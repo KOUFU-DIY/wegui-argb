@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "symbol": "arial_16_4bbp",
+  "font": {
+    "file": "arial.ttf",
+    "size": 16
+  },
+  "render": {
+    "bpp": 4
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"]
+    ]
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}

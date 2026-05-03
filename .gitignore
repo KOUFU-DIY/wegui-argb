@@ -1,0 +1,30 @@
+# Build outputs
+Simulator/build/
+STM32F103/MDK-ARM/Objects/
+STM32F103/MDK-ARM/Listings/
+tool/STM32F103_ex_flash_download/Objects/
+tool/STM32F103_ex_flash_download/Listings/
+
+# Keil / IDE user-local files
+*.uvguix*
+*.uvopt
+*.uvoptx
+*.lnp
+
+# Generic binaries / objects / maps / deps
+*.axf
+*.o
+*.d
+*.dep
+*.map
+*.lst
+
+# Logs
+*.build_log*
+build_log.txt
+
+# Local Claude settings
+.claude/
+
+# VS Code local IntelliSense config
+.vscode/c_cpp_properties.json

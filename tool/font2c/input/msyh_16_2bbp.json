@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "symbol": "msyh_16_2bbp",
+  "font": {
+    "file": "msyh.ttc",
+    "size": 16
+  },
+  "render": {
+    "bpp": 2
+  },
+  "charset": {
+    "chars": "菜单设置关于网络系统时间语言显示确定取消返回ABC123"
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}

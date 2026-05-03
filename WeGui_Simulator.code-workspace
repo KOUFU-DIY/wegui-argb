@@ -1,0 +1,38 @@
+{
+	"folders": [
+		{
+			"name": "Simulator (模拟器)",
+			"path": "Simulator"
+		},
+		{
+			"name": "Core (UI 核心)",
+			"path": "Core"
+		},
+		{
+			"name": "Demo (演示程序)",
+			"path": "Demo"
+		},
+		{
+			"name": "Drivers (硬件驱动)",
+			"path": "Drivers"
+		},
+	],
+	"settings": {
+		"cmake.configureOnOpen": true,
+		"cmake.generator": "MinGW Makefiles",
+		"cmake.sourceDirectory": "${workspaceFolder:Simulator (模拟器)}",
+		"cmake.buildDirectory": "${workspaceFolder:Simulator (模拟器)}/build",
+		"files.exclude": {
+			"**/.git": true,
+			"**/.svn": true,
+			"**/.hg": true,
+			"**/CVS": true,
+			"**/.DS_Store": true,
+			"**/Thumbs.db": true,
+			"Simulator/build": true
+		},
+		"editor.formatOnSave": true,
+		"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, BreakBeforeBraces: Allman, IndentWidth: 4, ColumnLimit: 120 }",
+		"editor.defaultFormatter": "ms-vscode.cpptools"
+	}
+}
