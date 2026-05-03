@@ -1,4 +1,4 @@
-# WeGui
+# WeGui-ARGB
 
 轻量级嵌入式 GUI 框架，面向 STM32 等 ARM Cortex-M MCU，同时提供 SDL2 PC 模拟器。
 
