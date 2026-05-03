@@ -1,6 +1,6 @@
 # WeGui API Reference
 
-> Lightweight embedded GUI framework for ARM Cortex-M MCUs.
+> Lightweight embedded GUI framework for multiple MCU / SoC platforms.
 > Dual-target: STM32F103 hardware (Keil AC5) + SDL2 PC simulator (CMake + MinGW).
 
 ---
@@ -613,7 +613,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps
 
 ### STM32 (Keil MDK-ARM AC5)
 ```powershell
-UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_RGB"
+UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_ARGB"
 ```
 
 ---

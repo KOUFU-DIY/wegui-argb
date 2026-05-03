@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Lightweight embedded GUI framework for STM32 ARM Cortex-M MCUs with dual-target support: STM32F103 hardware (Keil MDK-ARM AC5) and SDL2 PC simulator (CMake + MinGW). The `Core` and `Demo` directories are shared between both targets; only the platform port layer differs.
+Lightweight embedded GUI framework for multiple MCU / SoC platforms, with dual-target support: STM32F103 hardware (Keil MDK-ARM AC5) and SDL2 PC simulator (CMake + MinGW/Ninja). The `Core` and `Demo` directories are shared between both targets; only the platform port layer differs.
 
 Full API reference: `WEGUI_API_REFERENCE.md`.
 
@@ -13,7 +13,7 @@ Full API reference: `WEGUI_API_REFERENCE.md`.
 ### STM32F103 Hardware (Keil MDK-ARM AC5)
 
 ```powershell
-UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_RGB"
+UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_ARGB"
 ```
 
 Build log: `STM32F103/MDK-ARM/Objects/Project.build_log.htm`
@@ -223,7 +223,7 @@ The `we_timer_page_message_demo` additionally creates its own internal timers fo
 
 ## Tooling
 
-- `tool/bin2c/` — converts binary image files to C arrays; output goes to `tool/bin2c/output/merged_bin.c` (included by CMakeLists.txt for simulator builds)
+- `tool/bin2c/` — 将多个 bin 资源合成为单个 bin，并可转换生成对应的 `.c` / `.h` 文件
 - `tool/font2c/` — generates Font2C font files from TTF for external flash storage
 - `tool/font2c_gui/` — GUI wrapper for font2c
 - `tool/STM32F103_ex_flash_download/` — Keil flash algorithm for programming external SPI flash via debugger

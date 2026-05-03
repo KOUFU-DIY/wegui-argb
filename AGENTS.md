@@ -4,14 +4,14 @@ This file provides guidance to code agents working with this repository.
 
 ## Project Overview
 
-Lightweight embedded GUI framework for STM32 ARM Cortex-M MCUs with dual-target support: STM32F103 hardware (Keil MDK-ARM AC5) and SDL2 PC simulator (CMake + MinGW). The `Core` and `Demo` directories are shared between both targets; only the platform port layer differs.
+Lightweight embedded GUI framework for multiple MCU / SoC platforms, with dual-target support: STM32F103 hardware (Keil MDK-ARM AC5) and SDL2 PC simulator (CMake + MinGW/Ninja). The `Core` and `Demo` directories are shared between both targets; only the platform port layer differs.
 
 ## Build Commands
 
 ### STM32F103 Hardware (Keil MDK-ARM AC5)
 
 ```powershell
-UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_RGB"
+UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_ARGB"
 ```
 
 Build log: `STM32F103/MDK-ARM/Objects/Project.build_log.htm`

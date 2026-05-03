@@ -1,6 +1,6 @@
 # WeGui-ARGB
 
-轻量级嵌入式 GUI 框架，面向 STM32 等 ARM Cortex-M MCU，同时提供 SDL2 PC 模拟器。
+轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供 SDL2 PC 模拟器。
 
 ## 特性
 
@@ -75,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps
 命令行构建示例：
 
 ```powershell
-UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_RGB"
+UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 ```
 
 说明：
@@ -122,7 +122,7 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_RGB"
 
 ## 资源与工具
 
-- `tool/bin2c/` — 图片二进制转 C 数组
+- `tool/bin2c/` — 将多个 bin 资源合成为单个 bin，并可转换生成对应的 `.c` / `.h` 文件
 - `tool/font2c/` — 字库生成工具
 - `tool/STM32F103_ex_flash_download/` — 外挂 Flash 下载相关工具
 
