@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "symbol": "msyh_16_2bbp_ascii_menu_mix",
+  "font": {
+    "file": "msyh.ttc",
+    "size": 16
+  },
+  "render": {
+    "bpp": 2
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"]
+    ],
+    "chars": "菜单设置返回确定"
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}

@@ -1,0 +1,5 @@
+{
+    "cmake.configureOnOpen": true,
+    "cmake.sourceDirectory": "${workspaceFolder}/Simulator",
+    "cmake.buildDirectory": "${workspaceFolder}/Simulator/build"
+}
