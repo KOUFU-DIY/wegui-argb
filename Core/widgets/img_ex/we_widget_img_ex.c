@@ -336,11 +336,17 @@ img_w = IMG_DAT_WIDTH(img);
 #endif
 
     /* 步骤1：先把图片在当前 PFB 页中真正可见的区域裁出来。 */
-start_x = WE_MAX(obj->base.x, p_lcd->pfb_area.x0);
-end_x = WE_MIN(obj->base.x + obj->base.w - 1, p_lcd->pfb_area.x1);
-start_y = WE_MAX(obj->base.y, p_lcd->pfb_y_start);
-cos_a = we_cos(obj->angle);
-sin_a = we_sin(obj->angle);
+    start_x = WE_MAX(obj->base.x, p_lcd->pfb_area.x0);
+    end_x = WE_MIN(obj->base.x + obj->base.w - 1, p_lcd->pfb_area.x1);
+    start_y = WE_MAX(obj->base.y, p_lcd->pfb_y_start);
+    end_y = WE_MIN(obj->base.y + obj->base.h - 1, p_lcd->pfb_y_end);
+    if (start_x > end_x || start_y > end_y)
+    {
+        return;
+    }
+
+    cos_a = we_cos(obj->angle);
+    sin_a = we_sin(obj->angle);
     inv_scale_q16 = 16777216 / obj->scale_256;
     step_x_x = (int32_t)(((int64_t)cos_a * inv_scale_q16) >> 19);
     step_y_x = (int32_t)(((int64_t)(-sin_a) * inv_scale_q16) >> 19);
@@ -652,7 +658,7 @@ void we_img_ex_obj_init(we_img_ex_obj_t *obj, we_lcd_t *p_lcd, int16_t cx, int16
      * 调用注意：
      * img_ex 这里要求传入的 img 必须是未压缩 RGB565 原图。
      * 如果后面你换测试素材，优先检查 lcd_res.c 里该资源的 dat_type。 */
-_img_ex_update_bbox(obj);
+    _img_ex_update_bbox(obj);
 
     static const we_class_t _img_ex_class = {.draw_cb = we_img_ex_draw_cb, .event_cb = _img_ex_event_cb};
 
