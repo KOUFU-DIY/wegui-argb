@@ -19,10 +19,19 @@
 #include "stm32f103_we_input_port.h"
 #include "simple_widget_demos.h"
 
-/**
- * @brief 毫秒级阻塞延时
- * @param ms 延时时长, 单位毫秒
- */
+#define DEMO_SWITCH_MS_DEFAULT (5000UL)
+#define DEMO_TICK_PERIOD_MS    (16U)
+
+typedef void (*we_demo_init_fn_t)(we_lcd_t *lcd);
+typedef void (*we_demo_tick_fn_t)(we_lcd_t *lcd, uint16_t elapsed_ms);
+
+typedef struct
+{
+    we_demo_init_fn_t init;
+    we_demo_tick_fn_t tick;
+    uint32_t show_ms;
+} we_demo_entry_t;
+
 void delay_ms(uint32_t ms)
 {
     g_sys_delay = ms;
@@ -31,9 +40,6 @@ void delay_ms(uint32_t ms)
     }
 }
 
-/**
- * @brief 将系统时钟切换到 HSI/2 经 PLL 倍频后的 64MHz
- */
 static void hsi_set_sysclk_64(void)
 {
     RCC_DeInit();
@@ -60,9 +66,6 @@ static void hsi_set_sysclk_64(void)
     }
 }
 
-/**
- * @brief 检查系统时钟并在异常时执行时钟救援
- */
 static void sysclk_check_rescue(void)
 {
     RCC_ClocksTypeDef clocks;
@@ -75,10 +78,6 @@ static void sysclk_check_rescue(void)
     }
 }
 
-/**
- * @brief 系统初始化
- * @details 执行时钟检查、调试端口重映射与 SysTick 1ms 节拍配置
- */
 static void system_init(void)
 {
     sysclk_check_rescue();
@@ -92,9 +91,49 @@ static void system_init(void)
 static colour_t s_gram[USER_GRAM_NUM];
 we_lcd_t g_lcd;
 
+static const we_demo_entry_t s_demo_table[] = {
+		{ we_chart_simple_demo_init, we_chart_simple_demo_tick, 28000UL },
+    { we_label_simple_demo_init, we_label_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_btn_simple_demo_init, we_btn_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_img_simple_demo_init, we_img_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_img_ex_simple_demo_init, we_img_ex_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_arc_simple_demo_init, we_arc_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_group_simple_demo_init, we_group_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_slideshow_simple_demo_init, we_slideshow_simple_demo_tick, 8000UL },
+    { we_concentric_arc_simple_demo_init, we_concentric_arc_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_key_simple_demo_init, we_key_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_checkbox_simple_demo_init, we_checkbox_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_label_ex_simple_demo_init, we_label_ex_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_toggle_simple_demo_init, we_toggle_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_progress_simple_demo_init, we_progress_simple_demo_tick, DEMO_SWITCH_MS_DEFAULT },
+    { we_msgbox_simple_demo_init, we_msgbox_simple_demo_tick, 8000UL },
+    { we_flash_img_simple_demo_init, we_flash_img_simple_demo_tick, 8000UL },
+    { we_flash_font_simple_demo_init, we_flash_font_simple_demo_tick, 8000UL },
+};
+
+#define DEMO_COUNT ((uint8_t)(sizeof(s_demo_table) / sizeof(s_demo_table[0])))
+
+static void demo_start(we_lcd_t *lcd, uint8_t demo_index)
+{
+    if (demo_index >= DEMO_COUNT)
+        demo_index = 0U;
+
+#if (LCD_DEEP == DEEP_RGB565)
+    we_gui_init(lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
+                lcd_set_addr, lcd_rgb565_port, we_input_port_read, w25qxx_read_data);
+#elif (LCD_DEEP == DEEP_RGB888)
+    we_gui_init(lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
+                lcd_set_addr, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
+#endif
+
+    s_demo_table[demo_index].init(lcd);
+    we_gui_timer_create(lcd, s_demo_table[demo_index].tick, DEMO_TICK_PERIOD_MS, 1U);
+}
+
 int main(void)
 {
-    uint8_t demo_id;
+    uint8_t current_demo_idx = 0U;
+    uint32_t demo_elapsed_ms = 0U;
 
     system_init();
 
@@ -104,119 +143,28 @@ int main(void)
     flash_port_init();
     w25qxx_init();
 
-#if (LCD_DEEP == DEEP_RGB565)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb565_port, we_input_port_read, w25qxx_read_data);
-#elif (LCD_DEEP == DEEP_RGB888)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
-#endif
+    demo_start(&g_lcd, current_demo_idx);
 
-    /* demo_id:
-     * 1  = label
-     * 2  = btn
-     * 3  = img
-     * 4  = img_ex
-     * 5  = arc
-     * 6  = group
-     * 7  = slideshow
-     * 8  = concentric arc
-     * 9  = key
-     * 10 = checkbox
-     * 11 = label_ex
-     * 12 = chart
-     * 13 = toggle
-     * 14 = progress
-     * 15 = msgbox
-     * 16 = flash img
-     * 17 = flash font
-     */
-    demo_id = 8;
-
-    switch (demo_id)
-    {
-    case 1:
-        we_label_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_label_simple_demo_tick, 16U, 1U);
-        break;
-    case 2:
-        we_btn_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_btn_simple_demo_tick, 16U, 1U);
-        break;
-    case 3:
-        we_img_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_img_simple_demo_tick, 16U, 1U);
-        break;
-    case 4:
-        we_img_ex_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_img_ex_simple_demo_tick, 16U, 1U);
-        break;
-    case 5:
-        we_arc_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_arc_simple_demo_tick, 16U, 1U);
-        break;
-    case 6:
-        we_group_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_group_simple_demo_tick, 16U, 1U);
-        break;
-    case 7:
-        we_slideshow_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_slideshow_simple_demo_tick, 16U, 1U);
-        break;
-    case 8:
-        we_concentric_arc_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_concentric_arc_simple_demo_tick, 16U, 1U);
-        break;
-    case 9:
-        we_key_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_key_simple_demo_tick, 16U, 1U);
-        break;
-    case 10:
-        we_checkbox_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_checkbox_simple_demo_tick, 16U, 1U);
-        break;
-    case 11:
-        we_label_ex_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_label_ex_simple_demo_tick, 16U, 1U);
-        break;
-    case 12:
-        we_chart_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_chart_simple_demo_tick, 16U, 1U);
-        break;
-    case 13:
-        we_toggle_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_toggle_simple_demo_tick, 16U, 1U);
-        break;
-    case 14:
-        we_progress_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_progress_simple_demo_tick, 16U, 1U);
-        break;
-    case 15:
-        we_msgbox_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_msgbox_simple_demo_tick, 16U, 1U);
-        break;
-    case 16:
-        we_flash_img_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_flash_img_simple_demo_tick, 16U, 1U);
-        break;
-    case 17:
-        we_flash_font_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_flash_font_simple_demo_tick, 16U, 1U);
-        break;
-    default:
-        we_key_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_key_simple_demo_tick, 16U, 1U);
-        break;
-    }
-
-    g_sys_tick = 0;
+    g_sys_tick = 0U;
     while (1)
     {
         if (g_sys_tick >= 1U)
         {
             uint16_t ms = g_sys_tick;
-            g_sys_tick = 0;
+            g_sys_tick = 0U;
+
             we_gui_tick_inc(&g_lcd, ms);
+            demo_elapsed_ms += ms;
+
+            while (demo_elapsed_ms >= s_demo_table[current_demo_idx].show_ms)
+            {
+                demo_elapsed_ms -= s_demo_table[current_demo_idx].show_ms;
+                current_demo_idx++;
+                if (current_demo_idx >= DEMO_COUNT)
+                    current_demo_idx = 0U;
+
+                demo_start(&g_lcd, current_demo_idx);
+            }
         }
 
         we_gui_task_handler(&g_lcd);

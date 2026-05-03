@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
      * 16 = flash img
      * 17 = flash font
      */
-    demo_id = 14;
+    demo_id = 4;
 
     we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lcd_set_addr, LCD_FLUSH_PORT,
                 we_input_port_read, we_storage_port_read);
