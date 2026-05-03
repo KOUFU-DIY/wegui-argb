@@ -1,0 +1,118 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "sim: stop running",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'wegui_sim*' } | Stop-Process -Force\"",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "never",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "sim: build",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/build_sim.ps1\"",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "sim: stop running"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "sim: clean and build",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/build_sim.ps1\" -Clean",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "sim: stop running"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "sim: run latest",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/run_latest_sim.ps1\"",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "never",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "sim: build and run",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "sim: build",
+                "sim: run latest"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "stm32: build (AC5)",
+            "type": "shell",
+            "command": "& { $log = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.build_log.htm'; $axf = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.axf'; $null = Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '-j0','-b','${config:wegui.stm32ProjectFile}','-t','${config:wegui.stm32TargetName}' -PassThru -Wait; if (!(Test-Path $log) -or !(Test-Path $axf)) { Write-Error 'Keil did not generate Project.axf or build log.'; exit 1 }; $txt = Get-Content -Raw $log; if ($txt -match ' - 0 Error\\(s\\),') { exit 0 } else { Write-Error 'Keil build log contains errors.'; exit 1 } }",
+            "options": {
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "stm32: rebuild (AC5)",
+            "type": "shell",
+            "command": "& { $log = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.build_log.htm'; $axf = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.axf'; $null = Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '-j0','-r','${config:wegui.stm32ProjectFile}','-t','${config:wegui.stm32TargetName}' -PassThru -Wait; if (!(Test-Path $log) -or !(Test-Path $axf)) { Write-Error 'Keil did not generate Project.axf or build log.'; exit 1 }; $txt = Get-Content -Raw $log; if ($txt -match ' - 0 Error\\(s\\),') { exit 0 } else { Write-Error 'Keil build log contains errors.'; exit 1 } }",
+            "options": {
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$msCompile"
+            ]
+        },
+        {
+            "label": "stm32: open MDK project",
+            "type": "shell",
+            "command": "& { Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '${config:wegui.stm32ProjectFile}' }",
+            "options": {
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+            },
+            "presentation": {
+                "reveal": "never",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

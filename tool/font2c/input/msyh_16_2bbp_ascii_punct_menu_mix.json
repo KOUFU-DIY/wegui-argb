@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "symbol": "msyh_16_2bbp_ascii_punct_menu_mix",
+  "font": {
+    "file": "msyh.ttc",
+    "size": 16
+  },
+  "render": {
+    "bpp": 2
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"],
+      ["U+3000", "U+303F"]
+    ],
+    "chars": "菜单设置返回确定取消网络系统时间语言显示"
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}
