@@ -547,21 +547,6 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, colour_t color, uint8_t opacity);
     /**
-     * @brief 绘制纯色圆角矩形
-     * @param p_lcd 传入：GUI 屏幕上下文指针
-     * @param x 传入：左上角 X 坐标
-     * @param y 传入：左上角 Y 坐标
-     * @param w 传入：宽度
-     * @param h 传入：高度
-     * @param r 传入：圆角半径
-     * @param color 传入：填充颜色
-     * @param opacity 传入：透明度
-     * @return 无
-     */
-    void we_draw_round_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, int16_t r, colour_t color,
-                            uint8_t opacity);
-
-    /**
      * @brief 在 PFB 缓冲区内写入单个像素
      * @param p_lcd 传入：GUI 屏幕上下文指针
      * @param px 传入：像素 X 坐标 (屏幕绝对坐标)

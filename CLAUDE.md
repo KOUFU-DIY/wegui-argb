@@ -151,7 +151,7 @@ Fixed array: `WE_CFG_GUI_TASK_MAX_NUM` internal task slots, `WE_CFG_GUI_TIMER_MA
 
 ### Widgets
 
-Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`.
+Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`.
 
 **img_ex semantics:**
 - Angle unit is **512-step** (0–511 = full circle); 90° = 128, 180° = 256, 270° = 384. Use `WE_ANGLE(deg)` for float conversion or `WE_DEG(deg)` for integer compile-time constants. Normalized internally with `& 0x1FF` (no division).
@@ -165,7 +165,7 @@ Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `check
 
 **slideshow**: paged composite widget built on top of `group`; each page uses local coordinates and supports swipe/page snapping behavior.
 
-**toggle**: iOS-style animated switch. Animates over ~128 ms (8 steps × 16 ms by default). The track and thumb now both reuse the shared analytic capsule renderer.
+**toggle**: iOS-style animated switch. Animates over ~128 ms (8 steps × 16 ms by default). The track and thumb now both reuse the shared analytic round-rect fill renderer.
 
 **msgbox**: modal popup (`we_popup_obj_t`) that slides in from the top. Two layouts: one button (OK only) or two buttons (OK + Cancel). Show/hide via `we_popup_show()` / `we_popup_hide()`.
 
@@ -209,8 +209,8 @@ One demo = one group of static variables + one init + one tick. Each demo has it
 The important architectural point is that demos are both examples and integration tests: they are the primary way this repository exercises widgets, timers, input, storage-backed assets, and rendering behavior end-to-end.
 
 **Selecting active demo:**
-- **STM32** (`STM32F103/main.c`): uncomment the desired `init` + `timer_create` pair
-- **Simulator** (`Simulator/main_sim.c`): change `demo_id` (1–17) at the top of `main`
+- **STM32** (`STM32F103/main.c`): switch to the desired `demo_id` case in the current entry-file logic, then rebuild/flash
+- **Simulator** (`Simulator/main_sim.c`): change `demo_id` (1–18) at the top of `main`
 
 The `we_timer_page_message_demo` additionally creates its own internal timers for auto page-switching and message hide.
 

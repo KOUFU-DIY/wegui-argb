@@ -23,7 +23,6 @@
 在 `we_user_config.h` 中可覆盖：
 - `WE_PROGRESS_ANIM_DURATION_MS`
 - `WE_PROGRESS_RADIUS`
-- `WE_PROGRESS_USE_BTN_SKIN`
 
 ## 事件与行为
 - 当前不处理用户输入事件

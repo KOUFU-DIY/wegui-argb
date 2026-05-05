@@ -301,7 +301,7 @@ For per-widget API and behavior, see the corresponding `widget.md` under:
 
 Notable rendering notes:
 
-- `toggle` track and thumb are drawn via the shared analytic capsule renderer.
+- `toggle` track and thumb are drawn via the shared analytic round-rect fill renderer.
 - `checkbox` box geometry is drawn via the shared analytic round-rect fill.
 - `chart` waveform-body / feathering ideas reference Arm-2D, but the implementation has been rewritten for WeGui's ring-buffer, dirty-rectangle, PFB clipping and integer coordinate pipeline.
 
@@ -386,7 +386,7 @@ we_fill_gram(&mylcd, RGB888TODEV(0, 0, 0));
 we_clear_gram(&mylcd);
 
 // Draw filled rounded rectangle
-we_draw_round_rect(&mylcd, x, y, w, h, radius, color, opacity);
+we_draw_round_rect_analytic_fill(&mylcd, x, y, w, h, radius, color, opacity);
 
 // Draw alpha mask (used internally for font rendering)
 we_draw_alpha_mask(&mylcd, x, y, w, h, mask_data, bpp, fg_color, opacity);
@@ -600,6 +600,7 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 | 15 | msgbox |
 | 16 | flash img |
 | 17 | flash font |
+| 18 | slider |
 
 ---
 
