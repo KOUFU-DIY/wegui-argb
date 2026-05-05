@@ -398,9 +398,9 @@ static void _slideshow_draw_cb(void *ptr)
     if (obj->group.opacity == 0)
         return;
 
-    we_draw_round_rect(lcd, obj->group.base.x, obj->group.base.y,
-                       obj->group.base.w, obj->group.base.h,
-                       0, obj->group.bg_color, obj->group.opacity);
+    we_draw_round_rect_analytic_fill(lcd, obj->group.base.x, obj->group.base.y,
+                                     (uint16_t)obj->group.base.w, (uint16_t)obj->group.base.h,
+                                     0U, obj->group.bg_color, obj->group.opacity);
 
     {
         we_area_t old_pfb_area = lcd->pfb_area;

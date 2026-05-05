@@ -270,20 +270,22 @@ colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
 #endif
     thumb_cy = (int16_t)(track_y + track_h / 2);
 
-    /* ---- 4. 绘制轨道（胶囊形） ------------------------------------ */
-    we_draw_capsule_analytic(lcd, x, track_y,
-                             (uint16_t)w, (uint16_t)track_h,
-                             track_color, obj->opacity);
+    /* ---- 4. 绘制轨道（radius = h/2 的圆角矩形，几何上等价于胶囊） -- */
+    we_draw_round_rect_analytic_fill(lcd, x, track_y,
+                                     (uint16_t)w, (uint16_t)track_h,
+                                     (uint16_t)(track_h / 2),
+                                     track_color, obj->opacity);
 
-    /* ---- 5. 绘制滑块（白色圆形，使用公用胶囊绘制退化为圆） ---------- */
+    /* ---- 5. 绘制滑块（w == h 且 radius = w/2 时退化为圆） ----------- */
     {
         int16_t tr = (int16_t)(thumb_d / 2);
-        we_draw_capsule_analytic(lcd,
-                                 (int16_t)(thumb_cx - tr),
-                                 (int16_t)(thumb_cy - tr),
-                                 (uint16_t)(tr * 2),
-                                 (uint16_t)(tr * 2),
-                                 _c_thumb, obj->opacity);
+        we_draw_round_rect_analytic_fill(lcd,
+                                         (int16_t)(thumb_cx - tr),
+                                         (int16_t)(thumb_cy - tr),
+                                         (uint16_t)(tr * 2),
+                                         (uint16_t)(tr * 2),
+                                         (uint16_t)tr,
+                                         _c_thumb, obj->opacity);
     }
 
     /* draw_cb 仅负责按当前 anim_step 绘制，不推进状态、不标脏。

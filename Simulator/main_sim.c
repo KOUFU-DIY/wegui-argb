@@ -42,8 +42,9 @@ int main(int argc, char *argv[])
      * 15 = msgbox
      * 16 = flash img
      * 17 = flash font
+     * 18 = slider
      */
-    demo_id = 4;
+    demo_id = 18;
 
     we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lcd_set_addr, LCD_FLUSH_PORT,
                 we_input_port_read, we_storage_port_read);
@@ -117,6 +118,10 @@ int main(int argc, char *argv[])
     case 17:
         we_flash_font_simple_demo_init(&mylcd);
         we_gui_timer_create(&mylcd, we_flash_font_simple_demo_tick, 16U, 1U);
+        break;
+    case 18:
+        we_slider_simple_demo_init(&mylcd);
+        we_gui_timer_create(&mylcd, we_slider_simple_demo_tick, 16U, 1U);
         break;
     default:
         we_label_simple_demo_init(&mylcd);

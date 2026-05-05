@@ -263,4 +263,19 @@ void we_flash_font_simple_demo_init(we_lcd_t *lcd);
  */
 void we_flash_font_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
+/**
+ * @brief 初始化 slider simple demo。
+ * @param lcd LCD 运行实例。
+ * @return 无。
+ */
+void we_slider_simple_demo_init(we_lcd_t *lcd);
+
+/**
+ * @brief 执行 slider simple demo 周期逻辑。
+ * @param lcd LCD 运行实例。
+ * @param ms_tick 本次调用累计的毫秒增量。
+ * @return 无。
+ */
+void we_slider_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
 #endif

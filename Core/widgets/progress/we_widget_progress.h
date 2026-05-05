@@ -18,13 +18,6 @@ extern "C"
 #define WE_PROGRESS_RADIUS 8
 #endif
 
-/* 是否复用 btn 的圆角皮肤绘制
- * 1: 复用 btn 圆角边缘算法，过渡更平滑
- * 0: 使用通用 round rect 绘制 */
-#ifndef WE_PROGRESS_USE_BTN_SKIN
-#define WE_PROGRESS_USE_BTN_SKIN 1
-#endif
-
 typedef struct
 {
     we_obj_t base;

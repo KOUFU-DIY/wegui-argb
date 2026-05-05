@@ -32,6 +32,94 @@ static we_rect_t get_union_rect(we_rect_t *r1, we_rect_t *r2)
     return res;
 }
 
+/**
+ * @brief 判断矩形是否有效（宽高均非负）
+ * @param r 传入：矩形指针
+ * @return 1 表示有效，0 表示为空
+ */
+static uint8_t rect_is_valid(we_rect_t *r)
+{
+    return (r->x0 <= r->x1 && r->y0 <= r->y1) ? 1U : 0U;
+}
+
+/**
+ * @brief 判断一个矩形是否被另一个矩形完全包含
+ * @param outer 传入：外层矩形指针
+ * @param inner 传入：内层矩形指针
+ * @return 1 表示完全包含，0 表示否
+ */
+static uint8_t rect_contains(we_rect_t *outer, we_rect_t *inner)
+{
+    return (outer->x0 <= inner->x0 && outer->y0 <= inner->y0 && outer->x1 >= inner->x1 && outer->y1 >= inner->y1) ? 1U : 0U;
+}
+
+/**
+ * @brief 计算两个矩形的交集
+ * @param a 传入：矩形 A 指针
+ * @param b 传入：矩形 B 指针
+ * @param out 传出：交集矩形
+ * @return 1 表示存在交集，0 表示无交集
+ */
+static uint8_t rect_intersect(we_rect_t *a, we_rect_t *b, we_rect_t *out)
+{
+    out->x0 = (a->x0 > b->x0) ? a->x0 : b->x0;
+    out->y0 = (a->y0 > b->y0) ? a->y0 : b->y0;
+    out->x1 = (a->x1 < b->x1) ? a->x1 : b->x1;
+    out->y1 = (a->y1 < b->y1) ? a->y1 : b->y1;
+    return rect_is_valid(out);
+}
+
+/**
+ * @brief 对单端被覆盖的矩形执行缩短裁剪
+ * @param base 传入：用于裁剪的已存在矩形
+ * @param target 传入传出：待缩短的目标矩形
+ * @return 1 表示发生了裁剪，0 表示未变化
+ */
+static uint8_t rect_trim_one_side(we_rect_t *base, we_rect_t *target)
+{
+    we_rect_t inter;
+
+    if (!rect_intersect(base, target, &inter))
+        return 0U;
+
+    if (rect_contains(base, target))
+    {
+        target->x1 = (int16_t)(target->x0 - 1);
+        target->y1 = (int16_t)(target->y0 - 1);
+        return 1U;
+    }
+
+    if (inter.y0 == target->y0 && inter.y1 == target->y1)
+    {
+        if (inter.x0 == target->x0)
+        {
+            target->x0 = (int16_t)(inter.x1 + 1);
+            return 1U;
+        }
+        if (inter.x1 == target->x1)
+        {
+            target->x1 = (int16_t)(inter.x0 - 1);
+            return 1U;
+        }
+    }
+
+    if (inter.x0 == target->x0 && inter.x1 == target->x1)
+    {
+        if (inter.y0 == target->y0)
+        {
+            target->y0 = (int16_t)(inter.y1 + 1);
+            return 1U;
+        }
+        if (inter.y1 == target->y1)
+        {
+            target->y1 = (int16_t)(inter.y0 - 1);
+            return 1U;
+        }
+    }
+
+    return 0U;
+}
+
 /* =========================================================================
  * 2. 高阶调度引擎 (策略 2 用)
  * ========================================================================= */
@@ -44,7 +132,32 @@ static we_rect_t get_union_rect(we_rect_t *r1, we_rect_t *r2)
  */
 static void we_dirty_add_rect(we_dirty_mgr_t *mgr, we_rect_t *new_r)
 {
-    uint32_t new_area = rect_area(new_r);
+    uint32_t new_area;
+
+    for (uint8_t i = 0; i < mgr->count;)
+    {
+        if (rect_contains(&mgr->rects[i], new_r))
+        {
+            return;
+        }
+
+        if (rect_contains(new_r, &mgr->rects[i]))
+        {
+            mgr->rects[i] = mgr->rects[mgr->count - 1];
+            mgr->count--;
+            continue;
+        }
+
+        if (rect_trim_one_side(&mgr->rects[i], new_r))
+        {
+            if (!rect_is_valid(new_r))
+                return;
+        }
+
+        i++;
+    }
+
+    new_area = rect_area(new_r);
 
     // =========================================================
     // 1. 尝试【无损愈合/吸收】(数学降维公式)

@@ -164,6 +164,35 @@ static __inline void we_store_blended_color(colour_t *dst, colour_t fg, uint8_t 
 #define WE_MASK_QUADRANT_RB 3U
 
 /**
+ * @brief 计算轴对齐 90 度四分之一圆在单个像素上的 alpha mask
+ * @param x 传入：外接正方形左上角 X 坐标
+ * @param y 传入：外接正方形左上角 Y 坐标
+ * @param radius 传入：圆角半径
+ * @param quadrant 传入：象限标识（WE_MASK_QUADRANT_LT/RT/LB/RB）
+ * @param px 传入：目标像素 X 坐标
+ * @param py 传入：目标像素 Y 坐标
+ * @return 返回 0~255 alpha（255 表示满覆盖）
+ * @note 先做快速内外判定，仅在抗锯齿边界带内执行 4x4 子采样
+ */
+uint8_t we_mask_quarter_circle_alpha(int16_t x, int16_t y, uint16_t radius,
+                                     uint8_t quadrant, int16_t px, int16_t py);
+
+/**
+ * @brief 计算轴对齐圆角矩形在单个像素上的 alpha mask
+ * @param x 传入：外接矩形左上角 X 坐标
+ * @param y 传入：外接矩形左上角 Y 坐标
+ * @param w 传入：外接矩形宽度
+ * @param h 传入：外接矩形高度
+ * @param radius 传入：圆角半径
+ * @param px 传入：目标像素 X 坐标
+ * @param py 传入：目标像素 Y 坐标
+ * @return 返回 0~255 alpha（255 表示满覆盖）
+ * @note 中央区域与直边区域直接快速返回，仅在四角边界带调用 quarter-circle mask
+ */
+uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
+                                 uint16_t radius, int16_t px, int16_t py);
+
+/**
  * @brief 绘制解析抗锯齿的 1/4 圆角填充
  * @param p_lcd 传入：GUI 屏幕上下文指针
  * @param x 传入：外接正方形左上角 X 坐标
@@ -177,20 +206,6 @@ static __inline void we_store_blended_color(colour_t *dst, colour_t fg, uint8_t 
 void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
                                      uint16_t radius, colour_t color, uint8_t opacity,
                                      uint8_t quadrant);
-
-/**
- * @brief 绘制解析抗锯齿胶囊形填充
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x 传入：外接矩形左上角 X 坐标
- * @param y 传入：外接矩形左上角 Y 坐标
- * @param w 传入：外接矩形宽度
- * @param h 传入：外接矩形高度
- * @param color 传入：填充颜色
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- */
-void we_draw_capsule_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
-                              uint16_t w, uint16_t h, colour_t color, uint8_t opacity);
 
 /**
  * @brief 绘制解析抗锯齿圆角矩形填充

@@ -1067,6 +1067,11 @@
               <FilePath>..\..\Core\widgets\progress\we_widget_progress.c</FilePath>
             </File>
             <File>
+              <FileName>we_widget_slider.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\slider\we_widget_slider.c</FilePath>
+            </File>
+            <File>
               <FileName>we_widget_msgbox.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets\msgbox\we_widget_msgbox.c</FilePath>
@@ -1261,6 +1266,11 @@
               <FileName>demo_flash_font.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_flash_font.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_slider.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_slider.c</FilePath>
             </File>
           </Files>
         </Group>
