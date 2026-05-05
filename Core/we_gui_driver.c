@@ -866,6 +866,166 @@ void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h,
 }
 
 /**
+ * @brief 计算轴对齐 90 度四分之一圆在单个像素上的 4x4 coverage
+ * @param x 传入，外接正方形左上角 X 坐标
+ * @param y 传入，外接正方形左上角 Y 坐标
+ * @param radius 传入，圆角半径
+ * @param quadrant 传入，象限标识，取值见 WE_MASK_QUADRANT_xx
+ * @param px 传入，目标像素 X 坐标
+ * @param py 传入，目标像素 Y 坐标
+ * @return 返回 0~16 coverage（16 表示满覆盖）
+ */
+static uint8_t _we_mask_quarter_circle_cov16(int16_t x, int16_t y, uint16_t radius,
+                                             uint8_t quadrant, int16_t px, int16_t py)
+{
+    int32_t cx16;
+    int32_t cy16;
+    int32_t r16;
+    int32_t r16_sq;
+    int32_t near_dx;
+    int32_t near_dy;
+    int32_t far_dx;
+    int32_t far_dy;
+    int32_t near_d2;
+    int32_t far_d2;
+    uint8_t coverage = 0U;
+    uint8_t syi;
+    uint8_t sxi;
+    static const uint8_t sample_ofs[4] = { 2U, 6U, 10U, 14U };
+
+    if (radius == 0U)
+        return 0U;
+
+    switch (quadrant)
+    {
+    case WE_MASK_QUADRANT_LT:
+        cx16 = (int32_t)(x + radius) * 16;
+        cy16 = (int32_t)(y + radius) * 16;
+        near_dx = (int32_t)(px + 1 - (x + radius)) * 16;
+        near_dy = (int32_t)(py + 1 - (y + radius)) * 16;
+        far_dx = (int32_t)(px - (x + radius)) * 16;
+        far_dy = (int32_t)(py - (y + radius)) * 16;
+        break;
+    case WE_MASK_QUADRANT_RT:
+        cx16 = (int32_t)x * 16;
+        cy16 = (int32_t)(y + radius) * 16;
+        near_dx = (int32_t)(px - x) * 16;
+        near_dy = (int32_t)(py + 1 - (y + radius)) * 16;
+        far_dx = (int32_t)(px + 1 - x) * 16;
+        far_dy = (int32_t)(py - (y + radius)) * 16;
+        break;
+    case WE_MASK_QUADRANT_LB:
+        cx16 = (int32_t)(x + radius) * 16;
+        cy16 = (int32_t)y * 16;
+        near_dx = (int32_t)(px + 1 - (x + radius)) * 16;
+        near_dy = (int32_t)(py - y) * 16;
+        far_dx = (int32_t)(px - (x + radius)) * 16;
+        far_dy = (int32_t)(py + 1 - y) * 16;
+        break;
+    case WE_MASK_QUADRANT_RB:
+    default:
+        cx16 = (int32_t)x * 16;
+        cy16 = (int32_t)y * 16;
+        near_dx = (int32_t)(px - x) * 16;
+        near_dy = (int32_t)(py - y) * 16;
+        far_dx = (int32_t)(px + 1 - x) * 16;
+        far_dy = (int32_t)(py + 1 - y) * 16;
+        break;
+    }
+
+    r16 = (int32_t)radius * 16;
+    r16_sq = r16 * r16;
+    near_d2 = near_dx * near_dx + near_dy * near_dy;
+    if (near_d2 >= r16_sq)
+        return 0U;
+
+    far_d2 = far_dx * far_dx + far_dy * far_dy;
+    if (far_d2 <= r16_sq)
+        return 16U;
+
+    for (syi = 0U; syi < 4U; syi++)
+    {
+        int32_t sy = (int32_t)py * 16 + sample_ofs[syi];
+        int32_t dy = sy - cy16;
+        int32_t dy2 = dy * dy;
+
+        for (sxi = 0U; sxi < 4U; sxi++)
+        {
+            int32_t sx = (int32_t)px * 16 + sample_ofs[sxi];
+            int32_t dx = sx - cx16;
+            int32_t d2 = dx * dx + dy2;
+            if (d2 <= r16_sq)
+                coverage++;
+        }
+    }
+
+    return coverage;
+}
+
+/**
+ * @brief 计算轴对齐 90 度四分之一圆在单个像素上的 alpha mask
+ * @param x 传入，外接正方形左上角 X 坐标
+ * @param y 传入，外接正方形左上角 Y 坐标
+ * @param radius 传入，圆角半径
+ * @param quadrant 传入，象限标识，取值见 WE_MASK_QUADRANT_xx
+ * @param px 传入，目标像素 X 坐标
+ * @param py 传入，目标像素 Y 坐标
+ * @return 返回 0~255 alpha（255 表示满覆盖）
+ */
+uint8_t we_mask_quarter_circle_alpha(int16_t x, int16_t y, uint16_t radius,
+                                     uint8_t quadrant, int16_t px, int16_t py)
+{
+    uint8_t cov16 = _we_mask_quarter_circle_cov16(x, y, radius, quadrant, px, py);
+
+    if (cov16 == 0U)
+        return 0U;
+    if (cov16 >= 16U)
+        return 255U;
+    return (uint8_t)(((uint32_t)cov16 * 255U + 8U) >> 4);
+}
+
+uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
+                                 uint16_t radius, int16_t px, int16_t py)
+{
+    int16_t x1;
+    int16_t y1;
+    uint16_t r;
+
+    if (w == 0U || h == 0U)
+        return 0U;
+
+    x1 = (int16_t)(x + (int16_t)w - 1);
+    y1 = (int16_t)(y + (int16_t)h - 1);
+    if (px < x || px > x1 || py < y || py > y1)
+        return 0U;
+
+    r = radius;
+    if (r > w / 2U)
+        r = (uint16_t)(w / 2U);
+    if (r > h / 2U)
+        r = (uint16_t)(h / 2U);
+
+    if (r == 0U)
+        return 255U;
+
+    if ((px >= x + (int16_t)r && px <= x1 - (int16_t)r) ||
+        (py >= y + (int16_t)r && py <= y1 - (int16_t)r))
+        return 255U;
+
+    if (px < x + (int16_t)r)
+    {
+        if (py < y + (int16_t)r)
+            return we_mask_quarter_circle_alpha(x, y, r, WE_MASK_QUADRANT_LT, px, py);
+        return we_mask_quarter_circle_alpha(x, y1 - (int16_t)r + 1, r, WE_MASK_QUADRANT_LB, px, py);
+    }
+
+    if (py < y + (int16_t)r)
+        return we_mask_quarter_circle_alpha(x1 - (int16_t)r + 1, y, r, WE_MASK_QUADRANT_RT, px, py);
+
+    return we_mask_quarter_circle_alpha(x1 - (int16_t)r + 1, y1 - (int16_t)r + 1, r, WE_MASK_QUADRANT_RB, px, py);
+}
+
+/**
  * @brief 绘制抗锯齿实心四分之一圆
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
  * @param x 传入，目标象限包围盒左上角 X 坐标
@@ -884,8 +1044,6 @@ void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
     int16_t px, py;
     uint16_t stride;
     colour_t *row;
-    int32_t r16, cx16, cy16, r16_sq;
-    static const uint8_t sample_ofs[4] = { 2U, 6U, 10U, 14U };
 
     if (p_lcd == NULL || radius == 0U || opacity == 0U)
         return;
@@ -902,30 +1060,6 @@ void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
     if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
         return;
 
-    r16 = (int32_t)radius * 16;
-    r16_sq = r16 * r16;
-
-    switch (quadrant)
-    {
-    case WE_MASK_QUADRANT_LT:
-        cx16 = (int32_t)(x + radius) * 16;
-        cy16 = (int32_t)(y + radius) * 16;
-        break;
-    case WE_MASK_QUADRANT_RT:
-        cx16 = (int32_t)x * 16;
-        cy16 = (int32_t)(y + radius) * 16;
-        break;
-    case WE_MASK_QUADRANT_LB:
-        cx16 = (int32_t)(x + radius) * 16;
-        cy16 = (int32_t)y * 16;
-        break;
-    case WE_MASK_QUADRANT_RB:
-    default:
-        cx16 = (int32_t)x * 16;
-        cy16 = (int32_t)y * 16;
-        break;
-    }
-
     stride = p_lcd->pfb_width;
     row = p_lcd->pfb_gram
         + (uint32_t)(draw_y0 - (int16_t)p_lcd->pfb_y_start) * stride
@@ -937,141 +1071,19 @@ void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
 
         for (px = draw_x0; px <= draw_x1; px++, p++)
         {
-            uint8_t syi, sxi;
-            uint8_t coverage = 0U;
-
-            for (syi = 0U; syi < 4U; syi++)
-            {
-                int32_t sy = (int32_t)py * 16 + sample_ofs[syi];
-                int32_t dy = sy - cy16;
-                int32_t dy2 = dy * dy;
-
-                for (sxi = 0U; sxi < 4U; sxi++)
-                {
-                    int32_t sx = (int32_t)px * 16 + sample_ofs[sxi];
-                    int32_t dx = sx - cx16;
-                    int32_t d2 = dx * dx + dy2;
-                    if (d2 <= r16_sq)
-                        coverage++;
-                }
-            }
-
-            if (coverage == 0U)
+            uint8_t mask_alpha = we_mask_quarter_circle_alpha(x, y, radius, quadrant, px, py);
+            if (mask_alpha == 0U)
                 continue;
-            if (coverage >= 16U && opacity >= 250U)
+            if (mask_alpha >= 250U && opacity >= 250U)
             {
-                *p = color;
+                we_store_color(p, color);
             }
             else
             {
-                uint32_t a = ((uint32_t)opacity * coverage + 8U) >> 4;
-                if (a > 255U)
-                    a = 255U;
-                *p = we_colour_blend(color, *p, (uint8_t)a);
-            }
-        }
-    }
-}
-
-/**
- * @brief 绘制抗锯齿实心胶囊矩形
- * @param p_lcd 传入，当前 GUI 屏幕上下文指针
- * @param x 传入，包围盒左上角 X 坐标
- * @param y 传入，包围盒左上角 Y 坐标
- * @param w 传入，包围盒宽度
- * @param h 传入，包围盒高度
- * @param color 传入，填充颜色
- * @param opacity 传入，全局透明度(0~255)
- * @return 无
- */
-void we_draw_capsule_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
-                              uint16_t w, uint16_t h, colour_t color, uint8_t opacity)
-{
-    int16_t draw_x0, draw_x1, draw_y0, draw_y1;
-    int16_t px, py;
-    uint16_t stride;
-    colour_t *row;
-    int32_t r16, cy16, cx_l16, cx_r16, r16_sq;
-    static const uint8_t sample_ofs[4] = { 2U, 6U, 10U, 14U };
-
-    if (p_lcd == NULL || w == 0U || h == 0U || opacity == 0U)
-        return;
-
-    if (h < 2U)
-    {
-        we_fill_rect(p_lcd, x, y, w, h, color, opacity);
-        return;
-    }
-
-    draw_x0 = x;
-    draw_y0 = y;
-    draw_x1 = (int16_t)(x + w - 1);
-    draw_y1 = (int16_t)(y + h - 1);
-
-    if (draw_x0 < (int16_t)p_lcd->pfb_area.x0) draw_x0 = (int16_t)p_lcd->pfb_area.x0;
-    if (draw_y0 < (int16_t)p_lcd->pfb_y_start) draw_y0 = (int16_t)p_lcd->pfb_y_start;
-    if (draw_x1 > (int16_t)p_lcd->pfb_area.x1) draw_x1 = (int16_t)p_lcd->pfb_area.x1;
-    if (draw_y1 > (int16_t)p_lcd->pfb_y_end) draw_y1 = (int16_t)p_lcd->pfb_y_end;
-    if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
-        return;
-
-    r16 = (int32_t)h * 8;
-    cy16 = (int32_t)y * 16 + (int32_t)h * 8;
-    cx_l16 = (int32_t)x * 16 + (int32_t)h * 8;
-    cx_r16 = (int32_t)x * 16 + (int32_t)w * 16 - (int32_t)h * 8;
-    if (cx_r16 < cx_l16)
-        cx_r16 = cx_l16;
-    r16_sq = r16 * r16;
-
-    stride = p_lcd->pfb_width;
-    row = p_lcd->pfb_gram
-        + (uint32_t)(draw_y0 - (int16_t)p_lcd->pfb_y_start) * stride
-        + (uint32_t)(draw_x0 - (int16_t)p_lcd->pfb_area.x0);
-
-    for (py = draw_y0; py <= draw_y1; py++, row += stride)
-    {
-        colour_t *p = row;
-
-        for (px = draw_x0; px <= draw_x1; px++, p++)
-        {
-            uint8_t syi, sxi;
-            uint8_t coverage = 0U;
-
-            for (syi = 0U; syi < 4U; syi++)
-            {
-                int32_t sy = (int32_t)py * 16 + sample_ofs[syi];
-                int32_t dy = sy - cy16;
-                int32_t dy2 = dy * dy;
-
-                for (sxi = 0U; sxi < 4U; sxi++)
-                {
-                    int32_t sx = (int32_t)px * 16 + sample_ofs[sxi];
-                    int32_t clamped_x = sx;
-
-                    if (clamped_x < cx_l16) clamped_x = cx_l16;
-                    if (clamped_x > cx_r16) clamped_x = cx_r16;
-
-                    {
-                        int32_t dx = sx - clamped_x;
-                        int32_t d2 = dx * dx + dy2;
-                        if (d2 <= r16_sq)
-                            coverage++;
-                    }
-                }
-            }
-
-            if (coverage == 0U)
-                continue;
-            if (coverage >= 16U && opacity >= 250U)
-            {
-                *p = color;
-            }
-            else
-            {
-                uint32_t a = ((uint32_t)opacity * coverage + 8U) >> 4;
-                if (a > 255U)
-                    a = 255U;
-                *p = we_colour_blend(color, *p, (uint8_t)a);
+                uint32_t alpha = ((uint32_t)opacity * mask_alpha + 127U) / 255U;
+                if (alpha > 255U)
+                    alpha = 255U;
+                we_store_blended_color(p, color, (uint8_t)alpha);
             }
         }
     }
@@ -1094,6 +1106,14 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
                                       colour_t color, uint8_t opacity)
 {
     uint16_t r;
+    int16_t draw_x0;
+    int16_t draw_y0;
+    int16_t draw_x1;
+    int16_t draw_y1;
+    int16_t px;
+    int16_t py;
+    uint16_t stride;
+    colour_t *row;
 
     if (p_lcd == NULL || w == 0U || h == 0U || opacity == 0U)
         return;
@@ -1110,145 +1130,44 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
         return;
     }
 
-    if (w > (uint16_t)(r * 2U))
-    {
-        we_fill_rect(p_lcd, x + (int16_t)r, y, (uint16_t)(w - r * 2U), h, color, opacity);
-    }
-    if (h > (uint16_t)(r * 2U))
-    {
-        we_fill_rect(p_lcd, x, y + (int16_t)r, r, (uint16_t)(h - r * 2U), color, opacity);
-        we_fill_rect(p_lcd, x + (int16_t)w - (int16_t)r, y + (int16_t)r, r, (uint16_t)(h - r * 2U), color, opacity);
-    }
+    draw_x0 = x;
+    draw_y0 = y;
+    draw_x1 = (int16_t)(x + (int16_t)w - 1);
+    draw_y1 = (int16_t)(y + (int16_t)h - 1);
 
-    we_draw_quarter_circle_analytic(p_lcd, x, y, r, color, opacity, WE_MASK_QUADRANT_LT);
-    we_draw_quarter_circle_analytic(p_lcd, x + (int16_t)w - (int16_t)r, y, r, color, opacity, WE_MASK_QUADRANT_RT);
-    we_draw_quarter_circle_analytic(p_lcd, x, y + (int16_t)h - (int16_t)r, r, color, opacity, WE_MASK_QUADRANT_LB);
-    we_draw_quarter_circle_analytic(p_lcd, x + (int16_t)w - (int16_t)r, y + (int16_t)h - (int16_t)r,
-                                    r, color, opacity, WE_MASK_QUADRANT_RB);
-}
-
-/**
- * @brief 绘制圆角矩形（经典距离场抗锯齿实现）
- * @param p_lcd 传入，当前 GUI 屏幕上下文指针
- * @param x 传入，矩形左上角 X 坐标
- * @param y 传入，矩形左上角 Y 坐标
- * @param w 传入，矩形宽度
- * @param h 传入，矩形高度
- * @param r 传入，圆角半径
- * @param color 传入，填充颜色
- * @param opacity 传入，全局透明度(0~255)
- * @return 无
- */
-void we_draw_round_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, int16_t r, colour_t color,
-                        uint8_t opacity)
-{
-    if (w == 0 || h == 0 || opacity == 0)
-        return;
-    if (r > w / 2)
-        r = w / 2;
-    if (r > h / 2)
-        r = h / 2;
-    if (r <= 0)
-    {
-        we_fill_rect(p_lcd, x, y, w, h, color, opacity);
-        return;
-    }
-
-    int16_t x1 = x + w - 1;
-    int16_t y1 = y + h - 1;
-
-    if ((x > p_lcd->pfb_area.x1) || (x1 < p_lcd->pfb_area.x0) || (y > p_lcd->pfb_y_end) || (y1 < p_lcd->pfb_y_start))
+    if (draw_x0 < (int16_t)p_lcd->pfb_area.x0) draw_x0 = (int16_t)p_lcd->pfb_area.x0;
+    if (draw_y0 < (int16_t)p_lcd->pfb_y_start) draw_y0 = (int16_t)p_lcd->pfb_y_start;
+    if (draw_x1 > (int16_t)p_lcd->pfb_area.x1) draw_x1 = (int16_t)p_lcd->pfb_area.x1;
+    if (draw_y1 > (int16_t)p_lcd->pfb_y_end) draw_y1 = (int16_t)p_lcd->pfb_y_end;
+    if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
         return;
 
-    int16_t draw_x_start = (x < p_lcd->pfb_area.x0) ? p_lcd->pfb_area.x0 : x;
-    int16_t draw_y_start = (y < p_lcd->pfb_y_start) ? p_lcd->pfb_y_start : y;
-    int16_t draw_x_end = (x1 > p_lcd->pfb_area.x1) ? p_lcd->pfb_area.x1 : x1;
-    int16_t draw_y_end = (y1 > p_lcd->pfb_y_end) ? p_lcd->pfb_y_end : y1;
+    stride = p_lcd->pfb_width;
+    row = p_lcd->pfb_gram
+        + (uint32_t)(draw_y0 - (int16_t)p_lcd->pfb_y_start) * stride
+        + (uint32_t)(draw_x0 - (int16_t)p_lcd->pfb_area.x0);
 
-    int32_t solid_sq = 0, skip_sq = 0, blend_range = 1;
-    if (r > 0)
+    for (py = draw_y0; py <= draw_y1; py++, row += stride)
     {
-        solid_sq = (r - 1) * (r - 1);
-        skip_sq = (r + 1) * (r + 1);
-        blend_range = skip_sq - solid_sq;
-    }
+        colour_t *p = row;
 
-    int16_t c_xl = x + r;
-    int16_t c_xr = x1 - r;
-    int16_t c_yt = y + r;
-    int16_t c_yb = y1 - r;
-
-    uint16_t dst_stride = p_lcd->pfb_width;
-    colour_t *dst_line =
-        p_lcd->pfb_gram + ((draw_y_start - p_lcd->pfb_y_start) * dst_stride) + (draw_x_start - p_lcd->pfb_area.x0);
-
-    int16_t px, py;
-    for (py = draw_y_start; py <= draw_y_end; py++)
-    {
-        colour_t *p_dst = dst_line;
-        int32_t dy = 0;
-        uint8_t y_in_corner = 0;
-        /* 上下交界也纳入角区，避免顶部/底部切线像素被误判成直线区。 */
-        if (py <= c_yt)
+        for (px = draw_x0; px <= draw_x1; px++, p++)
         {
-            dy = py - c_yt;
-            y_in_corner = 1;
-        }
-        else if (py >= c_yb)
-        {
-            dy = py - c_yb;
-            y_in_corner = 1;
-        }
-        int32_t dy2 = dy * dy;
-
-        for (px = draw_x_start; px <= draw_x_end; px++)
-        {
-            if (y_in_corner && r > 0)
+            uint8_t mask_alpha = we_mask_round_rect_alpha(x, y, w, h, r, px, py);
+            if (mask_alpha == 0U)
+                continue;
+            if (mask_alpha >= 250U && opacity >= 250U)
             {
-                int32_t dx = 0;
-                uint8_t is_corner = 0;
-                /* 角区边界扩展为 <= / >=，让圆弧与直线交界像素
-                 * 也走圆角抗锯齿路径，避免出现硬台阶。 */
-                if (px <= c_xl)
-                {
-                    dx = c_xl - px;
-                    is_corner = 1;
-                }
-                else if (px >= c_xr)
-                {
-                    dx = px - c_xr;
-                    is_corner = 1;
-                }
-
-                if (is_corner)
-                {
-                    int32_t d2 = dx * dx + dy2;
-                    if (d2 >= skip_sq)
-                    {
-                        p_dst++;
-                        continue;
-                    }
-                    if (d2 > solid_sq)
-                    {
-                        uint32_t alpha = ((skip_sq - d2) * 255U) / (uint32_t)blend_range;
-                        if (alpha > 255U)
-                            alpha = 255U;
-
-                        if (opacity != 255)
-                            alpha = ((uint32_t)alpha * opacity + 127U) >> 8;
-
-                        we_store_blended_color(p_dst, color, (uint8_t)alpha);
-                        p_dst++;
-                        continue;
-                    }
-                }
+                we_store_color(p, color);
             }
-
-            /* 非圆角边缘区域直接填充即可。 */
-            we_store_blended_color(p_dst, color, opacity);
-            p_dst++;
+            else
+            {
+                uint32_t alpha = ((uint32_t)opacity * mask_alpha + 127U) / 255U;
+                if (alpha > 255U)
+                    alpha = 255U;
+                we_store_blended_color(p, color, (uint8_t)alpha);
+            }
         }
-        dst_line += dst_stride;
     }
 }
 

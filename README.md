@@ -30,10 +30,11 @@
 - msgbox
 - img_flash
 - font_flash
+- slider
 
 其中：
 
-- `toggle` 的轨道和滑块已统一复用公用解析式胶囊绘制函数
+- `toggle` 的轨道和滑块已统一复用公用解析式圆角矩形填充函数
 - `checkbox` 的方框绘制已统一复用公用解析式圆角填充函数
 - `chart` 的波形主体与柔边绘制思路参考自 Arm-2D，但实现已按 WeGui 的环形缓冲、脏矩形、PFB 裁剪与整数坐标体系重写
 
@@ -87,7 +88,7 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 
 ## Demo 选择
 
-当前 simple demo 共 **17 个**，Simulator 与 STM32 入口文件使用同一套 demo 顺序：
+当前 simple demo 共 **18 个**，Simulator 与 STM32 入口文件使用同一套 demo 顺序：
 
 1. label
 2. btn
@@ -106,6 +107,7 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 15. msgbox
 16. flash img
 17. flash font
+18. slider
 
 ### Simulator
 在 `Simulator/main_sim.c` 中修改 `demo_id`。

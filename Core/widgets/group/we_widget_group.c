@@ -101,7 +101,9 @@ static void _group_draw_cb(void *ptr)
     if (obj->opacity == 0)
         return;
 
-we_draw_round_rect(lcd, obj->base.x, obj->base.y, obj->base.w, obj->base.h, 0, obj->bg_color, obj->opacity);
+we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
+                                     (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                     0U, obj->bg_color, obj->opacity);
 
     {
         we_area_t old_pfb_area = lcd->pfb_area;
