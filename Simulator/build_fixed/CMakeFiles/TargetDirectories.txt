@@ -1,3 +1,0 @@
-E:/OneDrive/MCU_Program/Library/WeGui/AI_WEGUI_ARGB_CLAUDE/Simulator/build_fixed/CMakeFiles/wegui_sim.dir
-E:/OneDrive/MCU_Program/Library/WeGui/AI_WEGUI_ARGB_CLAUDE/Simulator/build_fixed/CMakeFiles/edit_cache.dir
-E:/OneDrive/MCU_Program/Library/WeGui/AI_WEGUI_ARGB_CLAUDE/Simulator/build_fixed/CMakeFiles/rebuild_cache.dir

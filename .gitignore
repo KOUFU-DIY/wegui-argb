@@ -1,5 +1,8 @@
 # Build outputs
-Simulator/build/
+Simulator/build*/
+STM32F030/MDK-ARM/Objects/
+STM32F030/MDK-ARM/Listings/
+STM32F030/MDK-ARM/STM32F030/
 STM32F103/MDK-ARM/Objects/
 STM32F103/MDK-ARM/Listings/
 tool/STM32F103_ex_flash_download/Objects/
