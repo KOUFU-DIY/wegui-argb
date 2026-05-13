@@ -12,13 +12,13 @@
 #define LCD_DEEP (DEEP_RGB565)
 
 /* 屏幕宽高 */
-#define SCREEN_WIDTH (280)
+#define SCREEN_WIDTH (240)
 #define SCREEN_HEIGHT (240)
 
 /* 屏幕显存
  * 最小设置 1 行；
  * DMA 模式建议至少 2 行。 */
-#define USER_GRAM_NUM (SCREEN_WIDTH * 8)
+#define USER_GRAM_NUM (SCREEN_WIDTH * 6)
 
 /* DMA 双 BUF 模式开关 */
 #define GRAM_DMA_BUFF_EN (1)
@@ -206,6 +206,40 @@
 
 /* 幻灯片内最多挂载的子控件数量（所有页面合计） */
 // #define WE_SLIDESHOW_CHILD_MAX (24)
+
+/* ---------------------- scroll_panel 控件 ---------------------- */
+/* 是否启用滚动惯性
+ * 0: 松手后立即停止
+ * 1: 按释放瞬间速度继续滑行 */
+// #define WE_SCROLL_PANEL_USE_INERTIA (1)
+
+/* 是否启用边界回弹
+ * 0: 越界后直接硬夹紧
+ * 1: 允许少量越界并自动回弹 */
+// #define WE_SCROLL_PANEL_USE_REBOUND (1)
+
+/* 惯性摩擦分子 */
+// #define WE_SCROLL_PANEL_INERTIA_FRICTION_NUM (7)
+
+/* 惯性摩擦分母
+ * 实际每帧速度约衰减到 NUM / DEN。 */
+// #define WE_SCROLL_PANEL_INERTIA_FRICTION_DEN (8)
+
+/* 回弹拉力除数
+ * 数值越小，回弹越强。 */
+// #define WE_SCROLL_PANEL_REBOUND_PULL_DIV (3)
+
+/* 回弹阶段单帧最大位移 */
+// #define WE_SCROLL_PANEL_REBOUND_MAX_STEP (24)
+
+/* 允许的最大越界像素 */
+// #define WE_SCROLL_PANEL_OVERSCROLL_LIMIT (32)
+
+/* 释放速度放大分子 */
+// #define WE_SCROLL_PANEL_VELOCITY_GAIN_NUM (1)
+
+/* 释放速度放大分母 */
+// #define WE_SCROLL_PANEL_VELOCITY_GAIN_DEN (1)
 
 /* ----------------------- progress 控件 ----------------------- */
 /* 数值过渡动画时长（毫秒） */

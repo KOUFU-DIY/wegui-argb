@@ -18,7 +18,7 @@
 #define _SOFT_4SPI (2)
 #define _HARD_4SPI (3)
 #define _DMA_4SPI  (4)
-#define LCD_PORT _DMA_4SPI
+#define LCD_PORT _HARD_4SPI
 
 #if (LCD_PORT == _SOFT_3SPI)
 #include "stm32f103_lcd_soft_3spi_port.h"

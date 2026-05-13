@@ -33,7 +33,7 @@ void we_label_ex_simple_demo_init(we_lcd_t *lcd)
 {
     int16_t cx    = (int16_t)(lcd->width / 2);
     int16_t cy    = 138;
-    int16_t fps_x = 196;
+    int16_t fps_x = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
 
     label_ex_ticks_ms    = 0U;
     label_ex_fps_timer   = 0U;

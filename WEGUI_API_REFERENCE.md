@@ -601,6 +601,7 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 | 16 | flash img |
 | 17 | flash font |
 | 18 | slider |
+| 19 | dropdown |
 
 ---
 

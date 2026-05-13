@@ -500,6 +500,14 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_obj_delete(we_obj_t *obj);
     /**
+     * @brief 将对象提升到同级链表最前端（最后绘制）
+     * @param obj 传入：目标对象指针
+     * @return 无
+     * @note 若对象属于父容器，则在父容器 children_head 内重排；
+     *       否则在 lcd 顶层对象链表中重排。
+     */
+    void we_obj_bring_to_front(we_obj_t *obj);
+    /**
      * @brief 按对象当前区域执行智能标脏
      * @param obj 传入：目标对象指针
      * @return 无

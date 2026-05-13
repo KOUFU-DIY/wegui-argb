@@ -43,8 +43,8 @@ There is **no standalone automated test suite or lint target** in this repositor
 
 Closest equivalent to a "single test": run one demo in isolation.
 
-- **Simulator**: change `demo_id` at the top of `Simulator/main_sim.c`, rebuild, then run `wegui_sim`.
-- **STM32** (`STM32F103/main.c`): switch to the desired demo path in the current entry-file logic, then rebuild/flash.
+- **Simulator**: change `demo_id` variable (line 47) in `Simulator/main_sim.c`, rebuild, then run `wegui_sim`.
+- **STM32** (`STM32F103/main.c`): change `demo_id` variable (line 135), then rebuild/flash.
 
 VS Code tasks in `.vscode/tasks.json` automate these steps (`sim: configure`, `sim: build`, `sim: build and run`, `stm32: build (AC5)`, `stm32: rebuild (AC5)`).
 
@@ -151,7 +151,7 @@ Fixed array: `WE_CFG_GUI_TASK_MAX_NUM` internal task slots, `WE_CFG_GUI_TIMER_MA
 
 ### Widgets
 
-Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`.
+Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`.
 
 **img_ex semantics:**
 - Angle unit is **512-step** (0–511 = full circle); 90° = 128, 180° = 256, 270° = 384. Use `WE_ANGLE(deg)` for float conversion or `WE_DEG(deg)` for integer compile-time constants. Normalized internally with `& 0x1FF` (no division).
@@ -209,8 +209,8 @@ One demo = one group of static variables + one init + one tick. Each demo has it
 The important architectural point is that demos are both examples and integration tests: they are the primary way this repository exercises widgets, timers, input, storage-backed assets, and rendering behavior end-to-end.
 
 **Selecting active demo:**
-- **STM32** (`STM32F103/main.c`): switch to the desired `demo_id` case in the current entry-file logic, then rebuild/flash
-- **Simulator** (`Simulator/main_sim.c`): change `demo_id` (1–18) at the top of `main`
+- **STM32** (`STM32F103/main.c`): change the `demo_id` variable in `main`, then rebuild/flash
+- **Simulator** (`Simulator/main_sim.c`): change the `demo_id` variable in `main`, then rebuild and run
 
 The `we_timer_page_message_demo` additionally creates its own internal timers for auto page-switching and message hide.
 

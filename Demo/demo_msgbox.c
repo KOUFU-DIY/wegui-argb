@@ -104,7 +104,7 @@ void we_msgbox_simple_demo_init(we_lcd_t *lcd)
     we_label_obj_init(&popup_title, lcd, 10, 10,
                       "MSGBOX", we_font_consolas_18,
                       RGB888TODEV(236, 241, 248), 255);
-    we_label_obj_init(&popup_fps, lcd, 196, 10,
+    we_label_obj_init(&popup_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10,
                       "FPS", we_font_consolas_18,
                       RGB888TODEV(120, 230, 205), 255);
     we_label_obj_init(&popup_hint, lcd, 10, 32,
