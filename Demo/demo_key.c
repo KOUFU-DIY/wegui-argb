@@ -17,7 +17,7 @@
 #include <string.h>
 
 #ifndef WE_SIMULATOR
-#include "stm32f10x.h"
+#include "stm32f0xx.h"
 
 /**
  * @brief 初始化按键 GPIO（PA6 上拉输入）
@@ -26,10 +26,12 @@
 static void _key_gpio_init(void)
 {
     GPIO_InitTypeDef gpio;
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
     gpio.GPIO_Pin   = GPIO_Pin_6;
-    gpio.GPIO_Mode  = GPIO_Mode_IPU;
-    gpio.GPIO_Speed = GPIO_Speed_2MHz;
+    gpio.GPIO_Mode  = GPIO_Mode_IN;
+    gpio.GPIO_OType = GPIO_OType_PP;
+    gpio.GPIO_Speed = GPIO_Speed_Level_1;
+    gpio.GPIO_PuPd  = GPIO_PuPd_UP;
     GPIO_Init(GPIOA, &gpio);
 }
 
@@ -129,7 +131,7 @@ void we_key_simple_demo_init(we_lcd_t *lcd)
     int16_t margin_x = 10;
     int16_t title_y  = 10;
     int16_t hint_y   = 32;
-    int16_t fps_x    = 196;
+    int16_t fps_x    = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
     int16_t btn_w    = 140;
     int16_t btn_h    = 36;
     int16_t btn_x    = (int16_t)((lcd->width - btn_w) / 2);

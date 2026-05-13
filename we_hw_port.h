@@ -5,6 +5,8 @@
 #include "../../CMS32C030/Lcd_Port/cms32c030_hw_config.h"
 #elif defined(WE_SIMULATOR)
 #include "../../Simulator/we_sim_port_config.h"
+#elif defined(WE_PLATFORM_STM32F030)
+#include "../../STM32F030/Lcd_Port/stm32f030_hw_config.h"
 #elif defined(WE_PLATFORM_CW32L012)
 #include "../../CW32L012/Lcd_Port/cw32l012_hw_config.h"
 #elif defined(WE_PLATFORM_AD15N)

@@ -44,7 +44,7 @@ void we_label_simple_demo_init(we_lcd_t *lcd)
     int16_t margin_x = 10;
     int16_t title_y  = 10;
     int16_t note_y   = 32;
-    int16_t fps_x    = lcd->width - 10 - 74;
+    int16_t fps_x    = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
     int16_t main_x   = 24;
     int16_t main_y   = 92;
     int16_t sub_y    = 128;

@@ -37,7 +37,7 @@ void we_btn_simple_demo_init(we_lcd_t *lcd)
     int16_t margin_x = 10;
     int16_t title_y  = 10;
     int16_t note_y   = 32;
-    int16_t fps_x    = 196;
+    int16_t fps_x    = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
     int16_t btn_w    = 92;
     int16_t btn_h    = 32;
     int16_t gap_x    = 20;
@@ -68,7 +68,7 @@ void we_btn_simple_demo_init(we_lcd_t *lcd)
     we_btn_set_state(&btn_selected, WE_BTN_STATE_SELECTED);
 
     we_btn_obj_init(&btn_pressed, lcd, col1_x, row2_y, btn_w, btn_h,
-                    "PRESS", we_font_consolas_18, NULL);
+                    "LONG BUTTON TEXT", we_font_consolas_18, NULL);
     we_btn_set_state(&btn_pressed, WE_BTN_STATE_PRESSED);
 
     we_btn_obj_init(&btn_dynamic, lcd, col2_x, row2_y, btn_w, btn_h,

@@ -193,21 +193,6 @@ uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
                                  uint16_t radius, int16_t px, int16_t py);
 
 /**
- * @brief 绘制解析抗锯齿的 1/4 圆角填充
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x 传入：外接正方形左上角 X 坐标
- * @param y 传入：外接正方形左上角 Y 坐标
- * @param radius 传入：圆角半径
- * @param color 传入：填充颜色
- * @param opacity 传入：整体透明度（0~255）
- * @param quadrant 传入：象限标识（WE_MASK_QUADRANT_LT/RT/LB/RB）
- * @return 无
- */
-void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
-                                     uint16_t radius, colour_t color, uint8_t opacity,
-                                     uint8_t quadrant);
-
-/**
  * @brief 绘制解析抗锯齿圆角矩形填充
  * @param p_lcd 传入：GUI 屏幕上下文指针
  * @param x 传入：外接矩形左上角 X 坐标
