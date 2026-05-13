@@ -84,7 +84,7 @@ void we_slider_simple_demo_init(we_lcd_t *lcd)
     we_label_obj_init(&slider_title, lcd, 10, 10, "SLIDER", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
     we_label_obj_init(&slider_hint, lcd, 10, 32, "range 20~220 | drag or tap", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
-    we_label_obj_init(&slider_fps, lcd, 196, 10, "FPS", we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
+    we_label_obj_init(&slider_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10, "FPS", we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
 
     we_slider_obj_init(&slider_h, lcd, 20, 80, 188, 28, WE_SLIDER_ORIENT_HOR, 20U, 220U, 96U,
                        RGB888TODEV(58, 66, 82), RGB888TODEV(74, 166, 255), RGB888TODEV(240, 244, 250), 255);

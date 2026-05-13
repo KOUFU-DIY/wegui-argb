@@ -64,6 +64,15 @@ int16_t we_demo_right_x(const we_lcd_t *lcd, int16_t right_margin, int16_t obj_w
 int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t bottom_margin, int16_t obj_h);
 
 /**
+ * @brief 计算 FPS 标签初始右对齐 X 坐标。
+ * @param lcd LCD 运行实例。
+ * @param text FPS 初始文本。
+ * @param font 字体资源指针。
+ * @return 右对齐后的 X 坐标。
+ */
+int16_t we_demo_fps_x(const we_lcd_t *lcd, const char *text, const unsigned char *font);
+
+/**
  * @brief 更新并显示 FPS 文本。
  * @param lcd LCD 运行实例。
  * @param fps_label 用于显示 FPS 的标签对象。

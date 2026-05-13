@@ -1,4 +1,5 @@
 #include "demo_common.h"
+#include "we_font_text.h"
 
 #include <stdio.h>
 
@@ -98,6 +99,26 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t bottom_margin, int16_t obj
 }
 
 /**
+ * @brief 计算 FPS 标签初始右对齐 X 坐标。
+ * @param lcd LCD 运行实例。
+ * @param text FPS 初始文本。
+ * @param font 字体资源指针。
+ * @return 右对齐后的 X 坐标。
+ */
+int16_t we_demo_fps_x(const we_lcd_t *lcd, const char *text, const unsigned char *font)
+{
+    uint16_t text_w;
+
+    if (lcd == NULL || text == NULL || font == NULL)
+    {
+        return 0;
+    }
+
+    text_w = we_get_text_width(font, text);
+    return we_demo_right_x(lcd, 10, (int16_t)text_w);
+}
+
+/**
  * @brief 更新并显示 FPS 文本。
  * @param lcd LCD 运行实例。
  * @param fps_label 用于显示 FPS 的标签对象。
@@ -117,6 +138,8 @@ void we_demo_update_fps(we_lcd_t *lcd,
     uint32_t frames_now;
     uint32_t delta_frames;
     uint32_t fps;
+    int16_t fps_x;
+    int16_t fps_y;
 
     if (lcd == NULL || fps_label == NULL || fps_timer == NULL || last_frames == NULL || fps_buf == NULL)
     {
@@ -134,6 +157,9 @@ void we_demo_update_fps(we_lcd_t *lcd,
     fps = (delta_frames * 1000U) / *fps_timer;
     sprintf(fps_buf, "FPS %u", (unsigned)fps);
     we_label_set_text(fps_label, fps_buf);
+    fps_x = we_demo_fps_x(lcd, fps_buf, fps_label->font);
+    fps_y = fps_label->base.y;
+    we_label_obj_set_pos(fps_label, fps_x, fps_y);
     *last_frames = frames_now;
     *fps_timer = 0U;
 }

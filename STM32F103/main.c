@@ -131,6 +131,7 @@ int main(void)
      * 16 = flash img
      * 17 = flash font
      * 18 = slider
+     * 19 = scroll_panel
      */
     demo_id = 18;
 
@@ -207,6 +208,10 @@ int main(void)
     case 18:
         we_slider_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_slider_simple_demo_tick, 16U, 1U);
+        break;
+    case 19:
+        we_scroll_panel_simple_demo_init(&g_lcd);
+        we_gui_timer_create(&g_lcd, we_scroll_panel_simple_demo_tick, 16U, 1U);
         break;
     default:
         we_key_simple_demo_init(&g_lcd);

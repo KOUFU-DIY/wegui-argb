@@ -84,7 +84,7 @@ void we_flash_font_simple_demo_init(we_lcd_t *lcd)
     we_label_obj_init(&ff_note, lcd, 10, 32,
                       "font2c external", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
-    we_label_obj_init(&ff_fps, lcd, 196, 10,
+    we_label_obj_init(&ff_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10,
                       "FPS", we_font_consolas_18,
                       RGB888TODEV(120, 230, 205), 255);
 

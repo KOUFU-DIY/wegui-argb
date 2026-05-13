@@ -52,7 +52,7 @@ void we_flash_img_simple_demo_init(we_lcd_t *lcd)
     we_label_obj_init(&fl_note, lcd, 10, 32,
                       "raw / qoi / argb", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
-    we_label_obj_init(&fl_fps, lcd, 196, 10,
+    we_label_obj_init(&fl_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10,
                       "FPS", we_font_consolas_18,
                       RGB888TODEV(120, 230, 205), 255);
     we_label_obj_init(&fl_stat, lcd, 10, 54,

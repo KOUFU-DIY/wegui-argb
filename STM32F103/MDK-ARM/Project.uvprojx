@@ -897,6 +897,11 @@
               <FilePath>..\Lcd_Port\stm32f103_lcd_hard_4spi_port.c</FilePath>
             </File>
             <File>
+              <FileName>stm32f103_lcd_soft_4spi_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\stm32f103_lcd_soft_4spi_port.c</FilePath>
+            </File>
+            <File>
               <FileName>stm32f103_flash_hard_stdspi_port.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Lcd_Port\stm32f103_flash_hard_stdspi_port.c</FilePath>
@@ -1070,6 +1075,11 @@
               <FileName>we_widget_slider.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets\slider\we_widget_slider.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_scroll_panel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\scroll_panel\we_widget_scroll_panel.c</FilePath>
             </File>
             <File>
               <FileName>we_widget_msgbox.c</FileName>
@@ -1271,6 +1281,11 @@
               <FileName>demo_slider.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_slider.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_scroll_panel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_scroll_panel.c</FilePath>
             </File>
           </Files>
         </Group>

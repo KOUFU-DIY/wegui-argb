@@ -121,7 +121,7 @@ void we_progress_simple_demo_init(we_lcd_t *lcd)
                       255);
     we_label_obj_init(&progress_note, lcd, 10, 32, "manual 0~255 animated bar", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
-    we_label_obj_init(&progress_fps, lcd, 196, 10, "FPS", we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
+    we_label_obj_init(&progress_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10, "FPS", we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
     we_label_obj_init(&progress_stat, lcd, 10, 54, "VAL 090 DSP 090 AUTO 1", we_font_consolas_18,
                       RGB888TODEV(245, 214, 120), 255);
 

@@ -55,6 +55,7 @@ set(DEMO_SOURCES
     "../Demo/demo_flash_img.c"
     "../Demo/demo_flash_font.c"
     "../Demo/demo_slider.c"
+    "../Demo/demo_scroll_panel.c"
     "../tool/font2c/output/arial_16_4bbp.c"
     "../tool/font2c/output/msyh_16_4bbp_ascii_menu_mix.c"
     "../tool/font2c/output/msyh_24_2bbp_ascii_menu_mix.c"

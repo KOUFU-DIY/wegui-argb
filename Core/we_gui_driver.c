@@ -1026,70 +1026,6 @@ uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
 }
 
 /**
- * @brief 绘制抗锯齿实心四分之一圆
- * @param p_lcd 传入，当前 GUI 屏幕上下文指针
- * @param x 传入，目标象限包围盒左上角 X 坐标
- * @param y 传入，目标象限包围盒左上角 Y 坐标
- * @param radius 传入，圆角半径
- * @param color 传入，填充颜色
- * @param opacity 传入，全局透明度(0~255)
- * @param quadrant 传入，象限标识，取值见 WE_MASK_QUADRANT_xx
- * @return 无
- */
-void we_draw_quarter_circle_analytic(we_lcd_t *p_lcd, int16_t x, int16_t y,
-                                     uint16_t radius, colour_t color, uint8_t opacity,
-                                     uint8_t quadrant)
-{
-    int16_t draw_x0, draw_x1, draw_y0, draw_y1;
-    int16_t px, py;
-    uint16_t stride;
-    colour_t *row;
-
-    if (p_lcd == NULL || radius == 0U || opacity == 0U)
-        return;
-
-    draw_x0 = x;
-    draw_y0 = y;
-    draw_x1 = (int16_t)(x + radius - 1U);
-    draw_y1 = (int16_t)(y + radius - 1U);
-
-    if (draw_x0 < (int16_t)p_lcd->pfb_area.x0) draw_x0 = (int16_t)p_lcd->pfb_area.x0;
-    if (draw_y0 < (int16_t)p_lcd->pfb_y_start) draw_y0 = (int16_t)p_lcd->pfb_y_start;
-    if (draw_x1 > (int16_t)p_lcd->pfb_area.x1) draw_x1 = (int16_t)p_lcd->pfb_area.x1;
-    if (draw_y1 > (int16_t)p_lcd->pfb_y_end) draw_y1 = (int16_t)p_lcd->pfb_y_end;
-    if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
-        return;
-
-    stride = p_lcd->pfb_width;
-    row = p_lcd->pfb_gram
-        + (uint32_t)(draw_y0 - (int16_t)p_lcd->pfb_y_start) * stride
-        + (uint32_t)(draw_x0 - (int16_t)p_lcd->pfb_area.x0);
-
-    for (py = draw_y0; py <= draw_y1; py++, row += stride)
-    {
-        colour_t *p = row;
-
-        for (px = draw_x0; px <= draw_x1; px++, p++)
-        {
-            uint8_t mask_alpha = we_mask_quarter_circle_alpha(x, y, radius, quadrant, px, py);
-            if (mask_alpha == 0U)
-                continue;
-            if (mask_alpha >= 250U && opacity >= 250U)
-            {
-                we_store_color(p, color);
-            }
-            else
-            {
-                uint32_t alpha = ((uint32_t)opacity * mask_alpha + 127U) / 255U;
-                if (alpha > 255U)
-                    alpha = 255U;
-                we_store_blended_color(p, color, (uint8_t)alpha);
-            }
-        }
-    }
-}
-
-/**
  * @brief 绘制抗锯齿实心圆角矩形
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
  * @param x 传入，矩形左上角 X 坐标
@@ -2026,6 +1962,80 @@ we_obj_delete_cleanup:
     obj->parent = NULL;
     obj->class_p = NULL;
     obj->lcd = NULL;
+}
+
+void we_obj_bring_to_front(we_obj_t *obj)
+{
+    we_obj_t *curr;
+    we_obj_t *prev;
+    we_obj_t *tail;
+
+    if (obj == NULL || obj->lcd == NULL || obj->next == NULL)
+        return;
+
+    if (obj->parent != NULL)
+    {
+        we_child_owner_t *parent = (we_child_owner_t *)obj->parent;
+        curr = parent->children_head;
+        prev = NULL;
+
+        while (curr != NULL)
+        {
+            if (curr == obj)
+            {
+                if (prev == NULL)
+                    parent->children_head = curr->next;
+                else
+                    prev->next = curr->next;
+                break;
+            }
+            prev = curr;
+            curr = curr->next;
+        }
+
+        tail = parent->children_head;
+        if (tail == NULL)
+        {
+            parent->children_head = obj;
+        }
+        else
+        {
+            while (tail->next != NULL)
+                tail = tail->next;
+            tail->next = obj;
+        }
+        obj->next = NULL;
+        return;
+    }
+
+    curr = obj->lcd->obj_list_head;
+    prev = NULL;
+    while (curr != NULL)
+    {
+        if (curr == obj)
+        {
+            if (prev == NULL)
+                obj->lcd->obj_list_head = curr->next;
+            else
+                prev->next = curr->next;
+            break;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+
+    tail = obj->lcd->obj_list_head;
+    if (tail == NULL)
+    {
+        obj->lcd->obj_list_head = obj;
+    }
+    else
+    {
+        while (tail->next != NULL)
+            tail = tail->next;
+        tail->next = obj;
+    }
+    obj->next = NULL;
 }
 
 /**

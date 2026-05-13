@@ -119,7 +119,7 @@ void we_chart_simple_demo_init(we_lcd_t *lcd)
     we_label_obj_init(&chart_note, lcd, 10, 32,
                       "rolling waveform", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255U);
-    we_label_obj_init(&chart_fps, lcd, 196, 10,
+    we_label_obj_init(&chart_fps, lcd, we_demo_fps_x(lcd, "FPS", we_font_consolas_18), 10,
                       "FPS", we_font_consolas_18,
                       RGB888TODEV(120, 230, 205), 255U);
     we_label_obj_init(&chart_wave, lcd, 10, 54,

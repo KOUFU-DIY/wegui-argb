@@ -47,7 +47,7 @@ void we_group_simple_demo_init(we_lcd_t *lcd)
     int16_t title_y  = 10;
     int16_t note_y   = 32;
     int16_t stat_y   = 54;
-    int16_t fps_x    = 196;
+    int16_t fps_x    = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
     int16_t panel_x  = 14;
     int16_t panel_y  = 84;
     int16_t panel_w  = 252;

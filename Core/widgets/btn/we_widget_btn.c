@@ -97,6 +97,68 @@ void we_btn_draw_skin(we_lcd_t *lcd, int16_t x, int16_t y, uint16_t w, uint16_t 
 we_draw_round_rect_analytic_fill(lcd, x, y, w, h, draw_r, style->bg_color, opacity);
 }
 
+static void _btn_draw_text_clipped(we_btn_obj_t *obj, const we_btn_style_t *style)
+{
+    we_lcd_t *lcd;
+    we_area_t old_pfb_area;
+    uint16_t old_y_start;
+    uint16_t old_y_end;
+    colour_t *old_gram;
+    uint16_t txt_w;
+    int8_t y_top;
+    int8_t y_bot;
+    int16_t btn_cx;
+    int16_t btn_cy;
+    int16_t txt_x;
+    int16_t txt_y;
+    int16_t clip_x0;
+    int16_t clip_y0;
+    int16_t clip_x1;
+    int16_t clip_y1;
+
+    if (obj == NULL || style == NULL || obj->text == NULL || obj->font == NULL)
+        return;
+
+    lcd = obj->base.lcd;
+    if (lcd == NULL)
+        return;
+
+    txt_w = we_get_text_width(obj->font, obj->text);
+    we_get_text_bbox(obj->font, obj->text, &y_top, &y_bot);
+
+    btn_cx = obj->base.x + (int16_t)(obj->base.w / 2);
+    btn_cy = obj->base.y + (int16_t)(obj->base.h / 2);
+    txt_x = btn_cx - (int16_t)(txt_w / 2);
+    txt_y = btn_cy - (y_top + y_bot) / 2;
+
+    old_pfb_area = lcd->pfb_area;
+    old_y_start = lcd->pfb_y_start;
+    old_y_end = lcd->pfb_y_end;
+    old_gram = lcd->pfb_gram;
+
+    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
+    clip_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
+    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
+    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
+
+    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    {
+        lcd->pfb_area.x0 = clip_x0;
+        lcd->pfb_area.x1 = clip_x1;
+        lcd->pfb_y_start = (uint16_t)clip_y0;
+        lcd->pfb_y_end = (uint16_t)clip_y1;
+        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
+                                + (clip_x0 - old_pfb_area.x0);
+
+        we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text, style->text_color, obj->opacity);
+    }
+
+    lcd->pfb_area = old_pfb_area;
+    lcd->pfb_y_start = old_y_start;
+    lcd->pfb_y_end = old_y_end;
+    lcd->pfb_gram = old_gram;
+}
+
 /**
  * @brief 控件绘制回调，向当前 PFB 输出可视内容。
  * @param ptr 回调透传对象指针。
@@ -122,20 +184,7 @@ static void _btn_draw_cb(void *ptr)
     we_btn_draw_skin(lcd, obj->base.x, obj->base.y, obj->base.w, obj->base.h,
                      obj->radius, style, obj->opacity);
 
-    // 3. 居中绘制文字
-    if (obj->text && obj->font)
-    {
-uint16_t txt_w = we_get_text_width(obj->font, obj->text);
-        int8_t y_top, y_bot;
-we_get_text_bbox(obj->font, obj->text, &y_top, &y_bot);
-
-        int16_t btn_cx = obj->base.x + (int16_t)(obj->base.w / 2);
-        int16_t btn_cy = obj->base.y + (int16_t)(obj->base.h / 2);
-        int16_t txt_x  = btn_cx - (int16_t)(txt_w / 2);
-        int16_t txt_y  = btn_cy - (y_top + y_bot) / 2;
-
-we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text, style->text_color, obj->opacity);
-    }
+    _btn_draw_text_clipped(obj, style);
 }
 
 /**

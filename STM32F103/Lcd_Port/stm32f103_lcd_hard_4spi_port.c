@@ -94,12 +94,12 @@ void lcd_hw_init(void)
 #endif
 
     spi.SPI_NSS              = SPI_NSS_Soft;
-    spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4; /* 低速初始化屏幕 */
+    spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
     spi.SPI_FirstBit         = SPI_FirstBit_MSB;
     spi.SPI_CRCPolynomial    = 7;
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPIx, ENABLE);
-    RCC_PCLK2Config(RCC_HCLK_Div1);
+    RCC_PCLK2Config(RCC_HCLK_Div2);
     SPI_Init(LCD_SPIx, &spi);
     SPI_Cmd(LCD_SPIx, ENABLE);
 

@@ -104,7 +104,7 @@ void we_toggle_simple_demo_init(we_lcd_t *lcd)
     int16_t mx       = 10;
     int16_t title_y  = 10;
     int16_t hint_y   = 32;
-    int16_t fps_x    = 196;
+    int16_t fps_x    = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
     int16_t row_h    = 38;
     int16_t start_y  = 84;
     int16_t tgl_w    = 44;
