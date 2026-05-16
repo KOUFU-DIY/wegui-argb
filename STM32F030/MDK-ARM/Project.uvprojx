@@ -164,14 +164,14 @@
             <AdsANop>0</AdsANop>
             <AdsANot>0</AdsANot>
             <AdsLLst>1</AdsLLst>
-            <AdsLmap>1</AdsLmap>
-            <AdsLcgr>1</AdsLcgr>
-            <AdsLsym>1</AdsLsym>
+            <AdsLmap>0</AdsLmap>
+            <AdsLcgr>0</AdsLcgr>
+            <AdsLsym>0</AdsLsym>
             <AdsLszi>1</AdsLszi>
-            <AdsLtoi>1</AdsLtoi>
-            <AdsLsun>1</AdsLsun>
-            <AdsLven>1</AdsLven>
-            <AdsLsxf>1</AdsLsxf>
+            <AdsLtoi>0</AdsLtoi>
+            <AdsLsun>0</AdsLsun>
+            <AdsLven>0</AdsLven>
+            <AdsLsxf>0</AdsLsxf>
             <RvctClst>0</RvctClst>
             <GenPPlst>0</GenPPlst>
             <AdsCpuType>"Cortex-M0"</AdsCpuType>
@@ -1150,11 +1150,6 @@
               <FileName>demo_img_ex.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_img_ex.c</FilePath>
-            </File>
-            <File>
-              <FileName>demo_key.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Demo\demo_key.c</FilePath>
             </File>
             <File>
               <FileName>demo_label.c</FileName>

@@ -55,21 +55,26 @@ static __inline uint16_t we_blend_rgb565(uint16_t fg, uint16_t bg, uint8_t alpha
         return bg;
     }
 
-    /* 这里改成按 R/G/B 三个通道分别做 255 分母的四舍五入混色。
-     * 原先的 packed RGB565 快速公式更省指令，但在文字这种“灰阶字模 alpha
-     * 再叠加全局 opacity”的场景里，低透明度时更容易出现偏色和台阶感。 */
-    ia = 255U - alpha;
+    /* 输入 alpha 仍是 0~255，先无成本扩展到 0~256：
+     *   a256 = alpha + (alpha >> 7)  →  0→0, 255→256, 中间近似线性
+     * 这样分母变成 256，三个通道的 /255 全部替换为 >>8，
+     * 在没有硬件除法的 Cortex-M0（如 STM32F030）上能省掉大量软除法周期。
+     * 误差 < 0.4%，RGB565 5/6 位深度下视觉无差异。 */
+    {
+        uint32_t a = (uint32_t)alpha + (uint32_t)(alpha >> 7);
+        ia = 256U - a;
 
-    fg_r = (fg >> 11) & 0x1FU;
-    fg_g = (fg >> 5) & 0x3FU;
-    fg_b = fg & 0x1FU;
-    bg_r = (bg >> 11) & 0x1FU;
-    bg_g = (bg >> 5) & 0x3FU;
-    bg_b = bg & 0x1FU;
+        fg_r = (fg >> 11) & 0x1FU;
+        fg_g = (fg >> 5) & 0x3FU;
+        fg_b = fg & 0x1FU;
+        bg_r = (bg >> 11) & 0x1FU;
+        bg_g = (bg >> 5) & 0x3FU;
+        bg_b = bg & 0x1FU;
 
-    r = (fg_r * alpha + bg_r * ia + 127U) / 255U;
-    g = (fg_g * alpha + bg_g * ia + 127U) / 255U;
-    b = (fg_b * alpha + bg_b * ia + 127U) / 255U;
+        r = (fg_r * a + bg_r * ia) >> 8;
+        g = (fg_g * a + bg_g * ia) >> 8;
+        b = (fg_b * a + bg_b * ia) >> 8;
+    }
 
     return (uint16_t)((r << 11) | (g << 5) | b);
 }
@@ -81,7 +86,8 @@ static __inline uint16_t we_blend_rgb565(uint16_t fg, uint16_t bg, uint8_t alpha
  * 与 we_store_blended_color (we_gui_driver.c) 的区别：
  * 1. 这里返回结果值，调用方自行决定如何写入目标
  * 2. 适合"先算出混色结果、再按需写入"的场景（如 img_ex 的逐像素内层循环）
- * 3. 统一使用 255 分母，与 we_blend_rgb565 精度一致
+ * 3. 内部把 0~255 alpha 扩展到 0~256 后用 >>8 替代 /255，
+ *    与 we_blend_rgb565 走同一套近似公式，精度一致
  * -------------------------------------------------------------------------- */
 /**
  * @brief 通用颜色混合（RGB565/RGB888）
@@ -104,13 +110,31 @@ static __inline colour_t we_colour_blend(colour_t fg, colour_t bg, uint8_t alpha
     out.dat16 = we_blend_rgb565(fg.dat16, bg.dat16, alpha);
 #elif (LCD_DEEP == DEEP_RGB888)
     {
-        uint32_t ia = 255U - alpha;
-        out.rgb.r = (uint8_t)(((uint32_t)fg.rgb.r * alpha + (uint32_t)bg.rgb.r * ia + 127U) / 255U);
-        out.rgb.g = (uint8_t)(((uint32_t)fg.rgb.g * alpha + (uint32_t)bg.rgb.g * ia + 127U) / 255U);
-        out.rgb.b = (uint8_t)(((uint32_t)fg.rgb.b * alpha + (uint32_t)bg.rgb.b * ia + 127U) / 255U);
+        uint32_t a  = (uint32_t)alpha + (uint32_t)(alpha >> 7);
+        uint32_t ia = 256U - a;
+        out.rgb.r = (uint8_t)(((uint32_t)fg.rgb.r * a + (uint32_t)bg.rgb.r * ia) >> 8);
+        out.rgb.g = (uint8_t)(((uint32_t)fg.rgb.g * a + (uint32_t)bg.rgb.g * ia) >> 8);
+        out.rgb.b = (uint8_t)(((uint32_t)fg.rgb.b * a + (uint32_t)bg.rgb.b * ia) >> 8);
     }
 #endif
     return out;
+}
+
+/* --------------------------------------------------------------------------
+ * 快速 a*b/255 近似（Cortex-M0 无硬件除法专用）
+ *
+ * 输入 v 应为两个 0~255 量的乘积（范围 0~65025）。
+ * 用 (v + (v>>8) + 1) >> 8 近似 v/255，省掉一次软件除法
+ * （M0 上 /255 约 90+ cycle）。与精确取整最多差 1 LSB，alpha 视觉无差异。
+ * -------------------------------------------------------------------------- */
+/**
+ * @brief 快速近似计算 v/255（v 为两个 0~255 量之积）
+ * @param v 传入：被除数（0~65025）
+ * @return 近似商（0~255）
+ */
+static __inline uint8_t we_div255(uint32_t v)
+{
+    return (uint8_t)((v + (v >> 8) + 1U) >> 8);
 }
 
 /* --------------------------------------------------------------------------

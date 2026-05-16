@@ -33,4 +33,3 @@
 
 ## 对应 demo
 - `Demo/demo_btn.c`
-- `Demo/demo_key.c`（事件回调示例）
