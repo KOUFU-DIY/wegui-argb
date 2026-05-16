@@ -1,10 +1,6 @@
 #include "we_widget_arc.h"
 #include "we_render.h"
 
-/* =========================================================================
- * 空间优化器：剥离重复指令，大幅减少 ROM 占用
- * ========================================================================= */
-
 // 512 步制归一化：位与运算，零除法开销，与 we_sin 保持一致
 
 /**
@@ -73,34 +69,11 @@ static uint32_t _cap_alpha(int32_t dx_q4, int32_t cx_q4, int32_t dy_sq_q8, int32
     return ((rmax2_q8 - d2) * inv_cap) >> 15;
 }
 
-// 取消 inline，让编译器复用代码段，省出宝贵 ROM
-
-/**
- * @brief 按给定 alpha 将前景色混合到背景色。
- * @param fg 前景色（待叠加颜色）。
- * @param bg 背景色（原像素颜色）。
- * @param alpha 前景覆盖强度（0~255）。
- * @return 混合后的颜色值。
+/* 颜色混合统一收敛到 we_render.h::we_colour_blend
+ *   - RGB565 路径走 we_blend_rgb565（>>8 近似）
+ *   - RGB888 路径走 >>8 近似，省掉 M0 上每像素 3 次软件 /255
+ *   - 快速路径 (alpha >=250 / <=5) 与原 _arc_blend_color 一致
  */
-static colour_t _arc_blend_color(colour_t fg, colour_t bg, uint8_t alpha)
-{
-    if (alpha >= 250U)
-        return fg;
-    if (alpha <= 5U)
-        return bg;
-    {
-        colour_t out;
-#if (LCD_DEEP == DEEP_RGB565)
-out.dat16 = we_blend_rgb565(fg.dat16, bg.dat16, alpha);
-#else
-        uint32_t inv_alpha = 255U - alpha;
-        out.rgb.r = (uint8_t)(((uint32_t)fg.rgb.r * alpha + (uint32_t)bg.rgb.r * inv_alpha + 127U) / 255U);
-        out.rgb.g = (uint8_t)(((uint32_t)fg.rgb.g * alpha + (uint32_t)bg.rgb.g * inv_alpha + 127U) / 255U);
-        out.rgb.b = (uint8_t)(((uint32_t)fg.rgb.b * alpha + (uint32_t)bg.rgb.b * inv_alpha + 127U) / 255U);
-#endif
-        return out;
-    }
-}
 
 #if WE_ARC_OPT_MODE == 0
 /* =========================================================================
@@ -340,20 +313,14 @@ final_fg_a = WE_MAX(fg_body_a, WE_MAX(cap_s_a, cap_efg_a));
                     if (final_bg_a > 0)
                     {
                         uint32_t bg_a = (final_bg_a * obj->opacity) >> 8;
-pixel_color = _arc_blend_color(obj->bg_color, pixel_color, bg_a);
+                        pixel_color = we_colour_blend(obj->bg_color, pixel_color, (uint8_t)bg_a);
                     }
                     if (fg_a > 0)
                     {
-pixel_color = _arc_blend_color(obj->fg_color, pixel_color, fg_a);
+                        pixel_color = we_colour_blend(obj->fg_color, pixel_color, (uint8_t)fg_a);
                     }
                 }
-#if (LCD_DEEP == DEEP_RGB565)
-                p_dst->dat16 = pixel_color.dat16;
-#else
-                p_dst->rgb.r = pixel_color.rgb.r;
-                p_dst->rgb.g = pixel_color.rgb.g;
-                p_dst->rgb.b = pixel_color.rgb.b;
-#endif
+                we_store_color(p_dst, pixel_color);
             }
 
         PIXEL_NEXT:

@@ -17,7 +17,7 @@ void delay_ms(uint32_t ms)
 static void system_init(void)
 {
     g_sys_tick = 0;
-		FLASH_PrefetchBufferCmd(ENABLE);//ø™∆Ù÷∏¡Ó‘§»°
+		FLASH_PrefetchBufferCmd(ENABLE);
     SystemCoreClockUpdate();
     SysTick_Config(SystemCoreClock / 1000U);
 }
@@ -52,19 +52,18 @@ int main(void)
      * 6  = group
      * 7  = slideshow
      * 8  = concentric arc
-     * 9  = key
-     * 10 = checkbox
-     * 11 = label_ex
-     * 12 = chart
-     * 13 = toggle
-     * 14 = progress
-     * 15 = msgbox
-     * 16 = flash img
-     * 17 = flash font
-     * 18 = slider
-     * 19 = scroll_panel
+     * 9  = checkbox
+     * 10 = label_ex
+     * 11 = chart
+     * 12 = toggle
+     * 13 = progress
+     * 14 = msgbox
+     * 15 = flash img
+     * 16 = flash font
+     * 17 = slider
+     * 18 = scroll_panel
      */
-    demo_id = 12;
+    demo_id = 17;
 
     switch (demo_id)
     {
@@ -101,46 +100,42 @@ int main(void)
         we_gui_timer_create(&g_lcd, we_concentric_arc_simple_demo_tick, 16U, 1U);
         break;
     case 9:
-        we_key_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_key_simple_demo_tick, 16U, 1U);
-        break;
-    case 10:
         we_checkbox_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_checkbox_simple_demo_tick, 16U, 1U);
         break;
-    case 11:
+    case 10:
         we_label_ex_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_label_ex_simple_demo_tick, 16U, 1U);
         break;
-    case 12:
+    case 11:
         we_chart_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_chart_simple_demo_tick, 16U, 1U);
         break;
-    case 13:
+    case 12:
         we_toggle_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_toggle_simple_demo_tick, 16U, 1U);
         break;
-    case 14:
+    case 13:
         we_progress_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_progress_simple_demo_tick, 16U, 1U);
         break;
-    case 15:
+    case 14:
         we_msgbox_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_msgbox_simple_demo_tick, 16U, 1U);
         break;
-    case 16:
+    case 15:
         we_flash_img_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_flash_img_simple_demo_tick, 16U, 1U);
         break;
-    case 17:
+    case 16:
         we_flash_font_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_flash_font_simple_demo_tick, 16U, 1U);
         break;
-    case 18:
+    case 17:
         we_slider_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_slider_simple_demo_tick, 16U, 1U);
         break;
-    case 19:
+    case 18:
         we_scroll_panel_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_scroll_panel_simple_demo_tick, 16U, 1U);
         break;

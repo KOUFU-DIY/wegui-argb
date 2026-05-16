@@ -45,7 +45,6 @@ set(DEMO_SOURCES
     "../Demo/demo_concentric_arc.c"
     "../Demo/demo_group.c"
     "../Demo/demo_slideshow.c"
-    "../Demo/demo_key.c"
     "../Demo/demo_checkbox.c"
     "../Demo/demo_label_ex.c"
     "../Demo/demo_chart.c"

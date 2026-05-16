@@ -283,26 +283,52 @@ void we_img_render_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t
     src_stride = img_w * 2;        // 源图每行字节数
     dst_stride = p_lcd->pfb_width; // PFB 每行像素数
 
-    /* ---------------- 5. 核心逐像素绘制循环 ---------------- */
-    for (y = 0; y < draw_height; y++)
+    /* ---------------- 5. 核心逐像素绘制循环 ----------------
+     * opacity 在整次绘制内是常量，先在循环外分类，避免每像素重复判定：
+     *   不透明 → 退化为带大小端交换的逐行拷贝（图标/背景最常见场景）
+     *   半透明 → 走逐像素混色 */
+    if (opacity >= 250U)
     {
-        p_dst = dst_line;
-        p_src = src_line;
-
-        for (x = 0; x < draw_width; x++)
+        for (y = 0; y < draw_height; y++)
         {
-            // 从源图按大端读取一个 RGB565 像素（byte[0]=高字节，byte[1]=低字节）。
-            uint16_t cur_pixel = ((uint16_t)p_src[0] << 8) | p_src[1];
-            colour_t fg = we_color_from_rgb565(cur_pixel);
-            we_store_blended_color(p_dst, fg, opacity);
+            p_dst = dst_line;
+            p_src = src_line;
 
-            p_dst++;
-            p_src += 2; // 源图前进 1 个像素
+            for (x = 0; x < draw_width; x++)
+            {
+                uint16_t cur_pixel = ((uint16_t)p_src[0] << 8) | p_src[1];
+                we_store_color(p_dst, we_color_from_rgb565(cur_pixel));
+
+                p_dst++;
+                p_src += 2;
+            }
+
+            src_line += src_stride;
+            dst_line += dst_stride;
         }
+    }
+    else
+    {
+        for (y = 0; y < draw_height; y++)
+        {
+            p_dst = dst_line;
+            p_src = src_line;
 
-        // 一行绘制结束后，切到下一行起始地址。
-        src_line += src_stride;
-        dst_line += dst_stride;
+            for (x = 0; x < draw_width; x++)
+            {
+                // 从源图按大端读取一个 RGB565 像素（byte[0]=高字节，byte[1]=低字节）。
+                uint16_t cur_pixel = ((uint16_t)p_src[0] << 8) | p_src[1];
+                colour_t fg = we_color_from_rgb565(cur_pixel);
+                we_store_blended_color(p_dst, fg, opacity);
+
+                p_dst++;
+                p_src += 2; // 源图前进 1 个像素
+            }
+
+            // 一行绘制结束后，切到下一行起始地址。
+            src_line += src_stride;
+            dst_line += dst_stride;
+        }
     }
 }
 
@@ -425,6 +451,13 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     uint8_t r = 0, g = 0, b = 0;
     uint16_t cur_pixel = 0;
 
+    /* opacity 整次绘制为常量，预先分类，省掉每像素混色分支 */
+    uint8_t opaque = (uint8_t)(opacity >= 250U);
+    /* 行指针缓存：同一行内复用，避免每像素重算 (cur_y*dst_stride) 乘法。
+     * 仅在通过裁剪判定后才计算，保证偏移非负（不会出现越界回绕） */
+    colour_t *row_dst = 0;
+    int32_t row_dst_y = -1;
+
     /* 像素计数上限：图片总像素数。
      * 作为解码循环的安全终止条件，防止 byte_offset 损坏时越界读取。 */
     uint32_t max_pixels = (uint32_t)img_w * img_h;
@@ -468,13 +501,17 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
 
             while (run--)
             {
-                if (cur_y >= iy_start)
+                if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
                 {
-                    if (cur_x >= ix_start && cur_x < clip_x_end)
+                    if (row_dst_y != (int32_t)cur_y)
                     {
-                        colour_t *dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + (base_dest_x + cur_x);
-                        we_store_blended_color(dst, fg, opacity);
+                        row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+                        row_dst_y = (int32_t)cur_y;
                     }
+                    if (opaque)
+                        we_store_color(row_dst + cur_x, fg);
+                    else
+                        we_store_blended_color(row_dst + cur_x, fg, opacity);
                 }
                 decoded_pixels++;
                 cur_x++;
@@ -489,14 +526,18 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
             continue;
         }
 
-        if (cur_y >= iy_start)
+        if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
         {
-            if (cur_x >= ix_start && cur_x < clip_x_end)
+            if (row_dst_y != (int32_t)cur_y)
             {
-                colour_t *dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + (base_dest_x + cur_x);
-                colour_t fg = we_color_from_rgb565(cur_pixel);
-                we_store_blended_color(dst, fg, opacity);
+                row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+                row_dst_y = (int32_t)cur_y;
             }
+            colour_t fg = we_color_from_rgb565(cur_pixel);
+            if (opaque)
+                we_store_color(row_dst + cur_x, fg);
+            else
+                we_store_blended_color(row_dst + cur_x, fg, opacity);
         }
         decoded_pixels++;
         cur_x++;
@@ -622,6 +663,14 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     uint8_t cur_alpha = 255; // ARGB8565 额外维护当前像素 alpha
     uint16_t cur_pixel = 0;
 
+    /* final_alpha = cur_alpha*opacity/255，只在 cur_alpha 变化时重算，
+     * 用 we_div255 近似去掉每像素一次软件除法（M0 ~90+ cycle） */
+    uint8_t final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+    /* 行指针缓存：同一行内复用，避免每像素重算 (cur_y*dst_stride) 乘法。
+     * 仅在通过裁剪判定后才计算，保证偏移非负（不会出现越界回绕） */
+    colour_t *row_dst = 0;
+    int32_t row_dst_y = -1;
+
     uint32_t max_pixels = (uint32_t)img_w * img_h;
     uint32_t decoded_pixels = jump_pixel_idx;
 
@@ -634,6 +683,7 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
         {
             /* 新像素：alpha + RGB565（3 字节） */
             cur_alpha = *arry++;
+            final_alpha = we_div255((uint32_t)cur_alpha * opacity);
             uint8_t h = *arry++;
             uint8_t l = *arry++;
             cur_pixel = ((uint16_t)h << 8) | l;
@@ -671,20 +721,20 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
         }
         else if ((flag & 0xC0) == 0xC0)
         {
-            /* RLE：重复当前 ARGB 像素，混色时 alpha = cur_alpha × opacity / 255 */
+            /* RLE：重复当前 ARGB 像素，final_alpha 已在变 alpha 时算好 */
             uint8_t run = (flag & 0x3F) + 1;
-            uint8_t final_alpha = (uint8_t)(((uint16_t)cur_alpha * opacity) / 255U);
             colour_t fg = we_color_from_rgb565(cur_pixel);
 
             while (run--)
             {
-                if (cur_y >= iy_start)
+                if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
                 {
-                    if (cur_x >= ix_start && cur_x < clip_x_end)
+                    if (row_dst_y != (int32_t)cur_y)
                     {
-                        colour_t *dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + (base_dest_x + cur_x);
-                        we_store_blended_color(dst, fg, final_alpha);
+                        row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+                        row_dst_y = (int32_t)cur_y;
                     }
+                    we_store_blended_color(row_dst + cur_x, fg, final_alpha);
                 }
                 decoded_pixels++;
                 cur_x++;
@@ -699,16 +749,16 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
             continue;
         }
 
-        /* 单像素输出，混色时 alpha = cur_alpha × opacity / 255 */
-        if (cur_y >= iy_start)
+        /* 单像素输出，final_alpha 已在变 alpha 时算好 */
+        if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
         {
-            if (cur_x >= ix_start && cur_x < clip_x_end)
+            if (row_dst_y != (int32_t)cur_y)
             {
-                uint8_t final_alpha = (uint8_t)(((uint16_t)cur_alpha * opacity) / 255U);
-                colour_t *dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + (base_dest_x + cur_x);
-                colour_t fg = we_color_from_rgb565(cur_pixel);
-                we_store_blended_color(dst, fg, final_alpha);
+                row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+                row_dst_y = (int32_t)cur_y;
             }
+            colour_t fg = we_color_from_rgb565(cur_pixel);
+            we_store_blended_color(row_dst + cur_x, fg, final_alpha);
         }
         decoded_pixels++;
         cur_x++;
@@ -1098,10 +1148,10 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
             }
             else
             {
-                uint32_t alpha = ((uint32_t)opacity * mask_alpha + 127U) / 255U;
-                if (alpha > 255U)
-                    alpha = 255U;
-                we_store_blended_color(p, color, (uint8_t)alpha);
+                /* 用 we_div255 近似替换软件除法（M0 上每次 /255 约 90+ cycle）。
+                 * 输入上限 255*255 = 65025，we_div255 结果天然 ≤255，无需再 clamp。 */
+                uint8_t alpha = we_div255((uint32_t)opacity * mask_alpha);
+                we_store_blended_color(p, color, alpha);
             }
         }
     }
@@ -1895,69 +1945,67 @@ void we_obj_set_pos(we_obj_t *obj, int16_t new_x, int16_t new_y)
 }
 
 /**
+ * @brief 从指定链表头中摘除目标对象（公用 helper）
+ * @param head_p 传入：链表头指针的地址（顶层链表为 &lcd->obj_list_head，
+ *                                       子容器为 &parent->children_head）
+ * @param obj 传入：待摘除对象指针
+ * @return 无
+ * @note 仅做摘除，不清状态。we_obj_delete 与 we_obj_bring_to_front 共用。
+ */
+static void _we_obj_unlink_from(we_obj_t **head_p, we_obj_t *obj)
+{
+    we_obj_t *curr = *head_p;
+    we_obj_t *prev = NULL;
+
+    while (curr != NULL)
+    {
+        if (curr == obj)
+        {
+            if (prev == NULL)
+                *head_p = curr->next;
+            else
+                prev->next = curr->next;
+            return;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+}
+
+/**
+ * @brief 返回对象所在链表的头指针地址
+ * @param obj 传入：目标对象
+ * @return 链表头指针的地址（顶层或子容器）
+ * @note 上层调用方保证 obj 与 obj->lcd 非空。
+ */
+static we_obj_t **_we_obj_owner_head(we_obj_t *obj)
+{
+    if (obj->parent != NULL)
+    {
+        we_child_owner_t *parent = (we_child_owner_t *)obj->parent;
+        return &parent->children_head;
+    }
+    return &obj->lcd->obj_list_head;
+}
+
+/**
  * @brief 通用对象删除接口，把任意控件从渲染树中摘除
  * @param obj 传入，待删除对象指针
  * @return 无
- * @note 当前版本默认只从顶层对象链表中摘除对象。
- *       如果后续引入独立子链表，可在这里继续补父容器子链表删除逻辑。
+ * @note 同时支持顶层链表和带 children_head 的复合容器（如 slideshow）。
  */
 void we_obj_delete(we_obj_t *obj)
 {
-    we_obj_t *curr;
-    we_obj_t *prev;
-
     if (obj == NULL || obj->lcd == NULL)
         return;
 
     // 1. 先把当前区域标脏，用于删除后的残影擦除。
     we_obj_invalidate(obj);
 
-    // 2. 从对象链表中摘掉当前对象。
-    if (obj->parent != NULL)
-    {
-        we_child_owner_t *parent = (we_child_owner_t *)obj->parent;
-
-        curr = parent->children_head;
-        prev = NULL;
-        while (curr != NULL)
-        {
-            if (curr == obj)
-            {
-                if (prev == NULL)
-                    parent->children_head = curr->next;
-                else
-                    prev->next = curr->next;
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
-        }
-        goto we_obj_delete_cleanup;
-    }
-
-    curr = obj->lcd->obj_list_head;
-    prev = NULL;
-    // 当前先只在顶层对象链表中查找。
-    while (curr != NULL)
-    {
-        if (curr == obj)
-        {
-            if (prev == NULL)
-                obj->lcd->obj_list_head = curr->next;
-            else
-                prev->next = curr->next;
-            break;
-        }
-        prev = curr;
-        curr = curr->next;
-    }
-
-    /* 当前实现支持从带 children_head 的复合控件子链表中摘除对象，
-     * 例如 slideshow 这类一级复合控件。
-     * 若后续出现不同子链表布局，再继续扩展这里。 */
+    // 2. 从所在链表中摘掉当前对象。
+    _we_obj_unlink_from(_we_obj_owner_head(obj), obj);
 
     // 3. 清空对象状态，避免后续误用。
-we_obj_delete_cleanup:
     obj->next = NULL;
     obj->parent = NULL;
     obj->class_p = NULL;
@@ -1966,68 +2014,22 @@ we_obj_delete_cleanup:
 
 void we_obj_bring_to_front(we_obj_t *obj)
 {
-    we_obj_t *curr;
-    we_obj_t *prev;
+    we_obj_t **head_p;
     we_obj_t *tail;
 
     if (obj == NULL || obj->lcd == NULL || obj->next == NULL)
         return;
 
-    if (obj->parent != NULL)
-    {
-        we_child_owner_t *parent = (we_child_owner_t *)obj->parent;
-        curr = parent->children_head;
-        prev = NULL;
+    head_p = _we_obj_owner_head(obj);
 
-        while (curr != NULL)
-        {
-            if (curr == obj)
-            {
-                if (prev == NULL)
-                    parent->children_head = curr->next;
-                else
-                    prev->next = curr->next;
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
-        }
+    // 1. 先把自己从原链表中摘下来。
+    _we_obj_unlink_from(head_p, obj);
 
-        tail = parent->children_head;
-        if (tail == NULL)
-        {
-            parent->children_head = obj;
-        }
-        else
-        {
-            while (tail->next != NULL)
-                tail = tail->next;
-            tail->next = obj;
-        }
-        obj->next = NULL;
-        return;
-    }
-
-    curr = obj->lcd->obj_list_head;
-    prev = NULL;
-    while (curr != NULL)
-    {
-        if (curr == obj)
-        {
-            if (prev == NULL)
-                obj->lcd->obj_list_head = curr->next;
-            else
-                prev->next = curr->next;
-            break;
-        }
-        prev = curr;
-        curr = curr->next;
-    }
-
-    tail = obj->lcd->obj_list_head;
+    // 2. 再追加到链表尾部，使其位于绘制顺序最上层。
+    tail = *head_p;
     if (tail == NULL)
     {
-        obj->lcd->obj_list_head = obj;
+        *head_p = obj;
     }
     else
     {

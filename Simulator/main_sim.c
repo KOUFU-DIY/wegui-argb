@@ -84,10 +84,6 @@ int main(int argc, char *argv[])
         we_concentric_arc_simple_demo_init(&mylcd);
         we_gui_timer_create(&mylcd, we_concentric_arc_simple_demo_tick, 16U, 1U);
         break;
-    case 9:
-        we_key_simple_demo_init(&mylcd);
-        we_gui_timer_create(&mylcd, we_key_simple_demo_tick, 16U, 1U);
-        break;
     case 10:
         we_checkbox_simple_demo_init(&mylcd);
         we_gui_timer_create(&mylcd, we_checkbox_simple_demo_tick, 16U, 1U);

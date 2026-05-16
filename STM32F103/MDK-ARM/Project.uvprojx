@@ -1233,11 +1233,6 @@
               <FilePath>..\..\Demo\demo_slideshow.c</FilePath>
             </File>
             <File>
-              <FileName>demo_key.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Demo\demo_key.c</FilePath>
-            </File>
-            <File>
               <FileName>demo_checkbox.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_checkbox.c</FilePath>

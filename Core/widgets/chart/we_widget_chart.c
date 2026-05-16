@@ -89,6 +89,60 @@ static __inline uint8_t _chart_get_aa_height(void)
 #endif
 }
 
+/* --------------------------------------------------------------------------
+ * 编译期柔边 base_alpha 查表
+ *
+ * 把 _chart_get_aa_alpha 里依赖 aa_h 的除法（线性 /aa_h，二次 /(aa_h*aa_h)）
+ * 全部搬到编译期，运行期只剩一次表读 + 一次乘移。
+ * 没有硬件除法的 Cortex-M0（如 STM32F030）受益最大。
+ *
+ * 表项含义：当 opacity=255 时，edge=i 的 base_alpha。
+ * 当前最多支持 WE_CHART_AA_MAX = 8；需要更厚柔边时扩展下面的 #if 即可。
+ * -------------------------------------------------------------------------- */
+#if (WE_CHART_AA_MAX > 0)
+
+#if (WE_CHART_AA_MAX > 8)
+#error "WE_CHART_AA_MAX 超出编译期表上限 (max 8)，请扩展 k_chart_aa_table 或减小该值"
+#endif
+
+#if (WE_CFG_CHART_AA_CURVE == 0)
+/* 线性：base_alpha = 255 * (aa_h - i) / aa_h */
+#define WE_CHART_AA_VAL(i) \
+    ((uint8_t)(255U * (WE_CHART_AA_MAX - (i)) / WE_CHART_AA_MAX))
+#else
+/* 二次：base_alpha = 255 * (aa_h - i)^2 / aa_h^2 */
+#define WE_CHART_AA_VAL(i)                                                \
+    ((uint8_t)(255UL * (WE_CHART_AA_MAX - (i)) * (WE_CHART_AA_MAX - (i))  \
+               / ((unsigned long)WE_CHART_AA_MAX * WE_CHART_AA_MAX)))
+#endif
+
+static const uint8_t k_chart_aa_table[WE_CHART_AA_MAX] = {
+    WE_CHART_AA_VAL(0),
+#if (WE_CHART_AA_MAX > 1)
+    WE_CHART_AA_VAL(1),
+#endif
+#if (WE_CHART_AA_MAX > 2)
+    WE_CHART_AA_VAL(2),
+#endif
+#if (WE_CHART_AA_MAX > 3)
+    WE_CHART_AA_VAL(3),
+#endif
+#if (WE_CHART_AA_MAX > 4)
+    WE_CHART_AA_VAL(4),
+#endif
+#if (WE_CHART_AA_MAX > 5)
+    WE_CHART_AA_VAL(5),
+#endif
+#if (WE_CHART_AA_MAX > 6)
+    WE_CHART_AA_VAL(6),
+#endif
+#if (WE_CHART_AA_MAX > 7)
+    WE_CHART_AA_VAL(7),
+#endif
+};
+
+#endif /* WE_CHART_AA_MAX > 0 */
+
 /**
  * @brief 根据柔边层级与整体透明度计算当前像素 alpha。
  * @param aa_h 柔边总层数。
@@ -98,20 +152,15 @@ static __inline uint8_t _chart_get_aa_height(void)
  */
 static __inline uint8_t _chart_get_aa_alpha(uint8_t aa_h, uint8_t edge_idx, uint8_t opacity)
 {
-    uint16_t base_alpha;
-
     if (aa_h == 0U || edge_idx >= aa_h || opacity == 0U)
         return 0U;
 
-#if (WE_CFG_CHART_AA_CURVE == 0)
-    base_alpha = (uint16_t)(255U * (uint16_t)(aa_h - edge_idx)) / aa_h;
+#if (WE_CHART_AA_MAX > 0)
+    return (uint8_t)(((uint16_t)k_chart_aa_table[edge_idx] * opacity) >> 8);
 #else
-    {
-        uint32_t t = (uint32_t)(aa_h - edge_idx);
-        base_alpha = (uint16_t)((255UL * t * t) / ((uint32_t)aa_h * (uint32_t)aa_h));
-    }
+    (void)edge_idx;
+    return 0U;
 #endif
-    return (uint8_t)((base_alpha * opacity) >> 8);
 }
 
 /**
@@ -417,12 +466,14 @@ static void _chart_draw_wave_body(we_chart_obj_t *obj,
         return;
 
     {
-        int32_t y0 = (span_top < clip_y0) ? clip_y0 : span_top;
-        int32_t y1 = (span_bot > clip_y1) ? clip_y1 : span_bot;
+        int32_t   y0  = (span_top < clip_y0) ? clip_y0 : span_top;
+        int32_t   y1  = (span_bot > clip_y1) ? clip_y1 : span_bot;
+        /* 起点乘法只算一次，循环里改成 += pfb_w 步进，省掉每行的一次乘法。 */
+        colour_t *dst = cb + (uint16_t)(y0 - pfb_y0) * pfb_w;
         for (int32_t y = y0; y <= y1; y++)
         {
-            colour_t *dst = cb + (uint16_t)(y - pfb_y0) * pfb_w;
             *dst = (a_solid >= 250U) ? color : we_colour_blend(color, *dst, a_solid);
+            dst += pfb_w;
         }
     }
 }
@@ -589,18 +640,30 @@ static void _chart_draw_cb(void *ptr)
     /* 全实心 alpha（考虑 opacity） */
     uint8_t a_solid = (uint8_t)(((uint16_t)255U * opacity) >> 8);
 
-    for (int32_t sc = sc_start; sc < (int32_t)bw; sc++)
+    /* D: 把 sc 循环的合法区间预先收敛到 PFB X 范围内，
+     *    省掉每列两次 sx 比较与 continue。 */
+    int32_t sc_lo = sc_start;
+    int32_t sc_hi = (int32_t)bw - 1;
     {
-        int16_t sx = (int16_t)(bx + sc);
-        if (sx < pfb_x0 || sx > pfb_x1) continue;
+        int32_t sc_x_lo = (int32_t)pfb_x0 - (int32_t)bx;
+        int32_t sc_x_hi = (int32_t)pfb_x1 - (int32_t)bx;
+        if (sc_x_lo > sc_lo) sc_lo = sc_x_lo;
+        if (sc_x_hi < sc_hi) sc_hi = sc_x_hi;
+    }
+    if (sc_lo > sc_hi) return;
 
-        int32_t col_idx = sc - sc_start;
+    /* A: 主循环里 y_cur 沿用上一轮的 y_nxt，每列只调一次 _get_sy。
+     *    先把起点 y_cur prime 出来。 */
+    int32_t col_idx = sc_lo - sc_start;
+    int32_t y_cur   = _get_sy(col_idx, idx0, obj, by, bh);
 
-        /* 当前列与下一列的屏幕 Y（下一列不存在则重用当前） */
-        int32_t y_cur = _get_sy(col_idx, idx0, obj, by, bh);
-        int32_t y_nxt = (col_idx + 1 < (int32_t)draw_cnt)
-                        ? _get_sy(col_idx + 1, idx0, obj, by, bh)
-                        : y_cur;
+    for (int32_t sc = sc_lo; sc <= sc_hi; sc++)
+    {
+        int16_t sx       = (int16_t)(bx + sc);
+        int32_t col_next = col_idx + 1;
+        int32_t y_nxt    = (col_next < (int32_t)draw_cnt)
+                           ? _get_sy(col_next, idx0, obj, by, bh)
+                           : y_cur;
 
         /* 顶锚刷子：top = 最小屏幕 Y（最高处） */
         int32_t iCurTop = y_cur - half_stroke;
@@ -614,6 +677,10 @@ static void _chart_draw_cb(void *ptr)
 
         _chart_draw_wave_col(obj, cb, pfb_w, pfb_y0, clip_y0, clip_y1,
                              span_top, span_bot, color, a_solid, opacity);
+
+        /* 滑动一格：本轮的 y_nxt 即下一轮的 y_cur。 */
+        y_cur   = y_nxt;
+        col_idx = col_next;
     }
 }
 
