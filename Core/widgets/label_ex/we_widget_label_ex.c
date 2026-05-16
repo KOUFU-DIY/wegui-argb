@@ -10,6 +10,24 @@
 #define FP_ONE  (1 << FP_BITS)
 
 /* --------------------------------------------------------------------------
+ * 字形预扫描缓存：把版面位置、位图地址、bpp 等一次性算好，
+ * 内层逐像素循环直接查表，彻底干掉每像素的 UTF-8 解码与字库接口调用。
+ * 单条目 16 字节（按 4 字节对齐自然填满）。
+ * 缓存容量由 WE_CFG_LABEL_EX_MAX_GLYPHS 决定（见 we_widget_label_ex.h）。
+ * -------------------------------------------------------------------------- */
+typedef struct
+{
+    const uint8_t *bitmap;   /* 已解析好的字形位图首地址 */
+    uint16_t       row_stride; /* 字形位图每行字节数 */
+    int16_t        draw_x;   /* 字形左上角相对文字基线的 X */
+    int16_t        draw_y;   /* 字形左上角相对文字基线的 Y */
+    uint16_t       box_w;    /* 字形宽度（像素） */
+    uint16_t       box_h;    /* 字形高度（像素） */
+    uint8_t        bpp;      /* 字形位深（1/2/4/8 bpp） */
+    uint8_t        alpha_mask; /* (1<<bpp)-1，预算好省一次移位 */
+} _glyph_cache_t;
+
+/* --------------------------------------------------------------------------
  * 测量多行文本中最宽一行的像素宽度（用于包围盒，不渲染）
  * -------------------------------------------------------------------------- */
 
@@ -37,32 +55,27 @@ uint16_t w = we_get_text_width(font, p);
 }
 
 /* --------------------------------------------------------------------------
- * 根据文字局部坐标 (tx, ty) 直接从字模 flash 数据查询 alpha 值。
- *
- * tx, ty 为文字局部整数坐标：x 轴原点在文字左边，y 轴原点在行顶。
- * 此函数零额外 RAM 占用，仅使用栈上局部变量。
+ * 预扫描整段文字，把每个字形的版面信息和位图地址解析到栈数组里。
+ * 之后整帧逐像素采样都直接查表，不再触碰 UTF-8 解码 / 字库 flash 查表。
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 读取当前属性值或计算结果。
- * @param obj 目标控件对象指针。
- * @param tx 文本局部坐标系中的 X 坐标。
- * @param ty 文本局部坐标系中的 Y 坐标。
- * @return 返回状态标志（1 有效，0 无效）。
+ * @brief 解析整段文字到字形缓存数组。
+ * @param obj 目标控件对象指针（提供 font/text）。
+ * @param cache 传出：字形缓存数组（由调用方在栈上分配）。
+ * @param cap cache 容量（数组长度上限）。
+ * @return 实际写入的字形数（≤cap，多余字符被截断）。
  */
-static uint8_t _get_alpha_at(const we_label_ex_obj_t *obj, int32_t tx, int32_t ty)
+static uint16_t _build_glyph_cache(const we_label_ex_obj_t *obj,
+                                   _glyph_cache_t *cache, uint16_t cap)
 {
     const unsigned char *font_array = obj->font;
     const char          *str        = obj->text;
-uint16_t             line_h     = we_font_get_line_height(font_array);
+    uint16_t             count      = 0U;
     int16_t              cursor_x   = 0;
     we_glyph_info_t      info;
 
-    /* Y 轴越界快速退出 */
-    if (ty < 0 || ty >= (int32_t)line_h)
-        return 0U;
-
-    while (*str)
+    while (*str && count < cap)
     {
         uint16_t code = 0U;
         uint8_t  c    = (uint8_t)*str++;
@@ -92,7 +105,7 @@ uint16_t             line_h     = we_font_get_line_height(font_array);
                 break;
         }
 
-        /* 换行只处理单行（label_ex 不支持多行旋转） */
+        /* label_ex 仅支持单行旋转，遇到换行直接收尾 */
         if (code == (uint16_t)'\n')
             break;
 
@@ -106,54 +119,68 @@ uint16_t             line_h     = we_font_get_line_height(font_array);
         }
 
         {
-            int16_t draw_x = cursor_x + info.x_ofs;
-            int16_t draw_y = info.y_ofs;
+            const uint8_t *bitmap     = NULL;
+            uint8_t        bpp        = 0U;
+            uint32_t       row_stride = 0U;
 
-            /* tx 已超过当前字形右边界，继续向后找 */
-            if (tx >= (int32_t)(draw_x + (int16_t)info.box_w))
+            if (we_font_get_bitmap_info(font_array, &info, &bitmap, &bpp, &row_stride) && bitmap != NULL)
             {
-                cursor_x += info.adv_w;
-                continue;
+                cache[count].bitmap     = bitmap;
+                cache[count].row_stride = (uint16_t)row_stride;
+                cache[count].draw_x     = cursor_x + info.x_ofs;
+                cache[count].draw_y     = info.y_ofs;
+                cache[count].box_w      = info.box_w;
+                cache[count].box_h      = info.box_h;
+                cache[count].bpp        = bpp;
+                cache[count].alpha_mask = (uint8_t)((1U << bpp) - 1U);
+                count++;
             }
+        }
 
-            /* tx 还在当前字形左边界之前，后续字形 x 只会更大，提前退出 */
-            if (tx < (int32_t)draw_x)
-                break;
+        cursor_x += info.adv_w;
+    }
+    return count;
+}
 
-            /* Y 范围检测 */
-            if (ty < (int32_t)draw_y || ty >= (int32_t)(draw_y + (int16_t)info.box_h))
+/**
+ * @brief 从字形缓存查询文字局部坐标 (tx, ty) 的 alpha 值。
+ * @param cache 字形缓存数组（来自 _build_glyph_cache）。
+ * @param count 字形缓存有效条目数。
+ * @param tx 文本局部 X 坐标。
+ * @param ty 文本局部 Y 坐标。
+ * @return 字形覆盖 alpha（0~255）。
+ */
+static __inline uint8_t _alpha_from_cache(const _glyph_cache_t *cache, uint16_t count,
+                                          int32_t tx, int32_t ty)
+{
+    for (uint16_t i = 0U; i < count; i++)
+    {
+        const _glyph_cache_t *g = &cache[i];
+
+        /* 字形按 cursor 顺序排布，后续 draw_x 只会更靠右，可以提前退出 */
+        if (tx < (int32_t)g->draw_x)
+            break;
+        if (tx >= (int32_t)(g->draw_x + (int16_t)g->box_w))
+            continue;
+        if (ty < (int32_t)g->draw_y || ty >= (int32_t)(g->draw_y + (int16_t)g->box_h))
+            continue;
+
+        {
+            uint32_t px       = (uint32_t)(tx - (int32_t)g->draw_x);
+            uint32_t py       = (uint32_t)(ty - (int32_t)g->draw_y);
+            uint32_t bit_pos  = py * (uint32_t)g->row_stride * 8U + px * (uint32_t)g->bpp;
+            uint8_t  shift    = (uint8_t)(8U - g->bpp - (uint8_t)(bit_pos & 7U));
+            uint8_t  a_raw    = (g->bitmap[bit_pos >> 3U] >> shift) & g->alpha_mask;
+
+            switch (g->bpp)
             {
-                cursor_x += info.adv_w;
-                continue;
-            }
-
-            /* 命中：通过统一字体接口提取 alpha */
-            {
-                const uint8_t *bitmap = NULL;
-                uint8_t bpp = 0U;
-                uint32_t row_stride = 0U;
-
-                if (!we_font_get_bitmap_info(font_array, &info, &bitmap, &bpp, &row_stride) || bitmap == NULL)
-                    return 0U;
-
-                {
-                    uint8_t alpha_mask = (uint8_t)((1U << bpp) - 1U);
-                    uint32_t px = (uint32_t)(tx - (int32_t)draw_x);
-                    uint32_t py = (uint32_t)(ty - (int32_t)draw_y);
-                    uint32_t bit_pos = py * row_stride * 8U + px * (uint32_t)bpp;
-                    uint32_t byte_idx = bit_pos >> 3U;
-                    uint8_t shift = (uint8_t)(8U - bpp - (uint8_t)(bit_pos & 7U));
-                    uint8_t a_raw = (bitmap[byte_idx] >> shift) & alpha_mask;
-
-                    if (bpp == 8U) return a_raw;
-                    if (bpp == 4U) return (uint8_t)((a_raw << 4) | a_raw);
-                    if (bpp == 2U) return (uint8_t)(a_raw * 85U);
-                    return a_raw ? 255U : 0U;
-                }
+            case 8U:  return a_raw;
+            case 4U:  return (uint8_t)((a_raw << 4) | a_raw);
+            case 2U:  return (uint8_t)(a_raw * 85U);
+            default:  return a_raw ? 255U : 0U;
             }
         }
     }
-
     return 0U;
 }
 
@@ -251,8 +278,13 @@ static void _label_ex_update_bbox(we_label_ex_obj_t *obj)
 /* --------------------------------------------------------------------------
  * 旋转缩放文字绘制回调
  *
- * 无离屏缓冲：对包围盒内每个屏幕像素做逆变换，直接调用 _get_alpha_at
- * 从字模 flash 数据读取 alpha，再与前景色混色写回 PFB。
+ * 工作方式：
+ *   1. 入口一次性把字符串解析到 _glyph_cache_t cache[]（栈数组），
+ *      之后整帧渲染都直接查表，零 UTF-8 解码、零字库 flash 接口调用。
+ *   2. 对包围盒内每个屏幕像素做逆变换，得到文字局部坐标 (tx, ty)，
+ *      查表获取 alpha，与前景色混色写回 PFB。
+ *   3. PFB 目标地址用指针递增维护，避免每像素 row*stride+col 重算。
+ *   4. /255 软除法替换为 we_div255 近似，省 M0 ~90 cycle/像素。
  * -------------------------------------------------------------------------- */
 
 /**
@@ -289,10 +321,12 @@ static void _label_ex_draw_cb(void *ptr)
     int16_t            y;
     int32_t            max_x_i32;
     int32_t            max_y_i32;
-    colour_t          *gram;
+    colour_t          *line_base;
     uint16_t           pfb_stride;
     uint8_t            opacity;
     colour_t           fg_color;
+    _glyph_cache_t     cache[WE_CFG_LABEL_EX_MAX_GLYPHS];
+    uint16_t           glyph_count;
 
     if (!p_lcd || obj->scale_256 == 0U || obj->opacity <= 5U ||
         !obj->font || !obj->text || obj->text_w == 0U)
@@ -305,6 +339,14 @@ start_y = WE_MAX(obj->base.y, (int16_t)p_lcd->pfb_y_start);
 end_y   = WE_MIN(obj->base.y + obj->base.h - 1, (int16_t)p_lcd->pfb_y_end);
 
     if (start_x > end_x || start_y > end_y)
+        return;
+
+    /* --------------------------------------------------------------------------
+     * 关键一步：进入像素扫描前先把整段文字预解析到栈缓存，
+     * 后续逐像素采样就只用查表，不再走 UTF-8 解码/字库 flash 接口。
+     * -------------------------------------------------------------------------- */
+    glyph_count = _build_glyph_cache(obj, cache, (uint16_t)WE_CFG_LABEL_EX_MAX_GLYPHS);
+    if (glyph_count == 0U)
         return;
 
     /* --------------------------------------------------------------------------
@@ -335,57 +377,48 @@ uint16_t line_h = we_font_get_line_height(obj->font);
     src_x0_q12 = (int32_t)((rot_x0_q15 * inv_scale_q16) >> 19) + buf_cx_q12;
     src_y0_q12 = (int32_t)((rot_y0_q15 * inv_scale_q16) >> 19) + buf_cy_q12;
 
-    /* 有效范围上界（用有符号比较，_get_alpha_at 内部负数已过滤）*/
-
-    gram       = p_lcd->pfb_gram;
     pfb_stride = p_lcd->pfb_width;
     opacity    = obj->opacity;
     fg_color   = obj->color;
 
+    /* 行首 PFB 指针，每行递增 pfb_stride，免去 row*stride+col 的乘加 */
+    line_base = (colour_t *)p_lcd->pfb_gram
+              + (uint32_t)(start_y - (int16_t)p_lcd->pfb_y_start) * pfb_stride
+              + (uint32_t)(start_x - (int16_t)p_lcd->pfb_area.x0);
+
     for (y = start_y; y <= end_y; y++)
     {
-        int16_t pfb_row = y - (int16_t)p_lcd->pfb_y_start;
+        colour_t *p_dst = line_base;
 
         curr_src_x = src_x0_q12;
         curr_src_y = src_y0_q12;
 
-        for (x = start_x; x <= end_x; x++)
+        /* for-loop 增量段的 p_dst++ 在 continue 时也会执行，地址始终对齐 */
+        for (x = start_x; x <= end_x; x++, p_dst++)
         {
             int32_t tx = curr_src_x >> FP_BITS;
             int32_t ty = curr_src_y >> FP_BITS;
+            uint8_t alpha8;
+            uint8_t final_alpha;
 
             curr_src_x += step_x_x;
             curr_src_y += step_y_x;
 
-            /* 快速越界过滤（负数和超上界均排除） */
+            /* 快速越界过滤（负数和超上界一并排除） */
             if (tx < 0 || tx >= max_x_i32 || ty < 0 || ty >= max_y_i32)
                 continue;
 
-            {
-uint8_t alpha8 = _get_alpha_at(obj, tx, ty);
-                if (alpha8 == 0U)
-                    continue;
+            alpha8 = _alpha_from_cache(cache, glyph_count, tx, ty);
+            if (alpha8 == 0U)
+                continue;
 
-                uint8_t final_alpha = (opacity == 255U)
-                    ? alpha8
-                    : (uint8_t)(((uint32_t)alpha8 * opacity + 127U) / 255U);
+            /* opacity 全开时省一次乘法；否则用 we_div255 近似代替软件 /255 */
+            final_alpha = (opacity == 255U) ? alpha8 : we_div255((uint32_t)alpha8 * opacity);
 
-                colour_t *dst = &gram[(uint32_t)pfb_row * pfb_stride +
-                                      (uint32_t)(x - (int16_t)p_lcd->pfb_area.x0)];
-
-#if (LCD_DEEP == DEEP_RGB565)
-dst->dat16 = we_blend_rgb565(fg_color.dat16, dst->dat16, final_alpha);
-#elif (LCD_DEEP == DEEP_RGB888)
-                {
-colour_t blended = we_colour_blend(fg_color, *dst, final_alpha);
-                    dst->rgb.r = blended.rgb.r;
-                    dst->rgb.g = blended.rgb.g;
-                    dst->rgb.b = blended.rgb.b;
-                }
-#endif
-            }
+            we_store_blended_color(p_dst, fg_color, final_alpha);
         }
 
+        line_base  += pfb_stride;
         src_x0_q12 += step_x_y;
         src_y0_q12 += step_y_y;
     }

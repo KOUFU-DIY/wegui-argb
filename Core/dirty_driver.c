@@ -184,37 +184,39 @@ static void we_dirty_add_rect(we_dirty_mgr_t *mgr, we_rect_t *new_r)
     // =========================================================
     // 3. ?? 坑位爆满！触发【全局最优融合 (Global Optimal Compact)】
     // 将 new_r 也拉进来，5个人一起相亲，寻找合并浪费最小的“天选组合”
+    //
+    // 直接在 mgr->rects[] 上原地比较，把 new_r 虚拟成 index = MAX_NUM 的元素，
+    // 省掉一份 v_rects 栈拷贝（~40B 栈 + 一个 copy 循环 ROM）。
     // =========================================================
     uint8_t best_i = 0, best_j = 1;
     int32_t min_waste = 0x7FFFFFFF;
-    we_rect_t best_union;
-
-    // 构建虚拟数组：把 new_r 放在最后
-    we_rect_t v_rects[WE_CFG_DIRTY_MAX_NUM + 1];
-    for (uint8_t i = 0; i < WE_CFG_DIRTY_MAX_NUM; i++)
-        v_rects[i] = mgr->rects[i];
-    v_rects[WE_CFG_DIRTY_MAX_NUM] = *new_r;
 
     // O(N^2) 遍历，找出最小代价组合
     for (uint8_t i = 0; i < WE_CFG_DIRTY_MAX_NUM; i++)
     {
+        we_rect_t *ri = &mgr->rects[i];
+        int32_t area_i = (int32_t)rect_area(ri);
+
         for (uint8_t j = i + 1; j <= WE_CFG_DIRTY_MAX_NUM; j++)
-        { // ?? 注意这里是 j <= MAX_NUM
-            we_rect_t u = get_union_rect(&v_rects[i], &v_rects[j]);
-            int32_t waste = (int32_t)rect_area(&u) - (int32_t)rect_area(&v_rects[i]) - (int32_t)rect_area(&v_rects[j]);
+        { // ?? 注意这里是 j <= MAX_NUM (== new_r 的虚拟位)
+            we_rect_t *rj = (j < WE_CFG_DIRTY_MAX_NUM) ? &mgr->rects[j] : new_r;
+            we_rect_t u = get_union_rect(ri, rj);
+            int32_t waste = (int32_t)rect_area(&u) - area_i - (int32_t)rect_area(rj);
 
             if (waste < min_waste)
             {
                 min_waste = waste;
                 best_i = i;
                 best_j = j;
-                best_union = u;
             }
         }
     }
 
     // 无论如何，best_i 必然是原来的某个旧矩形。将其更新为融合后的大框。
-    mgr->rects[best_i] = best_union;
+    {
+        we_rect_t *rj_best = (best_j < WE_CFG_DIRTY_MAX_NUM) ? &mgr->rects[best_j] : new_r;
+        mgr->rects[best_i] = get_union_rect(&mgr->rects[best_i], rj_best);
+    }
 
     // 接下来处理空洞与 new_r 的归宿
     if (best_j < WE_CFG_DIRTY_MAX_NUM)
