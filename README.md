@@ -31,7 +31,6 @@
 - img_flash
 - font_flash
 - slider
-- dropdown
 - scroll_panel
 
 其中：
@@ -90,27 +89,29 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 
 ## Demo 选择
 
-当前 simple demo 共 **19 个**，Simulator 与 STM32 入口文件使用同一套 demo 顺序：
+当前 simple demo 共 **18 个**，Simulator 与 STM32 入口文件使用同一套 demo 顺序。
+为保持历史 `demo_id` 兼容，编号 9（原 key demo）已退役且不再占位，跳号至 10。
 
-1. label
-2. btn
-3. img
-4. img_ex
-5. arc
-6. group
-7. slideshow
-8. concentric arc
-9. key
-10. checkbox
-11. label_ex
-12. chart
-13. toggle
-14. progress
-15. msgbox
-16. flash img
-17. flash font
-18. slider
-19. dropdown
+| demo_id | 内容 |
+| --- | --- |
+| 1  | label |
+| 2  | btn |
+| 3  | img |
+| 4  | img_ex |
+| 5  | arc |
+| 6  | group |
+| 7  | slideshow |
+| 8  | concentric arc |
+| 10 | checkbox |
+| 11 | label_ex |
+| 12 | chart |
+| 13 | toggle |
+| 14 | progress |
+| 15 | msgbox |
+| 16 | flash img |
+| 17 | flash font |
+| 18 | slider |
+| 19 | scroll_panel |
 
 ### Simulator
 在 `Simulator/main_sim.c` 中修改 `demo_id`。
