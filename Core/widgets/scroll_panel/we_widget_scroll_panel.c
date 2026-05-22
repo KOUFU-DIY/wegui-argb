@@ -3,6 +3,27 @@
 
 static int16_t _scroll_panel_max_scroll_y(const we_scroll_panel_obj_t *obj);
 
+static uint16_t _scroll_panel_get_draw_radius(const we_scroll_panel_obj_t *obj)
+{
+    uint16_t r;
+    uint16_t max_r;
+
+    if (obj == NULL)
+        return 0U;
+
+    if (obj->base.w <= 0 || obj->base.h <= 0)
+        return 0U;
+
+    r = obj->radius;
+    max_r = (uint16_t)obj->base.w / 2U;
+    if (max_r > (uint16_t)obj->base.h / 2U)
+        max_r = (uint16_t)obj->base.h / 2U;
+    if (r > max_r)
+        r = max_r;
+
+    return r;
+}
+
 static int16_t _scroll_panel_clamp_to_bounds(we_scroll_panel_obj_t *obj, int16_t scroll_y)
 {
     int16_t max_scroll;
@@ -332,6 +353,8 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
 {
     we_lcd_t *lcd;
     we_obj_t *child;
+    uint16_t outer_r;
+    uint16_t inner_r;
     we_area_t old_pfb_area;
     uint16_t old_y_start;
     uint16_t old_y_end;
@@ -349,16 +372,25 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
         return;
 
     _scroll_panel_update_inner_rect(obj);
+    outer_r = _scroll_panel_get_draw_radius(obj);
 
-    we_fill_rect(lcd, obj->base.x, obj->base.y,
-                 (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                 obj->border_color, obj->opacity);
+    we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
+                                     (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                     outer_r,
+                                     obj->border_color, obj->opacity);
 
     if (obj->inner_w > 0 && obj->inner_h > 0)
     {
-        we_fill_rect(lcd, obj->inner_x, obj->inner_y,
-                     (uint16_t)obj->inner_w, (uint16_t)obj->inner_h,
-                     obj->bg_color, obj->opacity);
+        inner_r = (outer_r > 0U) ? (uint16_t)(outer_r - 1U) : 0U;
+        if (inner_r > (uint16_t)obj->inner_w / 2U)
+            inner_r = (uint16_t)obj->inner_w / 2U;
+        if (inner_r > (uint16_t)obj->inner_h / 2U)
+            inner_r = (uint16_t)obj->inner_h / 2U;
+
+        we_draw_round_rect_analytic_fill(lcd, obj->inner_x, obj->inner_y,
+                                         (uint16_t)obj->inner_w, (uint16_t)obj->inner_h,
+                                         inner_r,
+                                         obj->bg_color, obj->opacity);
     }
 
     old_pfb_area = lcd->pfb_area;

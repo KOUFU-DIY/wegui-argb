@@ -119,6 +119,7 @@ void we_scroll_panel_simple_demo_init(we_lcd_t *lcd)
     we_scroll_panel_obj_init(&demo_panel, lcd, panel_x, panel_y, panel_w, panel_h,
                              RGB888TODEV(20, 27, 38), RGB888TODEV(58, 66, 82),
                              0U, 255);
+    we_scroll_panel_set_radius(&demo_panel, 10);
     we_scroll_panel_set_scrollbar(&demo_panel, 1U, 6U);
     we_scroll_panel_set_scrollbar_opacity(&demo_panel, 180U);
     we_scroll_panel_set_content_h(&demo_panel, 316);
