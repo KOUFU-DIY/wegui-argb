@@ -19,10 +19,6 @@
 #include "stm32f103_we_input_port.h"
 #include "simple_widget_demos.h"
 
-/**
- * @brief ���뼶������ʱ
- * @param ms ��ʱʱ��, ��λ����
- */
 void delay_ms(uint32_t ms)
 {
     g_sys_delay = ms;
@@ -31,9 +27,6 @@ void delay_ms(uint32_t ms)
     }
 }
 
-/**
- * @brief ��ϵͳʱ���л��� HSI/2 �� PLL ��Ƶ��� 64MHz
- */
 static void hsi_set_sysclk_64(void)
 {
     RCC_DeInit();
@@ -60,9 +53,6 @@ static void hsi_set_sysclk_64(void)
     }
 }
 
-/**
- * @brief ���ϵͳʱ�Ӳ����쳣ʱִ��ʱ�Ӿ�Ԯ
- */
 static void sysclk_check_rescue(void)
 {
     RCC_ClocksTypeDef clocks;
@@ -75,10 +65,6 @@ static void sysclk_check_rescue(void)
     }
 }
 
-/**
- * @brief ϵͳ��ʼ��
- * @details ִ��ʱ�Ӽ�顢���Զ˿���ӳ���� SysTick 1ms ��������
- */
 static void system_init(void)
 {
     sysclk_check_rescue();
@@ -131,8 +117,11 @@ int main(void)
      * 16 = flash font
      * 17 = slider
      * 18 = scroll_panel
+     * 19 = dropdown
+     * 20 = stepper
+     * 21 = indicator
      */
-    demo_id = 18;
+    demo_id = 19;
 
     switch (demo_id)
     {
@@ -200,13 +189,25 @@ int main(void)
         we_flash_font_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_flash_font_simple_demo_tick, 16U, 1U);
         break;
-    case 18:
+    case 17:
         we_slider_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_slider_simple_demo_tick, 16U, 1U);
         break;
-    case 17:
+    case 18:
         we_scroll_panel_simple_demo_init(&g_lcd);
         we_gui_timer_create(&g_lcd, we_scroll_panel_simple_demo_tick, 16U, 1U);
+        break;
+    case 19:
+        we_dropdown_simple_demo_init(&g_lcd);
+        we_gui_timer_create(&g_lcd, we_dropdown_simple_demo_tick, 16U, 1U);
+        break;
+    case 20:
+        we_stepper_simple_demo_init(&g_lcd);
+        we_gui_timer_create(&g_lcd, we_stepper_simple_demo_tick, 16U, 1U);
+        break;
+    case 21:
+        we_indicator_simple_demo_init(&g_lcd);
+        we_gui_timer_create(&g_lcd, we_indicator_simple_demo_tick, 16U, 1U);
         break;
     default:
         we_btn_simple_demo_init(&g_lcd);

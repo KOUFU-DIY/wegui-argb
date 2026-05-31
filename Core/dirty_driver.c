@@ -6,16 +6,19 @@
 #include "we_gui_driver.h" // 确保你的头文件里包含了 WE_CFG_DIRTY_STRATEGY 等宏定义和 we_dirty_mgr_t 结构体
 
 /* =========================================================================
- * 1. 基础几何辅助函数 (各策略共用)
+ * 1. 基础几何辅助函数
  * ========================================================================= */
 
+#if (WE_CFG_DIRTY_STRATEGY >= 2)
 /**
  * @brief 计算矩形面积
  * @param r 传入：矩形指针
  * @return 矩形面积（像素数）
  */
 static uint32_t rect_area(we_rect_t *r) { return (uint32_t)(r->x1 - r->x0 + 1) * (r->y1 - r->y0 + 1); }
+#endif
 
+#if (WE_CFG_DIRTY_STRATEGY >= 1)
 /**
  * @brief 计算两个矩形的并集包围盒
  * @param r1 传入：矩形 1 指针
@@ -31,7 +34,9 @@ static we_rect_t get_union_rect(we_rect_t *r1, we_rect_t *r2)
     res.y1 = (r1->y1 > r2->y1) ? r1->y1 : r2->y1;
     return res;
 }
+#endif
 
+#if (WE_CFG_DIRTY_STRATEGY >= 2)
 /**
  * @brief 判断矩形是否有效（宽高均非负）
  * @param r 传入：矩形指针
@@ -119,6 +124,7 @@ static uint8_t rect_trim_one_side(we_rect_t *base, we_rect_t *target)
 
     return 0U;
 }
+#endif
 
 /* =========================================================================
  * 2. 高阶调度引擎 (策略 2 用)
@@ -182,8 +188,8 @@ static void we_dirty_add_rect(we_dirty_mgr_t *mgr, we_rect_t *new_r)
     }
 
     // =========================================================
-    // 3. ?? 坑位爆满！触发【全局最优融合 (Global Optimal Compact)】
-    // 将 new_r 也拉进来，5个人一起相亲，寻找合并浪费最小的“天选组合”
+    // 3. 坑位爆满：触发【全局最优融合 (Global Optimal Compact)】
+    // 将 new_r 也拉进来，寻找合并浪费最小的组合。
     //
     // 直接在 mgr->rects[] 上原地比较，把 new_r 虚拟成 index = MAX_NUM 的元素，
     // 省掉一份 v_rects 栈拷贝（~40B 栈 + 一个 copy 循环 ROM）。
@@ -198,7 +204,7 @@ static void we_dirty_add_rect(we_dirty_mgr_t *mgr, we_rect_t *new_r)
         int32_t area_i = (int32_t)rect_area(ri);
 
         for (uint8_t j = i + 1; j <= WE_CFG_DIRTY_MAX_NUM; j++)
-        { // ?? 注意这里是 j <= MAX_NUM (== new_r 的虚拟位)
+        { // 注意这里是 j <= MAX_NUM (== new_r 的虚拟位)
             we_rect_t *rj = (j < WE_CFG_DIRTY_MAX_NUM) ? &mgr->rects[j] : new_r;
             we_rect_t u = get_union_rect(ri, rj);
             int32_t waste = (int32_t)rect_area(&u) - area_i - (int32_t)rect_area(rj);
@@ -290,6 +296,7 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
     if (x >= sw || x + w <= 0 || y >= sh || y + h <= 0)
         return;
 
+#if (WE_CFG_DIRTY_STRATEGY >= 1)
     // --- 局部越界裁剪：砍掉超出屏幕边缘的部分 ---
     int16_t x0 = (x < 0) ? 0 : x;
     int16_t y0 = (y < 0) ? 0 : y;
@@ -297,6 +304,7 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
     int16_t y1 = (y + h - 1 > sh - 1) ? sh - 1 : y + h - 1;
 
     we_rect_t new_r = {x0, y0, x1, y1};
+#endif
 
 #if (WE_CFG_DIRTY_STRATEGY == 0)
     // 策略 0：全局重绘
@@ -318,5 +326,100 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
 #elif (WE_CFG_DIRTY_STRATEGY == 2)
     // 策略 2：基于极简面积运算的智能合并
     we_dirty_add_rect(mgr, &new_r);
+#endif
+}
+
+/**
+ * @brief 提交一个矩形脏区，但排除其中一个安全空洞矩形。
+ * @param mgr 传入：脏矩形管理器指针
+ * @param x 传入：整体区域左上角 X 坐标
+ * @param y 传入：整体区域左上角 Y 坐标
+ * @param w 传入：整体区域宽度
+ * @param h 传入：整体区域高度
+ * @param ex 传入：排除区域左上角 X 坐标
+ * @param ey 传入：排除区域左上角 Y 坐标
+ * @param ew 传入：排除区域宽度
+ * @param eh 传入：排除区域高度
+ * @return 无
+ * @note 该函数只在新增 dirty 时拆分 bbox - hole；不会从已有 dirty list 中删除区域。
+ */
+void we_dirty_invalidate_exclude(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, int16_t h,
+                                 int16_t ex, int16_t ey, int16_t ew, int16_t eh)
+{
+    int16_t bx0;
+    int16_t by0;
+    int16_t bx1;
+    int16_t by1;
+    int16_t hx0;
+    int16_t hy0;
+    int16_t hx1;
+    int16_t hy1;
+    int16_t ix0;
+    int16_t iy0;
+    int16_t ix1;
+    int16_t iy1;
+    int16_t iw;
+    int16_t ih;
+    uint32_t bbox_area;
+    uint32_t cut_area;
+
+    if (mgr == NULL || w <= 0 || h <= 0)
+        return;
+
+#if (WE_CFG_DIRTY_STRATEGY < 2)
+    /* 策略 0/1 无法表达空洞，直接提交整体 bbox。 */
+    (void)ex;
+    (void)ey;
+    (void)ew;
+    (void)eh;
+    we_dirty_invalidate(mgr, x, y, w, h);
+    return;
+#else
+    if (ew <= 0 || eh <= 0)
+    {
+        we_dirty_invalidate(mgr, x, y, w, h);
+        return;
+    }
+
+    bx0 = x;
+    by0 = y;
+    bx1 = (int16_t)(x + w - 1);
+    by1 = (int16_t)(y + h - 1);
+    hx0 = ex;
+    hy0 = ey;
+    hx1 = (int16_t)(ex + ew - 1);
+    hy1 = (int16_t)(ey + eh - 1);
+
+    ix0 = WE_MAX(bx0, hx0);
+    iy0 = WE_MAX(by0, hy0);
+    ix1 = WE_MIN(bx1, hx1);
+    iy1 = WE_MIN(by1, hy1);
+
+    if (ix0 > ix1 || iy0 > iy1)
+    {
+        we_dirty_invalidate(mgr, x, y, w, h);
+        return;
+    }
+
+    iw = (int16_t)(ix1 - ix0 + 1);
+    ih = (int16_t)(iy1 - iy0 + 1);
+    bbox_area = (uint32_t)w * (uint32_t)h;
+    cut_area = (uint32_t)iw * (uint32_t)ih;
+
+    /* 空洞太小或收益很低时不拆，避免多脏矩形带来的调度开销。 */
+    if (iw < 8 || ih < 8 || cut_area < 32U || cut_area < (bbox_area >> 3))
+    {
+        we_dirty_invalidate(mgr, x, y, w, h);
+        return;
+    }
+
+    /* top */
+    we_dirty_invalidate(mgr, bx0, by0, (int16_t)(bx1 - bx0 + 1), (int16_t)(iy0 - by0));
+    /* bottom */
+    we_dirty_invalidate(mgr, bx0, (int16_t)(iy1 + 1), (int16_t)(bx1 - bx0 + 1), (int16_t)(by1 - iy1));
+    /* left */
+    we_dirty_invalidate(mgr, bx0, iy0, (int16_t)(ix0 - bx0), ih);
+    /* right */
+    we_dirty_invalidate(mgr, (int16_t)(ix1 + 1), iy0, (int16_t)(bx1 - ix1), ih);
 #endif
 }

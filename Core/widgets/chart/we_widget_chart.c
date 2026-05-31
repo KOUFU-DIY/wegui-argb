@@ -708,8 +708,7 @@ void we_chart_obj_init(we_chart_obj_t *obj, we_lcd_t *lcd,
                        int16_t *data_buf, uint16_t data_cap,
                        colour_t line_color, uint8_t stroke, uint8_t opacity)
 {
-    static const we_class_t _chart_class = { .draw_cb = _chart_draw_cb, .event_cb = NULL };
-    we_obj_t *tail;
+    static const we_class_t _chart_class = { .draw_cb = _chart_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
     if (!obj || !lcd || !data_buf || data_cap == 0U)
         return;
@@ -731,14 +730,7 @@ void we_chart_obj_init(we_chart_obj_t *obj, we_lcd_t *lcd,
     obj->base.next    = NULL;
     obj->base.parent  = NULL;
 
-    if (lcd->obj_list_head == NULL)
-        lcd->obj_list_head = (we_obj_t *)obj;
-    else
-    {
-        tail = lcd->obj_list_head;
-        while (tail->next) tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
         we_obj_invalidate((we_obj_t *)obj);

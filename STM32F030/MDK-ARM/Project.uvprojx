@@ -1057,6 +1057,21 @@
               <FilePath>..\..\Core\widgets\scroll_panel\we_widget_scroll_panel.c</FilePath>
             </File>
             <File>
+              <FileName>we_widget_dropdown.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\dropdown\we_widget_dropdown.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_stepper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\stepper\we_widget_stepper.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_indicator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\indicator\we_widget_indicator.c</FilePath>
+            </File>
+            <File>
               <FileName>we_widget_slider.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets\slider\we_widget_slider.c</FilePath>
@@ -1175,6 +1190,21 @@
               <FileName>demo_scroll_panel.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_scroll_panel.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_dropdown.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_dropdown.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_stepper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_stepper.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_indicator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_indicator.c</FilePath>
             </File>
             <File>
               <FileName>demo_slider.c</FileName>

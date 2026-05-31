@@ -26,7 +26,7 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
  */
 static void _slideshow_task_cb(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms);
 
-static const we_class_t _slideshow_class = { .draw_cb = _slideshow_draw_cb, .event_cb = _slideshow_event_cb };
+static const we_class_t _slideshow_class = { .draw_cb = _slideshow_draw_cb, .event_cb = _slideshow_event_cb, .set_pos_cb = NULL};
 
 /**
  * @brief 根据当前位置计算最近的分页吸附目标 X 坐标。

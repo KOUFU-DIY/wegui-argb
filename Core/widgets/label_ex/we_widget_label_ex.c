@@ -445,8 +445,7 @@ void we_label_ex_obj_init(we_label_ex_obj_t *obj, we_lcd_t *lcd,
                           const char *text, const unsigned char *font,
                           colour_t color, uint8_t opacity)
 {
-    static const we_class_t _label_ex_class = { .draw_cb = _label_ex_draw_cb, .event_cb = NULL };
-    we_obj_t *tail;
+    static const we_class_t _label_ex_class = { .draw_cb = _label_ex_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
     if (!obj || !lcd)
         return;
@@ -469,17 +468,7 @@ _label_ex_update_bbox(obj);
     obj->base.parent  = NULL;
 
     /* 挂入渲染链表尾部 */
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        tail = lcd->obj_list_head;
-        while (tail->next)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
 we_obj_invalidate((we_obj_t *)obj);

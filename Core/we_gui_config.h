@@ -63,4 +63,24 @@
 #define WE_CFG_SWIPE_THRESHOLD 30
 #endif
 
+/* 渲染性能统计开关。
+ * 1：保留 stat_render_frames / stat_pfb_pushes / stat_pushed_pixels 三个计数器，
+ *    可用于 FPS 显示和真机性能分析；
+ * 0：从 we_lcd_t 中去掉这 3 个 uint32 字段（每实例省 12 字节 RAM），
+ *    并消除推屏热路径里的累加开销，适合对 RAM 敏感的量产固件。
+ * 平台端口不定义时默认启用，保证 FPS demo 等开箱即用。 */
+#ifndef WE_CFG_ENABLE_RENDER_STATS
+#define WE_CFG_ENABLE_RENDER_STATS 1
+#endif
+
+/* 控件性能压测开关。
+ * 1：每帧强制把所有顶层控件按其脏矩形重新标脏，使 GUI 持续全量重绘，
+ *    配合 FPS / stat 计数器即可测出当前页面控件的极限渲染性能；
+ * 0：正常按需重绘（仅有内容变化的控件才会刷新）。
+ * 仅用于性能调试，量产固件请保持 0。
+ * 注意：开启后帧率会明显下降，这是预期现象（衡量的是最坏情况吞吐）。 */
+#ifndef WE_CFG_DEBUG_PERF_STRESS
+#define WE_CFG_DEBUG_PERF_STRESS 0
+#endif
+
 #endif

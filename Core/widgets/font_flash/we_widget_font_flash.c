@@ -536,7 +536,7 @@ code = _utf8_decode_next(&p);
     }
 }
 
-static const we_class_t _flash_font_class = { .draw_cb = _font_flash_draw_cb, .event_cb = NULL };
+static const we_class_t _flash_font_class = { .draw_cb = _font_flash_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
 /**
  * @brief 校验字体句柄与 blob 头信息，并填充 face 运行时字段。
@@ -708,17 +708,7 @@ _compute_bbox(obj, &w, &h);
     obj->base.w = w;
     obj->base.h = h;
 
-    if (face->lcd->obj_list_head == NULL)
-    {
-        face->lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = face->lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(face->lcd, (we_obj_t *)obj);
 
     if (opacity > 0U && w > 0 && h > 0)
 we_obj_invalidate((we_obj_t *)obj);

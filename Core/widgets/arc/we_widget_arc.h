@@ -71,10 +71,7 @@ void we_arc_set_opacity(we_arc_obj_t *obj, uint8_t opacity);
  * @param y 新的左上角 Y 坐标。
  * @return 无。
  */
-static inline void we_arc_obj_set_pos(we_arc_obj_t *obj, int16_t x, int16_t y)
-{
-    we_obj_set_pos((we_obj_t *)obj, x, y);
-}
+void we_arc_obj_set_pos(we_arc_obj_t *obj, int16_t x, int16_t y);
 
 /**
  * @brief 执行we_arc_obj_delete的核心处理流程。

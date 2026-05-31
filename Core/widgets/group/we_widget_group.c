@@ -126,8 +126,12 @@ int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
 
             while (child != NULL)
             {
-                if (child->class_p && child->class_p->draw_cb)
+                if (child->class_p && child->class_p->draw_cb &&
+                    (child->x + child->w > lcd->pfb_area.x0) && (child->x <= lcd->pfb_area.x1) &&
+                    (child->y + child->h > lcd->pfb_y_start) && (child->y <= lcd->pfb_y_end))
+                {
                     child->class_p->draw_cb(child);
+                }
                 child = child->next;
             }
         }
@@ -154,7 +158,7 @@ int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
 void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int16_t w, int16_t h,
                        colour_t bg_color, uint8_t opacity)
 {
-    static const we_class_t _group_class = { .draw_cb = _group_draw_cb, .event_cb = NULL };
+    static const we_class_t _group_class = { .draw_cb = _group_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
     uint16_t i;
 
     if (obj == NULL || lcd == NULL)
@@ -176,17 +180,7 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
     for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
         obj->child_slots[i].used = 0U;
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
 we_obj_invalidate((we_obj_t *)obj);
@@ -248,17 +242,7 @@ _group_detach_obj(child);
             child->next = NULL;
             child->parent = (we_obj_t *)obj;
 
-            if (obj->children_head == NULL)
-            {
-                obj->children_head = child;
-            }
-            else
-            {
-                we_obj_t *tail = obj->children_head;
-                while (tail->next != NULL)
-                    tail = tail->next;
-                tail->next = child;
-            }
+            we_obj_append_to_list(&obj->children_head, child);
 
             obj->child_slots[i].child = child;
             obj->child_slots[i].local_x = 0;

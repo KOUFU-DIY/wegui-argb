@@ -3,31 +3,6 @@
 #include "we_render.h"
 
 #if !WE_BTN_USE_CUSTOM_STYLE
-#if 0
-static const we_btn_style_t _built_in_styles[WE_BTN_STATE_MAX] = {
-    // Normal: 浅灰
-    [WE_BTN_STATE_NORMAL] = {.bg_color = RGB888TODEV(240, 240, 240),
-                             .border_color = RGB888TODEV(200, 200, 200),
-                             .text_color = RGB888TODEV(50, 50, 50),
-                             .border_w = 1}, // RGB(240,240,240), RGB(200,200,200), RGB(50,50,50)
-    // Selected: 浅蓝
-    [WE_BTN_STATE_SELECTED] = {.bg_color = RGB888TODEV(230, 245, 255),
-                               .border_color = RGB888TODEV(0, 120, 215),
-                               .text_color = RGB888TODEV(0, 100, 200),
-                               .border_w = 1}, // RGB(230,245,255), RGB(0,120,215), RGB(0,100,200)
-    // Pressed: 蓝
-    [WE_BTN_STATE_PRESSED] = {.bg_color = {.dat16 = 0xD73F},
-                              .border_color = RGB888TODEV(0, 90, 180),
-                              .text_color = RGB888TODEV(0, 80, 160),
-                              .border_w = 1}, // RGB(210,230,255), RGB(0,90,180), RGB(0,80,160)
-    // Disabled: 深灰
-    [WE_BTN_STATE_DISABLED] = {.bg_color = RGB888TODEV(220, 220, 220),
-                               .border_color = RGB888TODEV(180, 180, 180),
-                               .text_color = RGB888TODEV(150, 150, 150),
-                               .border_w = 1}, // RGB(220,220,220), RGB(180,180,180), RGB(150,150,150)
-};
-#endif
-
 static const we_btn_style_t _built_in_styles[WE_BTN_STATE_MAX] = {
 #if (LCD_DEEP == DEEP_RGB565)
     [WE_BTN_STATE_NORMAL] = {.bg_color = {.dat16 = 0x39AA},
@@ -211,7 +186,7 @@ we_btn_set_state(btn, WE_BTN_STATE_PRESSED);
 we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
         break;
     case WE_EVENT_CLICKED:
-        // TODO: 调用用户自定义的点击回调
+        /* 无用户回调时点击事件不做额外处理，默认状态由按下/释放维护。 */
         break;
     default:
         break;
@@ -245,7 +220,7 @@ void we_btn_obj_init(we_btn_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int
     obj->base.w = w;
     obj->base.h = h;
 
-    static const we_class_t _btn_class = {.draw_cb = _btn_draw_cb, .event_cb = _btn_event_cb};
+    static const we_class_t _btn_class = {.draw_cb = _btn_draw_cb, .event_cb = _btn_event_cb, .set_pos_cb = NULL};
     obj->base.class_p = &_btn_class;
 
     // 2. 初始化属性
@@ -272,17 +247,7 @@ RGB888TODEV(156, 164, 179), 1);
 
     // 4. 加入显示链表
     obj->base.next = NULL;
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     // 5. 标脏显示（经父节点链裁剪，支持挂入容器后正确初始化）
 we_obj_invalidate((we_obj_t *)obj);

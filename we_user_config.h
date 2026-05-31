@@ -38,6 +38,11 @@
  * 1: 打开，脏区会用红框标记 */
 #define WE_CFG_DEBUG_DIRTY_RECT (0)
 
+/* 控件压力性能测试开关
+ * 0: 关闭
+ * 1: 打开 */
+#define WE_CFG_DEBUG_PERF_STRESS (0)
+
 /* ------------------------- 功能裁剪开关 ------------------------- */
 /* 1: 保留索引 QOI 解码
  * 0: 裁掉索引 QOI 相关绘图函数和图片控件分发路径 */
@@ -117,7 +122,7 @@
 /* 联合包络标脏时的列块宽度
  * 1: 最细逐列标脏
  * N: 每 N 列合成一个 dirty block */
- #define WE_CHART_DIRTY_BLOCK_W (16)
+// #define WE_CHART_DIRTY_BLOCK_W (16)
 
 /* 柔边衰减曲线
  * 0: 线性衰减

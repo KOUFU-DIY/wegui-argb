@@ -1,0 +1,161 @@
+#ifndef __WE_WIDGET_DROPDOWN_H
+#define __WE_WIDGET_DROPDOWN_H
+
+#include "we_gui_driver.h"
+
+/* --------------------------------------------------------------------------
+ * 下拉选择控件（dropdown）
+ *
+ * 数据驱动的轻量下拉框，适合 MCU：
+ *   - 闭合态只显示当前选中项 + 箭头；
+ *   - 展开态借助 LCD 级 overlay popup 绘制选项列表，
+ *     不会被 group / scroll_panel / slideshow 等父容器裁剪；
+ *   - 同一时刻全屏只允许一个 popup（由 driver 的 popup_layer 保证）。
+ *
+ * 选项数组由调用者持有（通常是 const 静态数组），控件只保存指针，
+ * 不复制文本，省 RAM。
+ * -------------------------------------------------------------------------- */
+
+/* 默认可见选项数（超出部分用 first_visible_idx 滚动） */
+#ifndef WE_DROPDOWN_DEF_MAX_VISIBLE
+#define WE_DROPDOWN_DEF_MAX_VISIBLE 4
+#endif
+
+/* 单个选项 */
+typedef struct
+{
+    const char *text;  /* 选项显示文本（UTF-8） */
+    int32_t value;     /* 选项关联值，由调用者定义含义 */
+    uint8_t disabled;  /* 非 0 表示禁用，不可被选择 */
+} we_dropdown_option_t;
+
+struct we_dropdown_obj_t;
+
+/* 选中项改变回调 */
+typedef void (*we_dropdown_changed_cb_t)(struct we_dropdown_obj_t *obj,
+                                         int16_t selected_idx,
+                                         int32_t value);
+
+typedef struct we_dropdown_obj_t
+{
+    we_obj_t base;
+    const we_dropdown_option_t *options;
+    uint16_t option_cnt;
+    int16_t selected_idx;     /* 当前选中项，-1 表示未选 */
+    int16_t hover_idx;        /* popup 中当前按下高亮项，-1 表示无 */
+    uint16_t first_visible_idx; /* popup 顶部第一个可见项 */
+    uint8_t opened;           /* 是否已展开 */
+    uint8_t pressed;          /* 主框是否处于按下态 */
+    uint8_t enabled;          /* 是否可交互 */
+    uint8_t max_visible_items;
+    uint16_t item_h;          /* 单项高度（含主框/列表项） */
+    uint16_t radius;
+    const unsigned char *font;
+    we_dropdown_changed_cb_t changed_cb;
+    /* --- popup 内部拖拽滚动状态，无需外部访问 --- */
+    int16_t drag_start_y;       /* 按下时的 Y 坐标 */
+    uint16_t drag_start_first;  /* 按下时的 first_visible_idx */
+    uint8_t dragging;           /* 本次触摸是否已判定为拖拽滚动 */
+} we_dropdown_obj_t;
+
+/**
+ * @brief 初始化下拉控件并挂载到 LCD 对象链表。
+ * @param obj 目标控件对象指针。
+ * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param x 左上角 X 坐标。
+ * @param y 左上角 Y 坐标。
+ * @param w 主框宽度（像素）。
+ * @param h 主框高度（像素），同时作为列表项默认高度。
+ * @param font 字体资源指针。
+ * @return 无。
+ */
+void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
+                          int16_t x, int16_t y, int16_t w, int16_t h,
+                          const unsigned char *font);
+
+/**
+ * @brief 绑定选项数组（控件只保存指针，不复制内容）。
+ * @param obj 目标控件对象指针。
+ * @param options 选项数组指针，需在控件生命周期内保持有效。
+ * @param option_cnt 选项个数。
+ * @return 无。
+ */
+void we_dropdown_set_options(we_dropdown_obj_t *obj,
+                             const we_dropdown_option_t *options,
+                             uint16_t option_cnt);
+
+/**
+ * @brief 设置当前选中项并刷新主框显示。
+ * @param obj 目标控件对象指针。
+ * @param index 选中项索引，越界或指向禁用项时忽略。
+ * @return 无。
+ */
+void we_dropdown_set_selected(we_dropdown_obj_t *obj, int16_t index);
+
+/**
+ * @brief 获取当前选中项索引。
+ * @param obj 目标控件对象指针。
+ * @return 选中项索引，未选时为 -1。
+ */
+int16_t we_dropdown_get_selected(const we_dropdown_obj_t *obj);
+
+/**
+ * @brief 获取当前选中项关联值。
+ * @param obj 目标控件对象指针。
+ * @return 选中项 value，未选时为 0。
+ */
+int32_t we_dropdown_get_value(const we_dropdown_obj_t *obj);
+
+/**
+ * @brief 设置选中项改变回调。
+ * @param obj 目标控件对象指针。
+ * @param cb 回调函数指针。
+ * @return 无。
+ */
+void we_dropdown_set_changed_cb(we_dropdown_obj_t *obj, we_dropdown_changed_cb_t cb);
+
+/**
+ * @brief 展开下拉列表（占用唯一 popup slot）。
+ * @param obj 目标控件对象指针。
+ * @return 无。
+ */
+void we_dropdown_open(we_dropdown_obj_t *obj);
+
+/**
+ * @brief 收起下拉列表。
+ * @param obj 目标控件对象指针。
+ * @return 无。
+ */
+void we_dropdown_close(we_dropdown_obj_t *obj);
+
+/**
+ * @brief 切换下拉列表展开/收起状态。
+ * @param obj 目标控件对象指针。
+ * @return 无。
+ */
+void we_dropdown_toggle(we_dropdown_obj_t *obj);
+
+/**
+ * @brief 设置 popup 最多同时可见的选项数量。
+ * @param obj 目标控件对象指针。
+ * @param count 可见项数量（至少 1）。
+ * @return 无。
+ */
+void we_dropdown_set_max_visible_items(we_dropdown_obj_t *obj, uint8_t count);
+
+/**
+ * @brief 设置列表项高度。
+ * @param obj 目标控件对象指针。
+ * @param item_h 单项高度（像素）。
+ * @return 无。
+ */
+void we_dropdown_set_item_height(we_dropdown_obj_t *obj, uint16_t item_h);
+
+/**
+ * @brief 删除下拉控件（如展开则先关闭 popup）。
+ * @param obj 目标控件对象指针。
+ * @return 无。
+ */
+void we_dropdown_obj_delete(we_dropdown_obj_t *obj);
+
+#endif

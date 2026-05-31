@@ -105,6 +105,13 @@ static inline void we_lcd_set_addr_port(uint16_t x0, uint16_t y0, uint16_t x1, u
 #define WE_CFG_DEBUG_DIRTY_RECT (0)
 #endif
 
+/* 控件性能压测开关
+ * 0: 关闭，正常按需重绘
+ * 1: 打开，每帧强制标脏所有控件，持续全量重绘以压测控件渲染性能 */
+#ifndef WE_CFG_DEBUG_PERF_STRESS
+#define WE_CFG_DEBUG_PERF_STRESS (0)
+#endif
+
 #ifndef WE_CFG_ENABLE_INDEXED_QOI
 #define WE_CFG_ENABLE_INDEXED_QOI (1)
 #endif

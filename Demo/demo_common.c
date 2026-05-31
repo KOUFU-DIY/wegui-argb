@@ -152,9 +152,24 @@ void we_demo_update_fps(we_lcd_t *lcd,
         return;
     }
 
+#if (WE_CFG_ENABLE_RENDER_STATS == 1)
     frames_now = lcd->stat_render_frames;
     delta_frames = frames_now - *last_frames;
     fps = (delta_frames * 1000U) / *fps_timer;
+#else
+    /* 未启用渲染统计时无法计算真实帧率，显示占位提示。 */
+    (void)frames_now;
+    (void)delta_frames;
+    (void)fps;
+    sprintf(fps_buf, "FPS --");
+    we_label_set_text(fps_label, fps_buf);
+    fps_x = we_demo_fps_x(lcd, fps_buf, fps_label->font);
+    fps_y = fps_label->base.y;
+    we_label_obj_set_pos(fps_label, fps_x, fps_y);
+    *last_frames = 0U;
+    *fps_timer = 0U;
+    return;
+#endif
     sprintf(fps_buf, "FPS %u", (unsigned)fps);
     we_label_set_text(fps_label, fps_buf);
     fps_x = we_demo_fps_x(lcd, fps_buf, fps_label->font);

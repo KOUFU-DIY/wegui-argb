@@ -28,6 +28,21 @@ if ($gcc) { Write-Host ("gcc: " + $gcc.Source) }
 if ($gxx) { Write-Host ("g++: " + $gxx.Source) }
 if ($mingwMake) { Write-Host ("mingw32-make: " + $mingwMake.Source) }
 
+# 把检测到的工具链 bin 目录前置到 PATH，确保 cc1.exe 等子进程优先加载
+# 与自己配套的 DLL（libisl / libmpc / libwinpthread / libstdc++ 等），
+# 而不是 PATH 上其它程序携带的不匹配旧版本。否则 gcc.exe 能启动，
+# 但它拉起的 cc1.exe 会静默加载失败，CMake 报 “The C compiler is broken”。
+$toolDirs = @()
+foreach ($tool in @($gcc, $gxx, $ninja, $cmake, $mingwMake)) {
+    if ($tool) {
+        $dir = Split-Path $tool.Source -Parent
+        if ($toolDirs -notcontains $dir) { $toolDirs += $dir }
+    }
+}
+if ($toolDirs.Count -gt 0) {
+    $env:PATH = ($toolDirs -join ';') + ';' + $env:PATH
+}
+
 $configureArgs = @(
     '-S', $simRoot,
     '-B', $buildDir
