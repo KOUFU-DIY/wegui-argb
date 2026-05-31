@@ -16,9 +16,24 @@
  * 不复制文本，省 RAM。
  * -------------------------------------------------------------------------- */
 
-/* 默认可见选项数（超出部分用 first_visible_idx 滚动） */
+/* 默认可见选项数（超出部分用 scroll_px 无级滚动） */
 #ifndef WE_DROPDOWN_DEF_MAX_VISIBLE
 #define WE_DROPDOWN_DEF_MAX_VISIBLE 4
+#endif
+
+/* 滚动条自动淡出：停止滚动后保持完全显示的时长（毫秒） */
+#ifndef WE_DROPDOWN_SB_HOLD_MS
+#define WE_DROPDOWN_SB_HOLD_MS 600U
+#endif
+
+/* 滚动条自动淡出：从完全显示淡出到完全透明的时长（毫秒） */
+#ifndef WE_DROPDOWN_SB_FADE_MS
+#define WE_DROPDOWN_SB_FADE_MS 400U
+#endif
+
+/* 滚动条空闲时淡出到的最低透明度（0~255），>0 表示常驻可见、不完全消失 */
+#ifndef WE_DROPDOWN_SB_IDLE_ALPHA
+#define WE_DROPDOWN_SB_IDLE_ALPHA 40U
 #endif
 
 /* 单个选项 */
@@ -43,7 +58,7 @@ typedef struct we_dropdown_obj_t
     uint16_t option_cnt;
     int16_t selected_idx;     /* 当前选中项，-1 表示未选 */
     int16_t hover_idx;        /* popup 中当前按下高亮项，-1 表示无 */
-    uint16_t first_visible_idx; /* popup 顶部第一个可见项 */
+    int32_t scroll_px;        /* popup 内容向上滚动的像素偏移（无级，0=顶部对齐） */
     uint8_t opened;           /* 是否已展开 */
     uint8_t pressed;          /* 主框是否处于按下态 */
     uint8_t enabled;          /* 是否可交互 */
@@ -54,8 +69,12 @@ typedef struct we_dropdown_obj_t
     we_dropdown_changed_cb_t changed_cb;
     /* --- popup 内部拖拽滚动状态，无需外部访问 --- */
     int16_t drag_start_y;       /* 按下时的 Y 坐标 */
-    uint16_t drag_start_first;  /* 按下时的 first_visible_idx */
+    int32_t drag_start_scroll;  /* 按下时的 scroll_px */
     uint8_t dragging;           /* 本次触摸是否已判定为拖拽滚动 */
+    /* --- 滚动条自动淡出状态，由每对象周期任务驱动 --- */
+    uint8_t  sb_alpha;          /* 滚动条当前透明度（0~255），0=完全隐藏 */
+    uint16_t sb_idle_ms;        /* 自上次滚动以来累计的空闲毫秒 */
+    int8_t   sb_task_id;        /* 淡出动画 task 槽，-1 表示未注册 */
 } we_dropdown_obj_t;
 
 /**

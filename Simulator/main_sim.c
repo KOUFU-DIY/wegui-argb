@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
      * 21 = stepper
      * 22 = indicator
      */
-    demo_id = 22;
+    demo_id = 20;
 
     we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lcd_set_addr, LCD_FLUSH_PORT,
                 we_input_port_read, we_storage_port_read);

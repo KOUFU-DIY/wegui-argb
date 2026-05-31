@@ -22,6 +22,9 @@
 /* 弹出列表与主框之间的间隙（像素）。 */
 #define _DD_POPUP_GAP       3
 
+/* 判定为拖拽滚动（而非点选）的位移阈值（像素）。超过即进入无级滚动。 */
+#define _DD_DRAG_THRESHOLD  5
+
 /**
  * @brief 计算 popup 区域：优先向下展开，下方不足则向上，均不足取空间更大方向并限高。
  * @param d 下拉控件指针。
@@ -245,20 +248,117 @@ static void _dropdown_draw_cb(void *ptr)
 }
 
 /**
- * @brief 当前可见项数量（受 max_visible_items 与 popup 实际高度共同约束）。
+ * @brief popup 可视区域像素高度。
  * @param d 下拉控件指针。
- * @return 可见项数量。
+ * @return popup 高度（像素）。
  */
-static uint16_t _dropdown_visible_count(we_dropdown_obj_t *d)
+static int16_t _dropdown_popup_h(we_dropdown_obj_t *d)
 {
     we_area_t *a = &d->base.lcd->popup_layer.area;
-    uint16_t fit = (uint16_t)((a->y1 - a->y0 + 1) / (int16_t)d->item_h);
-    uint16_t rest = (uint16_t)(d->option_cnt - d->first_visible_idx);
-    if (fit > rest)
-        fit = rest;
-    if (fit > d->max_visible_items)
-        fit = d->max_visible_items;
-    return fit;
+    return (int16_t)(a->y1 - a->y0 + 1);
+}
+
+/**
+ * @brief 内容总高度与可视高度之差，即 scroll_px 的最大可滚动像素（>=0）。
+ * @param d 下拉控件指针。
+ * @return 最大滚动像素，内容不溢出时为 0。
+ */
+static int32_t _dropdown_max_scroll(we_dropdown_obj_t *d)
+{
+    int32_t content_h = (int32_t)d->option_cnt * (int32_t)d->item_h;
+    int32_t view_h = (int32_t)_dropdown_popup_h(d);
+    int32_t m = content_h - view_h;
+    return (m > 0) ? m : 0;
+}
+
+/**
+ * @brief 唤醒滚动条：透明度拉满、空闲计时清零（随后由淡出 task 自动隐藏）。
+ *        仅当内容确实可滚动时才生效。
+ * @param d 下拉控件指针。
+ * @return 无。
+ */
+static void _dropdown_sb_wake(we_dropdown_obj_t *d)
+{
+    if (_dropdown_max_scroll(d) == 0)
+        return; /* 不可滚动，无需显示滚动条 */
+    d->sb_idle_ms = 0U;
+    if (d->sb_alpha != _DD_SB_THUMB_OPA)
+    {
+        d->sb_alpha = _DD_SB_THUMB_OPA;
+        we_popup_layer_invalidate(d->base.lcd);
+    }
+}
+
+/**
+ * @brief 将 scroll_px 夹紧到 [0, max_scroll] 并按需标脏。
+ * @param d 下拉控件指针。
+ * @param new_scroll 目标滚动像素。
+ * @return 无。
+ */
+static void _dropdown_scroll_to(we_dropdown_obj_t *d, int32_t new_scroll)
+{
+    int32_t max_scroll = _dropdown_max_scroll(d);
+
+    if (new_scroll < 0)
+        new_scroll = 0;
+    if (new_scroll > max_scroll)
+        new_scroll = max_scroll;
+
+    if (new_scroll != d->scroll_px)
+    {
+        d->scroll_px = new_scroll;
+        _dropdown_sb_wake(d); /* 滚动即唤醒滚动条 */
+        we_popup_layer_invalidate(d->base.lcd);
+    }
+}
+
+/**
+ * @brief 滚动条淡出周期任务：popup 打开且滚动条可见时，
+ *        空闲超过 HOLD 后按 FADE 时长线性淡出到完全透明。
+ * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param user_data 控件对象指针。
+ * @param elapsed_ms 本次调度经过的毫秒数。
+ * @return 无。
+ */
+static void _dropdown_sb_fade_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+{
+    we_dropdown_obj_t *d = (we_dropdown_obj_t *)user_data;
+    uint32_t step;
+
+    (void)lcd;
+    if (d == NULL || !d->opened || elapsed_ms == 0U)
+        return; /* 未展开：task 空转，不产生重绘 */
+    if (d->sb_alpha <= WE_DROPDOWN_SB_IDLE_ALPHA)
+        return; /* 已降到常驻最低透明度，无需继续淡出 */
+
+    /* 拖拽中保持完全显示，不淡出 */
+    if (d->dragging)
+    {
+        d->sb_idle_ms = 0U;
+        return;
+    }
+
+    /* 累计空闲时间（饱和到 HOLD+FADE，避免 uint16 溢出） */
+    if ((uint32_t)d->sb_idle_ms + elapsed_ms >= (uint32_t)(WE_DROPDOWN_SB_HOLD_MS + WE_DROPDOWN_SB_FADE_MS))
+        d->sb_idle_ms = (uint16_t)(WE_DROPDOWN_SB_HOLD_MS + WE_DROPDOWN_SB_FADE_MS);
+    else
+        d->sb_idle_ms = (uint16_t)(d->sb_idle_ms + elapsed_ms);
+
+    if (d->sb_idle_ms <= WE_DROPDOWN_SB_HOLD_MS)
+        return; /* 仍在保持期，维持峰值 */
+
+    /* 进入淡出期：alpha 从峰值线性递减到常驻最低值 IDLE_ALPHA（不到 0）。
+     * 步长按"峰值→0"的全程速率，使淡出手感与 FADE_MS 一致。 */
+    step = (uint32_t)_DD_SB_THUMB_OPA * (uint32_t)elapsed_ms / (uint32_t)WE_DROPDOWN_SB_FADE_MS;
+    if (step == 0U)
+        step = 1U; /* 保证慢主循环下也能前进 */
+
+    if ((uint32_t)d->sb_alpha > (uint32_t)WE_DROPDOWN_SB_IDLE_ALPHA + step)
+        d->sb_alpha = (uint8_t)((uint32_t)d->sb_alpha - step);
+    else
+        d->sb_alpha = WE_DROPDOWN_SB_IDLE_ALPHA; /* 收敛到常驻最低值 */
+
+    we_popup_layer_invalidate(d->base.lcd);
 }
 
 /**
@@ -285,6 +385,13 @@ static void _dropdown_fill_item_rounded(we_dropdown_obj_t *d, const we_area_t *a
     if (r > (uint16_t)pw / 2U) r = (uint16_t)(pw / 2U);
     if (r > (uint16_t)ph / 2U) r = (uint16_t)(ph / 2U);
 
+    /* 无级滚动下行可能部分超出 popup，y 范围夹紧到可视区，
+     * 既防越界写像素，又省掉 popup 外的覆盖率计算。 */
+    if (iy < a->y0)
+        iy = a->y0;
+    if (row_y1 > a->y1)
+        row_y1 = a->y1;
+
     /* 仅当本行接近 popup 上/下边缘时才需要 mask；中间行整体是直边，
      * 但统一走 mask 也只是多算覆盖率，逻辑简单、开销可接受。 */
     for (py = iy; py <= row_y1; py++)
@@ -301,28 +408,30 @@ static void _dropdown_fill_item_rounded(we_dropdown_obj_t *d, const we_area_t *a
 }
 
 /**
- * @brief 在 popup 右侧绘制半透明滚动条（轨道 + 滑块）。
+ * @brief 在 popup 右侧绘制半透明滚动条（无轨道，仅胶囊滑块）。
  *
- * 仅当选项总数超过可见数时显示。滑块高度按“可见数/总数”比例，
- * 位置按 first_visible_idx 在可滚动范围内的占比。纯绘制，不参与交互。
+ * 仅当内容总高超过可视高度时显示。滑块高度按“可视高/内容总高”比例，
+ * 位置按 scroll_px 在可滚动像素范围内的占比。纯绘制，不参与交互。
  * @param d 下拉控件指针。
  * @param a popup 区域（屏幕绝对坐标）。
- * @param vis 当前可见项数。
  * @return 无。
  */
-static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a, uint16_t vis)
+static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a)
 {
     we_lcd_t *lcd = d->base.lcd;
     int16_t ph = (int16_t)(a->y1 - a->y0 + 1);
+    int32_t content_h = (int32_t)d->option_cnt * (int32_t)d->item_h;
+    int32_t max_scroll = _dropdown_max_scroll(d);
     int16_t track_x;
     int16_t track_y0;
     int16_t track_h;
     int16_t thumb_h;
     int16_t thumb_y;
-    uint16_t max_first;
 
-    if (d->option_cnt <= vis || vis == 0U)
+    if (max_scroll == 0 || content_h == 0)
         return; /* 无需滚动 */
+    if (d->sb_alpha == 0U)
+        return; /* alpha 为 0（未唤醒/不可滚动）时不绘制 */
 
     /* 轨道：上下各留 radius 像素，避免压到圆角；宽度固定。 */
     track_x = (int16_t)(a->x1 - _DD_SB_MARGIN - _DD_SB_WIDTH + 1);
@@ -331,26 +440,22 @@ static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a, u
     if (track_h < (int16_t)d->item_h)
         track_h = ph; /* 圆角过大时退化为整高轨道 */
 
-    /* 滑块高度 = 轨道高 * 可见数 / 总数，下限保证可见。 */
-    thumb_h = (int16_t)((int32_t)track_h * vis / d->option_cnt);
+    /* 滑块高度 = 轨道高 * 可视高 / 内容总高，下限保证可见。 */
+    thumb_h = (int16_t)((int32_t)track_h * ph / content_h);
     if (thumb_h < 8)
         thumb_h = 8;
     if (thumb_h > track_h)
         thumb_h = track_h;
 
-    /* 滑块位置 = 在 [0, track_h - thumb_h] 内按滚动进度插值。 */
-    max_first = (uint16_t)(d->option_cnt - vis);
-    thumb_y = track_y0;
-    if (max_first > 0U)
-    {
-        thumb_y = (int16_t)(track_y0 +
-                  (int32_t)(track_h - thumb_h) * d->first_visible_idx / max_first);
-    }
+    /* 滑块位置 = 在 [0, track_h - thumb_h] 内按滚动像素进度插值。 */
+    thumb_y = (int16_t)(track_y0 +
+              (int32_t)(track_h - thumb_h) * d->scroll_px / max_scroll);
 
-    /* 仅绘制半透明胶囊滑块，不画轨道；圆角=半宽 → 两头自然收成半圆。 */
+    /* 仅绘制半透明胶囊滑块，不画轨道；圆角=半宽 → 两头自然收成半圆。
+     * 透明度取当前淡出值 sb_alpha（由淡出 task 推进）。 */
     we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y, _DD_SB_WIDTH,
                                      (uint16_t)thumb_h, _DD_SB_WIDTH / 2U,
-                                     _DD_COL_SCROLLBAR, _DD_SB_THUMB_OPA);
+                                     _DD_COL_SCROLLBAR, d->sb_alpha);
 }
 
 /**
@@ -365,43 +470,73 @@ static void _dropdown_popup_draw(void *owner)
     we_area_t *a = &lcd->popup_layer.area;
     int16_t pw = (int16_t)(a->x1 - a->x0 + 1);
     int16_t ph = (int16_t)(a->y1 - a->y0 + 1);
-    uint16_t vis = _dropdown_visible_count(d);
-    uint16_t i;
+    int16_t first;          /* 第一个（可能半露）可见项索引 */
+    int16_t top_ofs;        /* 首项被裁掉的顶部像素数（0..item_h-1） */
+    int16_t iy;             /* 当前行顶部 Y（可为负 / 超出 popup 底部） */
+    uint16_t idx;
+    /* 行循环期间把 PFB 带纵向收窄到 popup 内，半露行的文本/高亮即便其
+     * box 超出 popup 上/下边，也不会越过 popup 边缘渗到 gap 或主框上。 */
+    uint16_t saved_ys = lcd->pfb_y_start;
+    uint16_t saved_ye = lcd->pfb_y_end;
+    colour_t *saved_gram = lcd->pfb_gram;
+    int16_t clip_y0 = WE_MAX((int16_t)saved_ys, a->y0);
+    int16_t clip_y1 = WE_MIN((int16_t)saved_ye, a->y1);
 
     /* 列表整体背景：用比主框更亮的悬浮色，圆角与主框一致。 */
     we_draw_round_rect_analytic_fill(lcd, a->x0, a->y0, (uint16_t)pw, (uint16_t)ph,
                                      d->radius, _DD_COL_POPUP_BG, 255U);
 
-    for (i = 0; i < vis; i++)
+    /* 无级滚动：scroll_px 拆成“首项索引 + 首项顶部裁剪量”。 */
+    first = (int16_t)(d->scroll_px / (int32_t)d->item_h);
+    top_ofs = (int16_t)(d->scroll_px % (int32_t)d->item_h);
+    iy = (int16_t)(a->y0 - top_ofs);
+
+    if (clip_y0 <= clip_y1)
     {
-        uint16_t idx = (uint16_t)(d->first_visible_idx + i);
-        int16_t iy = (int16_t)(a->y0 + i * d->item_h);
-        const we_dropdown_option_t *op = &d->options[idx];
-        colour_t tc;
+        lcd->pfb_gram = saved_gram + (clip_y0 - (int16_t)saved_ys) * lcd->pfb_width;
+        lcd->pfb_y_start = (uint16_t)clip_y0;
+        lcd->pfb_y_end = (uint16_t)clip_y1;
 
-        if ((int16_t)idx == d->hover_idx)
+        /* 从首项起逐行向下绘制，直到行顶超出 popup 底边。 */
+        for (idx = (uint16_t)first; idx < d->option_cnt; idx++)
         {
-            /* 按下高亮：整行铺选中背景色，并跟随 popup 圆角裁剪。 */
-            _dropdown_fill_item_rounded(d, a, iy, _DD_COL_SEL_BG);
-            tc = _DD_COL_SEL_TEXT;
-        }
-        else if ((int16_t)idx == d->selected_idx)
-        {
-            tc = _DD_COL_SEL_BG; /* 当前选中项用强调色文本标识 */
-        }
-        else
-        {
-            tc = op->disabled ? _DD_COL_TEXT_DIS : _DD_COL_TEXT;
-        }
-        if (op->disabled && (int16_t)idx != d->hover_idx)
-            tc = _DD_COL_TEXT_DIS;
+            const we_dropdown_option_t *op = &d->options[idx];
+            colour_t tc;
 
-        _dropdown_draw_text_clipped(lcd, d->font, op->text, tc,
-                                    a->x0, iy, pw, (int16_t)d->item_h, 8, 255U);
+            if (iy > a->y1)
+                break; /* 已画到 popup 底部之外 */
+
+            if ((int16_t)idx == d->hover_idx)
+            {
+                /* 按下高亮：整行铺选中背景色，并跟随 popup 圆角裁剪。 */
+                _dropdown_fill_item_rounded(d, a, iy, _DD_COL_SEL_BG);
+                tc = _DD_COL_SEL_TEXT;
+            }
+            else if ((int16_t)idx == d->selected_idx)
+            {
+                tc = _DD_COL_SEL_BG; /* 当前选中项用强调色文本标识 */
+            }
+            else
+            {
+                tc = op->disabled ? _DD_COL_TEXT_DIS : _DD_COL_TEXT;
+            }
+            if (op->disabled && (int16_t)idx != d->hover_idx)
+                tc = _DD_COL_TEXT_DIS;
+
+            /* 文本按 popup y 边界裁剪，半露行的文字会被裁掉一截，符合自由滚动表现。 */
+            _dropdown_draw_text_clipped(lcd, d->font, op->text, tc,
+                                        a->x0, iy, pw, (int16_t)d->item_h, 8, 255U);
+
+            iy = (int16_t)(iy + (int16_t)d->item_h);
+        }
+
+        lcd->pfb_y_start = saved_ys;
+        lcd->pfb_y_end = saved_ye;
+        lcd->pfb_gram = saved_gram;
     }
 
-    /* 选项超出可见范围时，叠加半透明滚动条。 */
-    _dropdown_draw_scrollbar(d, a, vis);
+    /* 内容超出可视高度时，叠加半透明滚动条。 */
+    _dropdown_draw_scrollbar(d, a);
 }
 
 /**
@@ -456,47 +591,18 @@ static uint8_t _dropdown_event_cb(void *ptr, we_event_t event, we_indev_data_t *
 static int16_t _dropdown_popup_hit(we_dropdown_obj_t *d, int16_t px, int16_t py)
 {
     we_area_t *a = &d->base.lcd->popup_layer.area;
-    uint16_t vis = _dropdown_visible_count(d);
-    int16_t rel;
-    uint16_t row;
+    int32_t content_y;
+    int16_t idx;
 
     if (px < a->x0 || px > a->x1 || py < a->y0 || py > a->y1)
         return -1;
 
-    rel = (int16_t)(py - a->y0);
-    row = (uint16_t)(rel / (int16_t)d->item_h);
-    if (row >= vis)
+    /* 触摸点映射到内容坐标系（含滚动偏移），再整除项高得到索引。 */
+    content_y = (int32_t)(py - a->y0) + d->scroll_px;
+    idx = (int16_t)(content_y / (int32_t)d->item_h);
+    if (idx < 0 || idx >= (int16_t)d->option_cnt)
         return -1;
-    return (int16_t)(d->first_visible_idx + row);
-}
-
-/**
- * @brief 滚动列表使顶部可见项为 new_first（带边界夹紧并标脏）。
- * @param d 下拉控件指针。
- * @param new_first 目标顶部项索引。
- * @return 无。
- */
-static void _dropdown_scroll_to(we_dropdown_obj_t *d, int16_t new_first)
-{
-    we_area_t *a = &d->base.lcd->popup_layer.area;
-    uint16_t fit = (uint16_t)((a->y1 - a->y0 + 1) / (int16_t)d->item_h);
-    int16_t max_first;
-
-    if (fit > d->max_visible_items)
-        fit = d->max_visible_items;
-    max_first = (int16_t)d->option_cnt - (int16_t)fit;
-    if (max_first < 0)
-        max_first = 0;
-    if (new_first < 0)
-        new_first = 0;
-    if (new_first > max_first)
-        new_first = max_first;
-
-    if ((uint16_t)new_first != d->first_visible_idx)
-    {
-        d->first_visible_idx = (uint16_t)new_first;
-        we_popup_layer_invalidate(d->base.lcd);
-    }
+    return idx;
 }
 
 /**
@@ -517,7 +623,7 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
     if (event == WE_EVENT_PRESSED)
     {
         d->drag_start_y = data->y;
-        d->drag_start_first = d->first_visible_idx;
+        d->drag_start_scroll = d->scroll_px;
         d->dragging = 0U;
         if (inside)
         {
@@ -534,18 +640,18 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
     {
         int16_t dy = (int16_t)(data->y - d->drag_start_y);
         int16_t adyy = (dy >= 0) ? dy : (int16_t)(-dy);
-        if (adyy >= (int16_t)(d->item_h / 2))
+        if (adyy >= _DD_DRAG_THRESHOLD)
             d->dragging = 1U;
 
         if (d->dragging)
         {
-            int16_t steps = (int16_t)(dy / (int16_t)d->item_h);
             if (d->hover_idx != -1)
             {
                 d->hover_idx = -1; /* 拖拽中取消按下高亮 */
                 we_popup_layer_invalidate(d->base.lcd);
             }
-            _dropdown_scroll_to(d, (int16_t)((int16_t)d->drag_start_first - steps));
+            /* 无级滚动：手指下移 dy>0 → 内容下移 → scroll_px 减小，直接跟手。 */
+            _dropdown_scroll_to(d, d->drag_start_scroll - (int32_t)dy);
         }
         return 1U;
     }
@@ -599,13 +705,6 @@ void we_dropdown_open(we_dropdown_obj_t *obj)
     if (obj->options == NULL || obj->option_cnt == 0U)
         return;
 
-    /* 滚动到能看到当前选中项的位置 */
-    obj->first_visible_idx = 0U;
-    if (obj->selected_idx >= obj->max_visible_items)
-    {
-        obj->first_visible_idx =
-            (uint16_t)(obj->selected_idx - obj->max_visible_items + 1);
-    }
     obj->hover_idx = -1;
     obj->dragging = 0U;
 
@@ -613,7 +712,28 @@ void we_dropdown_open(we_dropdown_obj_t *obj)
     we_popup_layer_open(obj->base.lcd, WE_POPUP_TYPE_DROPDOWN, obj, &area,
                         _dropdown_popup_draw, _dropdown_popup_event, NULL);
 
+    /* 滚动到能看到当前选中项的位置：让选中项尽量靠近可视区底部，
+     * 再由 _dropdown_scroll_to 夹紧到 [0, max_scroll]。popup 已打开，
+     * max_scroll 可用。 */
+    obj->scroll_px = 0;
+    if (obj->selected_idx > 0)
+    {
+        int32_t view_h = (int32_t)_dropdown_popup_h(obj);
+        int32_t sel_bottom = (int32_t)(obj->selected_idx + 1) * (int32_t)obj->item_h;
+        int32_t want = sel_bottom - view_h;
+        if (want > 0)
+            _dropdown_scroll_to(obj, want);
+    }
+
     obj->opened = 1U;
+    /* 展开期间注册淡出 task；展开即让滚动条短暂可见，提示"此处可滚动"，
+     * 随后由淡出 task 自动隐藏。 */
+    obj->sb_alpha = 0U;
+    obj->sb_idle_ms = 0U;
+    if (obj->sb_task_id < 0)
+        obj->sb_task_id = _we_gui_task_register_with_data(obj->base.lcd,
+                                                          _dropdown_sb_fade_task, obj);
+    _dropdown_sb_wake(obj);
     we_obj_invalidate((we_obj_t *)obj); /* 重绘主框箭头方向 */
 }
 
@@ -630,6 +750,14 @@ void we_dropdown_close(we_dropdown_obj_t *obj)
     obj->opened = 0U;
     obj->hover_idx = -1;
     obj->dragging = 0U;
+    obj->sb_alpha = 0U;   /* 复位淡出状态，下次展开重新计时 */
+    obj->sb_idle_ms = 0U;
+    /* 释放展开期间占用的淡出 task 槽。 */
+    if (obj->sb_task_id >= 0 && obj->base.lcd != NULL)
+    {
+        _we_gui_task_unregister(obj->base.lcd, obj->sb_task_id);
+        obj->sb_task_id = -1;
+    }
     we_popup_layer_close(obj->base.lcd, obj);
     we_obj_invalidate((we_obj_t *)obj); /* 重绘主框箭头方向 */
 }
@@ -719,7 +847,7 @@ void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
     obj->option_cnt = 0U;
     obj->selected_idx = -1;
     obj->hover_idx = -1;
-    obj->first_visible_idx = 0U;
+    obj->scroll_px = 0;
     obj->opened = 0U;
     obj->pressed = 0U;
     obj->enabled = 1U;
@@ -731,10 +859,15 @@ void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
     obj->font = font;
     obj->changed_cb = NULL;
     obj->drag_start_y = 0;
-    obj->drag_start_first = 0U;
+    obj->drag_start_scroll = 0;
     obj->dragging = 0U;
+    obj->sb_alpha = 0U;
+    obj->sb_idle_ms = 0U;
+    obj->sb_task_id = -1;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
+    /* 滚动条淡出 task 仅在展开期间注册（见 we_dropdown_open），
+     * 因全屏同时只有一个 popup，最多占用一个 task 槽。 */
     we_obj_invalidate((we_obj_t *)obj);
 }
 
@@ -755,7 +888,7 @@ void we_dropdown_set_options(we_dropdown_obj_t *obj,
     obj->option_cnt = option_cnt;
     if (obj->selected_idx >= (int16_t)option_cnt)
         obj->selected_idx = -1;
-    obj->first_visible_idx = 0U;
+    obj->scroll_px = 0;
     we_obj_invalidate((we_obj_t *)obj);
 }
 
@@ -852,6 +985,11 @@ void we_dropdown_obj_delete(we_dropdown_obj_t *obj)
     if (obj->base.lcd != NULL && we_popup_layer_is_owner(obj->base.lcd, obj))
         we_popup_layer_close(obj->base.lcd, obj);
     obj->opened = 0U;
+    if (obj->sb_task_id >= 0 && obj->base.lcd != NULL)
+    {
+        _we_gui_task_unregister(obj->base.lcd, obj->sb_task_id);
+        obj->sb_task_id = -1;
+    }
     we_obj_delete((we_obj_t *)obj);
 }
 
