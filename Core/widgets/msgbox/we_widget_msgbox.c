@@ -952,6 +952,7 @@ eased = obj->anim_hiding ? _msgbox_ease_hide(t) : _msgbox_ease_slide(t);
 static const we_class_t _popup_class = {
     .draw_cb  = _popup_draw_cb,
     .event_cb = _popup_event_cb,
+        .set_pos_cb = NULL
 };
 
 /**
@@ -984,8 +985,6 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
                                we_popup_action_cb_t cancel_cb,
                                we_popup_layout_t layout)
 {
-    we_obj_t *tail;
-
     if (obj == NULL || lcd == NULL)
         return;
 
@@ -1027,17 +1026,7 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->anim_from_y = obj->hidden_y;
     obj->anim_to_y = obj->target_y;
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 }
 
 /**

@@ -96,7 +96,7 @@ static uint8_t _img_type_supported(imgarry_type_t dat_type)
  */
 void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, const uint8_t *img, uint8_t opacity)
 {
-    static const we_class_t _img_class = {.draw_cb = _img_draw_cb, .event_cb = NULL};
+    static const we_class_t _img_class = {.draw_cb = _img_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
     if (obj == NULL || lcd == NULL || img == NULL)
     {
@@ -114,19 +114,7 @@ void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, con
     obj->img_src = img;
     obj->opacity = opacity;
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-        {
-            tail = tail->next;
-        }
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0 && obj->base.class_p != NULL)
     {

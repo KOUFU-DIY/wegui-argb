@@ -231,8 +231,9 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
 
     static const we_class_t _cb_class = {
         .draw_cb = _checkbox_draw_cb,
-        .event_cb = _checkbox_event_cb
-    };
+        .event_cb = _checkbox_event_cb,
+        .set_pos_cb = NULL
+};
 
     obj->base.lcd = lcd;
     obj->base.x = x;
@@ -256,17 +257,7 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
 
     /* 加入显示链表 */
     obj->base.next = NULL;
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
 we_obj_invalidate((we_obj_t *)obj);
 }

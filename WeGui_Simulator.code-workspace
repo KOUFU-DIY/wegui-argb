@@ -33,6 +33,7 @@
 		},
 		"editor.formatOnSave": true,
 		"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, BreakBeforeBraces: Allman, IndentWidth: 4, ColumnLimit: 120 }",
-		"editor.defaultFormatter": "ms-vscode.cpptools"
+		"editor.defaultFormatter": "ms-vscode.cpptools",
+		"powershell.cwd": "Simulator (模拟器)"
 	}
 }

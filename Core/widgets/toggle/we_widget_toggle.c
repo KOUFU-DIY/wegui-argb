@@ -30,7 +30,8 @@ static void _toggle_anim_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_m
 
 static const we_class_t _toggle_class = {
     .draw_cb  = _toggle_draw_cb,
-    .event_cb = _toggle_event_cb
+    .event_cb = _toggle_event_cb,
+        .set_pos_cb = NULL
 };
 
 /* --------------------------------------------------------------------------
@@ -376,17 +377,7 @@ void we_toggle_obj_init(we_toggle_obj_t *obj, we_lcd_t *lcd,
 #endif
 
     /* 加入显示链表（追加到链尾，保持 Z 轴顺序） */
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
 we_obj_invalidate((we_obj_t *)obj);
 }

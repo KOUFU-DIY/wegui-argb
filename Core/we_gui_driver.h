@@ -197,11 +197,33 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     typedef void (*we_input_read_cb_t)(we_indev_data_t *data);
     typedef void (*we_storage_read_cb_t)(uint32_t addr, uint8_t buf[], uint32_t len);
 
+    typedef enum
+    {
+        WE_POPUP_TYPE_NONE = 0,
+        WE_POPUP_TYPE_DROPDOWN,
+        WE_POPUP_TYPE_MENU,
+        WE_POPUP_TYPE_DIALOG,
+        WE_POPUP_TYPE_KEYBOARD,
+        WE_POPUP_TYPE_TOOLTIP,
+    } we_popup_type_t;
+
+    typedef struct
+    {
+        uint8_t active;
+        uint8_t type; /* stores we_popup_type_t */
+        void *owner;
+        we_area_t area;
+        void (*draw_cb)(void *owner);
+        uint8_t (*event_cb)(void *owner, we_event_t event, we_indev_data_t *data);
+        void (*close_cb)(void *owner);
+    } we_popup_layer_t;
+
     // 控件类描述符 (存放于 Flash，节省 RAM)
     typedef struct
     {
         void (*draw_cb)(void *obj);
         uint8_t (*event_cb)(void *obj, we_event_t event, we_indev_data_t *data);
+        void (*set_pos_cb)(void *obj, int16_t x, int16_t y);
     } we_class_t;
 
     // 所有控件的绝对基类 (Base Object)
@@ -254,6 +276,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         int16_t gesture_press_y;                                  // 手势识别：按下时 Y 坐标
         we_input_read_cb_t input_read_cb;                         // 当前 LCD 绑定的输入读取接口
         we_storage_read_cb_t storage_read_cb;                     // 当前 LCD 绑定的外部存储读取接口
+        we_popup_layer_t popup_layer;                             // LCD 级单 overlay popup
 
         /* 渲染统计信息
          *
@@ -265,9 +288,11 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
          * 这样在 STM32 真机上看性能时，不会只剩一个 FPS 数字，
          * 还能一起判断是否是“脏矩形太碎”导致效率下降。
          */
+#if (WE_CFG_ENABLE_RENDER_STATS == 1)
         uint32_t stat_render_frames;
         uint32_t stat_pfb_pushes;
         uint32_t stat_pushed_pixels;
+#endif
     } we_lcd_t;
 
     typedef struct
@@ -297,6 +322,23 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @return 无
      */
     void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, int16_t h);
+    /**
+     * @brief 登记一个矩形脏区，但排除其中一个安全空洞矩形
+     * @param mgr 传入：脏矩形管理器指针
+     * @param x 传入：整体区域左上角 X 坐标
+     * @param y 传入：整体区域左上角 Y 坐标
+     * @param w 传入：整体区域宽度
+     * @param h 传入：整体区域高度
+     * @param ex 传入：排除区域左上角 X 坐标
+     * @param ey 传入：排除区域左上角 Y 坐标
+     * @param ew 传入：排除区域宽度
+     * @param eh 传入：排除区域高度
+     * @return 无
+     * @note 该函数只在新增脏区时把 bbox-hole 拆成最多 4 个矩形提交，
+     *       不会从已有 dirty list 中删除任何区域。
+     */
+    void we_dirty_invalidate_exclude(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, int16_t h,
+                                     int16_t ex, int16_t ey, int16_t ew, int16_t eh);
     /**
      * @brief 取出下一个待刷新的脏矩形
      * @param mgr 传入：脏矩形管理器指针
@@ -494,6 +536,20 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_obj_set_pos(we_obj_t *obj, int16_t new_x, int16_t new_y);
     /**
+     * @brief 将对象追加到指定对象链表尾部
+     * @param head_p 传入：链表头指针地址
+     * @param obj 传入：待追加对象
+     * @return 无
+     */
+    void we_obj_append_to_list(we_obj_t **head_p, we_obj_t *obj);
+    /**
+     * @brief 将对象追加到 LCD 顶层对象链表尾部
+     * @param lcd 传入：GUI 屏幕上下文指针
+     * @param obj 传入：待追加对象
+     * @return 无
+     */
+    void we_obj_attach_to_lcd(we_lcd_t *lcd, we_obj_t *obj);
+    /**
      * @brief 删除一个对象
      * @param obj 传入：待删除对象指针
      * @return 无
@@ -525,6 +581,35 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @note 标脏区域会沿 parent 链逐层裁剪，适合局部内容更新。
      */
     void we_obj_invalidate_area(we_obj_t *obj, int16_t x, int16_t y, int16_t w, int16_t h);
+    /**
+     * @brief 按对象区域标脏，但排除其中一个安全空洞矩形
+     * @param obj 传入：目标对象指针
+     * @param x 传入：整体区域左上角 X 坐标（屏幕绝对坐标）
+     * @param y 传入：整体区域左上角 Y 坐标（屏幕绝对坐标）
+     * @param w 传入：整体区域宽度
+     * @param h 传入：整体区域高度
+     * @param ex 传入：排除区域左上角 X 坐标（屏幕绝对坐标）
+     * @param ey 传入：排除区域左上角 Y 坐标（屏幕绝对坐标）
+     * @param ew 传入：排除区域宽度
+     * @param eh 传入：排除区域高度
+     * @return 无
+     * @note 标脏区域会沿 parent 链逐层裁剪；该接口只拆分本次新增脏区，
+     *       不会从已有 dirty list 中删除任何区域。
+     */
+    void we_obj_invalidate_area_exclude(we_obj_t *obj, int16_t x, int16_t y, int16_t w, int16_t h,
+                                        int16_t ex, int16_t ey, int16_t ew, int16_t eh);
+
+    /* === LCD 级 overlay popup API === */
+    void we_popup_layer_open(we_lcd_t *lcd, uint8_t type, void *owner,
+                             const we_area_t *area,
+                             void (*draw_cb)(void *owner),
+                             uint8_t (*event_cb)(void *owner, we_event_t event, we_indev_data_t *data),
+                             void (*close_cb)(void *owner));
+    void we_popup_layer_close(we_lcd_t *lcd, void *owner);
+    void we_popup_layer_close_any(we_lcd_t *lcd);
+    uint8_t we_popup_layer_is_owner(we_lcd_t *lcd, void *owner);
+    void we_popup_layer_set_area(we_lcd_t *lcd, void *owner, const we_area_t *area);
+    void we_popup_layer_invalidate(we_lcd_t *lcd);
 
     /* === 图形绘制 API === */
     /**

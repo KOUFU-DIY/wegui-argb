@@ -103,7 +103,7 @@ we_draw_string(obj->base.lcd, obj->base.x, obj->base.y, obj->font, obj->text, ob
 }
 
 // =========================================================
-// ?? 控件生命周期 API
+// 控件生命周期 API
 // =========================================================
 
 /**
@@ -138,21 +138,11 @@ _label_get_text_bbox(font, text, &w, &h);
     obj->color = color;
     obj->opacity = opacity;
 
-    static const we_class_t _label_class = {.draw_cb = _label_draw_cb, .event_cb = NULL};
+    static const we_class_t _label_class = {.draw_cb = _label_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
     obj->base.class_p = &_label_class;
     obj->base.next = NULL;
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0 && w > 0 && h > 0)
     {

@@ -660,25 +660,12 @@ void we_img_ex_obj_init(we_img_ex_obj_t *obj, we_lcd_t *p_lcd, int16_t cx, int16
      * 如果后面你换测试素材，优先检查 lcd_res.c 里该资源的 dat_type。 */
     _img_ex_update_bbox(obj);
 
-    static const we_class_t _img_ex_class = {.draw_cb = we_img_ex_draw_cb, .event_cb = _img_ex_event_cb};
+    static const we_class_t _img_ex_class = {.draw_cb = we_img_ex_draw_cb, .event_cb = _img_ex_event_cb, .set_pos_cb = NULL};
 
     obj->base.class_p = &_img_ex_class;
     obj->base.next = NULL;
 
-    if (p_lcd->obj_list_head == NULL)
-    {
-        p_lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = p_lcd->obj_list_head;
-
-        while (tail->next != NULL)
-        {
-            tail = tail->next;
-        }
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(p_lcd, (we_obj_t *)obj);
 
 we_obj_invalidate((we_obj_t *)obj);
 }

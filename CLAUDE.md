@@ -4,11 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Lightweight embedded GUI framework for multiple MCU / SoC platforms, with dual-target support: STM32F103 hardware (Keil MDK-ARM AC5) and SDL2 PC simulator (CMake + MinGW/Ninja). The `Core` and `Demo` directories are shared between both targets; only the platform port layer differs.
+WeGui-ARGB is a lightweight embedded GUI framework for MCU / SoC targets plus an SDL2 PC simulator. The platform-independent GUI kernel and demos live in `Core/` and `Demo/`; each hardware/simulator target provides only the port layer, startup code, and build project.
+
+Primary targets currently present in this repository:
+- `Simulator/` — SDL2 PC simulator built with CMake + MinGW/Ninja or MinGW Makefiles.
+- `STM32F103/` — Keil MDK-ARM AC5 hardware target, with LCD, input, and W25Qxx external flash ports.
+- `STM32F030/` — Keil MDK-ARM AC5 hardware target, with LCD and input ports.
 
 Full API reference: `WEGUI_API_REFERENCE.md`.
 
 ## Build Commands
+
+### Simulator (CMake + MinGW)
+
+Use the repository wrapper scripts rather than calling CMake directly:
+
+```powershell
+# Clean configure + build
+powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1" -Clean
+
+# Incremental build
+powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1"
+
+# Run latest built simulator
+powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps1"
+```
+
+`Simulator/build_sim.ps1` auto-detects `ninja + gcc + g++` first and falls back to `mingw32-make + gcc + g++`. If the simulator build is stale or broken, delete `Simulator/build/` and rebuild with `-Clean`.
+
+`Simulator/CMakeLists.txt` globs core/widget sources (`../Core/*.c` and `../Core/widgets/*/*.c`, one directory level deep) but lists `DEMO_SOURCES` **explicitly**. Adding a new widget compiles automatically; adding a new demo requires appending its `demo_xxx.c` to `DEMO_SOURCES`. The glob is one level deep, so the deprecated `Core/widgets/控件废案/dropdown/` copy (two levels deep) is not compiled — only `Core/widgets/dropdown/` is.
 
 ### STM32F103 Hardware (Keil MDK-ARM AC5)
 
@@ -18,77 +42,71 @@ UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_ARGB"
 
 Build log: `STM32F103/MDK-ARM/Objects/Project.build_log.htm`
 
-Flash via CMSIS-DAP / DAPLink (pyOCD usable). If flashed content appears stale, verify build log timestamp before reflashing.
-
-### Simulator (CMake + MinGW)
+### STM32F030 Hardware (Keil MDK-ARM AC5)
 
 ```powershell
-# Preferred: use the repository build wrapper
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1" -Clean
-
-# Run latest build
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps1"
+UV4.exe -r "STM32F030\MDK-ARM\Project.uvprojx" -t "STM32F030"
 ```
 
-VS Code tasks in `.vscode/tasks.json` currently contain local MinGW / Keil examples. For a public clone, adjust those tool paths to match your own environment if you use the provided tasks.
+Build log: `STM32F030/MDK-ARM/Objects/Project.build_log.htm`
 
-If the simulator build is stale or broken, delete `Simulator/build/` contents and reconfigure.
+### VS Code Tasks
 
-### Tests / Validation
+`.vscode/tasks.json` currently provides simulator tasks (`sim: build`, `sim: clean and build`, `sim: run latest`, `sim: build and run`) and STM32F103 Keil tasks (`stm32: build (AC5)`, `stm32: rebuild (AC5)`, `stm32: open MDK project`). The Keil tasks depend on local VS Code settings such as `wegui.keilUv4Path`, `wegui.stm32ProjectFile`, and `wegui.stm32TargetName`.
 
-There is **no standalone automated test suite or lint target** in this repository. Validation is done by building one of the two targets and running a demo:
+## Tests / Validation
 
-- **Simulator smoke test**: build `wegui_sim`, run it, and verify the selected demo renders and animates correctly.
-- **Hardware smoke test**: build the Keil target, flash it, and verify the selected demo on the LCD.
+There is **no standalone automated test suite or lint target** in this repository. Validation is done by building a target and running one demo as an integration smoke test.
 
-Closest equivalent to a "single test": run one demo in isolation.
+Closest equivalent to a single test:
+- **Simulator**: change `demo_id` in `Simulator/main_sim.c` (currently line 51), rebuild, run `wegui_sim`, and verify rendering/animation/input behavior.
+- **STM32F103**: change `demo_id` in `STM32F103/main.c` (currently line 124), rebuild/flash, and verify on the LCD.
+- **STM32F030**: change `demo_id` in `STM32F030/main.c` (currently line 69), rebuild/flash, and verify on the LCD.
 
-- **Simulator**: change `demo_id` variable (line 47) in `Simulator/main_sim.c`, rebuild, then run `wegui_sim`.
-- **STM32** (`STM32F103/main.c`): change `demo_id` variable (line 135), then rebuild/flash.
-
-VS Code tasks in `.vscode/tasks.json` automate these steps (`sim: configure`, `sim: build`, `sim: build and run`, `stm32: build (AC5)`, `stm32: rebuild (AC5)`).
+Hardware flashing is done outside the build command (CMSIS-DAP / DAPLink / pyOCD are usable depending on the board). If flashed content appears stale, verify the relevant `.build_log.htm` timestamp before reflashing.
 
 ## Architecture
 
 ### Directory Layout
 
-- `Core/` — Platform-independent GUI kernel, widget implementations, dirty-rect engine
-- `Demo/` — Demo applications; each widget type has its own `demo_xxx.c`; `simple_widget_demos.h` declares all entry points
-- `STM32F103/` — Hardware MCU entry (`main.c`), Keil project, LCD SPI port implementations
-- `Simulator/` — SDL2 simulator entry (`main_sim.c`), SDL port (`sdl_port.c/h`), and simulator config (`we_sim_port_config.h`)
+- `Core/` — platform-independent GUI kernel, drawing, widget implementations, dirty-rectangle engine, image/font support.
+- `Demo/` — demo applications; each widget type has its own `demo_xxx.c`, with declarations in `simple_widget_demos.h`.
+- `Simulator/` — SDL2 entry (`main_sim.c`), SDL LCD/input/storage port (`sdl_port.c/h`), simulator config (`we_sim_port_config.h`), and build/run scripts.
+- `STM32F103/` — STM32F103 entry (`main.c`), Keil project, LCD SPI ports, button/input port, and W25Qxx external flash port.
+- `STM32F030/` — STM32F030 entry (`main.c`), Keil project, LCD SPI ports, and button/input port.
+- `tool/` — resource conversion and external-flash support tools (`bin2c`, `font2c`, `font2c_gui`, STM32F103 external flash download tooling).
 
-### Platform Port Config Chain
+### Platform Config Chain
 
-`we_user_config.h` (project root) is the unified config entry point — edit this first when tuning screen size, PFB rows, dirty strategy, or timer slot counts.
+`we_user_config.h` at the repository root is the unified user configuration entry point. Edit it first for screen size, color depth, PFB/GRAM rows, dirty strategy, timer counts, input/storage binding, and widget default tuning macros.
 
-`Core/we_gui_driver.h` includes `we_user_config.h` directly, while the platform routing header (`we_hw_port.h` at project root, or `STM32F103/Lcd_Port/we_port.h` for STM32-only builds) selects the correct platform config based on preprocessor defines:
+The core includes this config directly through `Core/we_gui_driver.h`. Platform routing then selects a target-specific LCD/port config through `we_hw_port.h` or an STM32-local port header:
 - `WE_SIMULATOR` → `Simulator/we_sim_port_config.h`
-- `WE_PLATFORM_CMS32C030` → CMS32C030 config
-- `WE_PLATFORM_CW32L012` → CW32L012 config
-- `WE_PLATFORM_AD15N` → AD15N config
-- default → `STM32F103/Lcd_Port/stm32f103_hw_config.h`
+- `WE_PLATFORM_STM32F030` → `STM32F030/Lcd_Port/stm32f030_hw_config.h`
+- `WE_PLATFORM_CMS32C030` → CMS32C030 config (referenced by router, not present in this checkout)
+- `WE_PLATFORM_CW32L012` → CW32L012 config (referenced by router, not present in this checkout)
+- `WE_PLATFORM_AD15N` → AD15N config (referenced by router)
+- default → STM32F103 config
 
-`stm32f103_hw_config.h` selects LCD IC (`LCD_IC`: `_ST7735`, `_ST7789V3`, `_ST7789VW`, `_ST7796S`, `_GC9A01`) and port type (`LCD_PORT`: `_HARD_4SPI`, `_DMA_4SPI`, etc.). It defines `lcd_set_addr`, `lcd_ic_init`, and `LCD_FLUSH_PORT` macros that connect to the concrete driver.
+Target hardware config headers select the LCD IC (`LCD_IC`) and physical LCD port (`LCD_PORT`), then define `lcd_set_addr`, `lcd_ic_init`, and `LCD_FLUSH_PORT`/flush callbacks that bind the GUI core to the concrete driver.
 
-`Core/we_gui_config.h` enforces that every required config macro (`LCD_DEEP`, `SCREEN_WIDTH`, `SCREEN_HEIGHT`, `WE_CFG_DIRTY_STRATEGY`, etc.) is defined by the platform config — it will `#error` if any is missing.
-
-For porting to a new MCU, copy `Demo/we_lcd_port_template.h/.c` as the starting point.
+`Core/we_gui_config.h` validates required macros such as `LCD_DEEP`, `SCREEN_WIDTH`, `SCREEN_HEIGHT`, `WE_CFG_DIRTY_STRATEGY`, and timer/input/storage limits with `#error` checks.
 
 ### Core Runtime Model
 
-The runtime is centered on a single `we_lcd_t` instance, defined in `Core/we_gui_driver.h`. That struct owns:
-- the partial frame buffer (PFB) and flush callbacks,
+The runtime centers on one `we_lcd_t` instance (`Core/we_gui_driver.h`). That object owns:
+- the partial frame buffer (PFB/GRAM) and LCD flush callbacks,
 - the dirty-rectangle manager,
 - the root linked list of GUI objects,
 - GUI internal task slots and user timer slots,
-- input state and optional storage binding,
+- input state (`we_indev_data_t`) and optional storage callback,
 - render statistics counters.
 
-This is the main architectural boundary: widgets and demos mutate object state, mark regions dirty, and `we_gui_task_handler()` consumes that state to redraw via the currently bound LCD port.
+Widgets and demos mutate object state and mark regions dirty. `we_gui_task_handler()` consumes timers/input/dirty state and redraws through the currently bound LCD port.
 
-### Initialization API
+### Initialization and Main Loop Pattern
 
-Primary init (bundles LCD + input + storage in one call):
+Primary init bundles LCD, input, and storage binding:
 
 ```c
 we_gui_init(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, uint16_t gram_size,
@@ -97,45 +115,30 @@ we_gui_init(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, uint16_t gram_siz
             we_storage_read_cb_t storage_cb); // NULL if unused
 ```
 
-Lower-level alternative (LCD only, then bind input/storage separately):
+Lower-level LCD-only init is available through `we_lcd_init_with_port(...)`, with optional `we_input_init_with_port(...)` and `we_storage_init_with_port(...)` when the relevant config flags are enabled.
 
-```c
-we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base,
-                      uint16_t gram_size,
-                      we_lcd_set_addr_cb_t set_addr_cb, we_lcd_flush_cb_t flush_cb);
-// optional, guarded by config flags:
-we_input_init_with_port(we_lcd_t*, we_input_read_cb_t);    // WE_CFG_ENABLE_INPUT_PORT_BIND
-we_storage_init_with_port(we_lcd_t*, we_storage_read_cb_t); // WE_CFG_ENABLE_STORAGE_PORT_BIND
-```
+All current entry points follow the same flow:
+1. initialize system clock/hardware/ports,
+2. call `we_gui_init(...)` once,
+3. initialize exactly one demo and create its periodic GUI timer,
+4. loop over elapsed-time tick injection and `we_gui_task_handler(...)`.
 
-Hardware-side naming conventions: `lcd_hw_init()`, `lcd_rgb565_port()`, `lcd_rgb888_port()`.
-
-### Main Loop Pattern
-
-Both simulator and STM32 entry points follow the same four-stage control flow:
-1. initialize hardware/ports,
-2. call `we_gui_init(...)` once to bind LCD/input/storage,
-3. initialize exactly one demo and register its periodic tick with `we_gui_timer_create(...)`,
-4. loop over `we_gui_tick_inc(...)` + `we_gui_task_handler(...)`.
-
-Demo ticks are driven by GUI timers, not called directly in the main loop:
+Typical pattern:
 
 ```c
 lcd_hw_init();
-we_gui_init(&mylcd, RGB888TODEV(10,14,20), user_gram, USER_GRAM_NUM,
+we_gui_init(&lcd, RGB888TODEV(10, 14, 20), gram, USER_GRAM_NUM,
             lcd_set_addr, LCD_FLUSH_PORT, input_cb, storage_cb);
-we_xxx_simple_demo_init(&mylcd);
-we_gui_timer_create(&mylcd, we_xxx_simple_demo_tick, 16U, 1U); // 16ms periodic
+we_xxx_simple_demo_init(&lcd);
+we_gui_timer_create(&lcd, we_xxx_simple_demo_tick, 16U, 1U);
 
 while (1) {
-    we_gui_tick_inc(&mylcd, ms);   // pass actual elapsed ms (from SysTick/SDL delta)
-    we_gui_task_handler(&mylcd);   // drives timers + rendering
+    we_gui_tick_inc(&lcd, elapsed_ms);
+    we_gui_task_handler(&lcd);
 }
 ```
 
-Input is polled automatically inside `we_gui_task_handler` via the registered callback. Call `we_gui_indev_handler()` directly only when managing input state manually.
-
-Simulator additionally calls `sim_lcd_update()` after `we_gui_task_handler`.
+The simulator additionally calls `sim_lcd_update()` after `we_gui_task_handler()`. Input is polled automatically inside `we_gui_task_handler()` through the registered input callback; call `we_gui_indev_handler()` directly only when managing input state manually.
 
 ### Timer API
 
@@ -147,99 +150,75 @@ we_gui_timer_restart(lcd, id);   // reset accumulator + reactivate
 we_gui_timer_delete(lcd, id);
 ```
 
-Fixed array: `WE_CFG_GUI_TASK_MAX_NUM` internal task slots, `WE_CFG_GUI_TIMER_MAX_NUM` user timer slots. Both are configured per-platform.
+Timer/task storage is fixed-size: `WE_CFG_GUI_TASK_MAX_NUM` for GUI internal tasks and `WE_CFG_GUI_TIMER_MAX_NUM` for user timers.
 
-### Widgets
+### Widgets and Important Semantics
 
-Widget types in `Core/`: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`.
+Widget implementations live in `Core/`; demos are in `Demo/`. Current main widgets include `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`, `dropdown`, `stepper`, and `indicator`.
 
-**img_ex semantics:**
-- Angle unit is **512-step** (0–511 = full circle); 90° = 128, 180° = 256, 270° = 384. Use `WE_ANGLE(deg)` for float conversion or `WE_DEG(deg)` for integer compile-time constants. Normalized internally with `& 0x1FF` (no division).
-- Scale unit is **256-step** (256 = 1.0×, 128 = 0.5×, 512 = 2.0×).
-- `cx/cy` = screen transform center; `pivot_ofs_x/y` = source image local pivot offset — these describe different coordinate systems and must not be merged.
-- Input image must be **RGB565 uncompressed** (no RLE/QOI).
+Important non-obvious semantics:
+- `img_ex` and `label_ex` use a **512-step angle unit** (`0..511` = full circle; 90° = 128; 180° = 256). Use `WE_ANGLE(deg)` or `WE_DEG(deg)`.
+- `img_ex`/`label_ex` scale uses a **256-step scale unit** (`256` = 1.0×, `128` = 0.5×, `512` = 2.0×).
+- For `img_ex`, `cx/cy` are the screen transform center, while `pivot_ofs_x/y` are source-image local pivot offsets; do not merge those coordinate systems. Input images must be RGB565 uncompressed.
+- `group` is the lightweight child-container and structural base for composites such as `slideshow`; children use local coordinates with opacity propagation and coordinated movement.
+- `slideshow` handles paged local-coordinate children and swipe/page snapping.
+- `msgbox` is a modal `we_popup_obj_t`; show/hide through `we_popup_show()` / `we_popup_hide()`.
+- `chart` uses a circular buffer and pixel-space data values. There is no Y-axis scaling API; callers must pre-scale raw data to pixels before pushing. `stroke` controls line width and `WE_CHART_AA_MAX` caps anti-aliased feather height.
+- `progress` uses a direct `0..255` target value with smooth animated display transitions.
+- `dropdown` is data-driven: the caller owns the `we_dropdown_option_t` array (the widget stores only a pointer, never copies text). Its expanded list draws through the LCD-level overlay popup so it is not clipped by `group`/`scroll_panel`/`slideshow` parents. Only one popup may be open screen-wide, enforced by the driver's single `popup_layer` slot (`we_popup_layer_open/close/...` in `we_gui_driver.h`).
+- `stepper` stores its value as a **fixed-point `int32`**: real value = `value / 10^decimals`. Decimals are split out only at draw time to avoid Cortex-M0 soft-float cost. Continuous hold-to-repeat reuses the `STAY` event and does **not** consume a timer slot.
+- `indicator` is a circular status lamp that animates an on/off color transition (optional glow) via a per-object GUI task and `we_lerp`/`we_ease_*`. Default is read-only; enable `we_indicator_set_clickable()` for click-toggle. The glow stays inside the base box so it never leaks past dirty rectangles.
+- `Core/we_motion.h` provides easing helpers accepting `t ∈ [0, 256]`.
 
-**label_ex**: rotatable/scalable text widget; uses the same 512-step angle and 256-step scale systems as `img_ex`.
+### Dirty Rectangles and PFB/GRAM
 
-**group**: lightweight child-container used to manage a set of child widgets with local coordinates, opacity propagation, and coordinated movement. It is also the structural base used by composite controls such as `slideshow`.
-
-**slideshow**: paged composite widget built on top of `group`; each page uses local coordinates and supports swipe/page snapping behavior.
-
-**toggle**: iOS-style animated switch. Animates over ~128 ms (8 steps × 16 ms by default). The track and thumb now both reuse the shared analytic round-rect fill renderer.
-
-**msgbox**: modal popup (`we_popup_obj_t`) that slides in from the top. Two layouts: one button (OK only) or two buttons (OK + Cancel). Show/hide via `we_popup_show()` / `we_popup_hide()`.
-
-**chart**: scrolling waveform chart with circular buffer and optional grid overlay. Uses ARM-2D style cross-column AA: steep segments write a linear opacity ramp to the *previous* column (left edge) and current column (right edge); gentle segments fill `stroke` pixels solid. The current waveform-body + feathering idea references Arm-2D, but the implementation is rewritten for WeGui's ring-buffer, dirty-rectangle, PFB-clipping, and integer-coordinate pipeline. `stroke` controls line width (default 2); `WE_CHART_AA_MAX` caps the AA ramp height. **No Y-axis scaling**: data values are in pixel units (0 = widget center, positive = up, negative = down); caller must pre-scale raw data to pixel space (e.g. `val = raw_q15 * (h/2) / 32768`) before pushing. `y_min`/`y_max` and `we_chart_set_range` have been removed.
-
-**progress**: horizontal progress bar using a direct `0~255` target value model with smooth animated display transitions and fine-grained dirty updates.
-
-**Motion system** (`Core/we_motion.h`): eight easing functions (`we_ease_linear`, `_in/out_quad`, `_out_cubic`, `_in_out_sine`, `_out_bounce`, `_out_back`) accepting `t ∈ [0, 256]`.
-
-### Dirty Rectangle Strategy (`WE_CFG_DIRTY_STRATEGY` in platform config)
-
+`WE_CFG_DIRTY_STRATEGY` in `we_user_config.h` controls redraw strategy:
 - `0`: full-screen redraw
 - `1`: one merged bounding box
-- `2`: multi-rect (default; up to `WE_CFG_DIRTY_MAX_NUM` rects, smart O(N²) merge)
+- `2`: multi-rect merge up to `WE_CFG_DIRTY_MAX_NUM`
 
-`WE_CFG_DEBUG_DIRTY_RECT` — currently enabled (`1`) in `we_user_config.h` (overlays dirty regions in red). Disable before production builds.
+The current shared config uses strategy `2` with `WE_CFG_DIRTY_MAX_NUM = 10`. `WE_CFG_DEBUG_DIRTY_RECT` overlays dirty regions in red when enabled; it is currently `0`.
 
-`we_lcd_t` tracks rendering stats: `stat_render_frames`, `stat_pfb_pushes`, `stat_pushed_pixels`.
+The partial frame buffer covers only a few screen rows. `USER_GRAM_NUM = SCREEN_WIDTH × rows`; increasing rows trades RAM for fewer flushes. The current shared config uses `SCREEN_WIDTH = 240`, `SCREEN_HEIGHT = 240`, and `USER_GRAM_NUM = SCREEN_WIDTH * 8`.
 
-### PFB / GRAM Sizing
+### Input and Gestures
 
-The partial frame buffer covers only a few rows of the screen (configured via `USER_GRAM_NUM`). Formula: `USER_GRAM_NUM = SCREEN_WIDTH × rows` where `rows` is typically 6 for hardware (DMA double-buffered) and 2 for the simulator. Increasing rows trades RAM for fewer flush calls per frame.
+`we_indev_data_t indev_data` lives inside `we_lcd_t`; do not relocate it unless redesigning the input subsystem.
 
-### Input & Gesture
-
-`we_indev_data_t indev_data` lives inside `we_lcd_t`. Do not relocate it unless redesigning input.
-
-**Swipe gesture detection** is built into `we_gui_indev_handler`. On RELEASED, if displacement from press exceeds `WE_CFG_SWIPE_THRESHOLD` (default 30px, overridable in platform config), a directional swipe event (`WE_EVENT_SWIPE_LEFT/RIGHT/UP/DOWN`) is dispatched instead of `WE_EVENT_CLICKED`. Container widgets automatically handle swipe events to snap to the next page.
+Swipe detection is built into `we_gui_indev_handler()`. On release, if movement from press exceeds `WE_CFG_SWIPE_THRESHOLD`, a directional swipe event (`WE_EVENT_SWIPE_LEFT/RIGHT/UP/DOWN`) is dispatched instead of a click. Container widgets can use swipe events for page snapping.
 
 ## Demo Style
 
-Each demo follows the unified pattern:
+Each demo follows this pattern:
 
 ```c
 void we_xxx_simple_demo_init(we_lcd_t *lcd);
 void we_xxx_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 ```
 
-One demo = one group of static variables + one init + one tick. Each demo has its own `Demo/demo_xxx.c` file; all declarations are in `Demo/simple_widget_demos.h`.
+One demo should be a small, copyable example: static variables plus one init function plus one tick function. Demos are also the primary integration tests for widgets, timers, input, storage-backed assets, and rendering behavior.
 
-The important architectural point is that demos are both examples and integration tests: they are the primary way this repository exercises widgets, timers, input, storage-backed assets, and rendering behavior end-to-end.
+Demo selection differs slightly by target (`demo_id` switch in each entry's `main`):
+- `Simulator/main_sim.c`: there is no `case 9` (historical `key` slot); checkbox is 10, scroll_panel 19, dropdown 20, stepper 21, indicator 22.
+- `STM32F103/main.c` and `STM32F030/main.c`: checkbox is `demo_id` 9, scroll_panel 18, dropdown 19, stepper 20, indicator 21.
 
-**Selecting active demo:**
-- **STM32** (`STM32F103/main.c`): change the `demo_id` variable in `main`, then rebuild/flash
-- **Simulator** (`Simulator/main_sim.c`): change the `demo_id` variable in `main`, then rebuild and run
-
-The `we_timer_page_message_demo` additionally creates its own internal timers for auto page-switching and message hide.
+When adding a demo, update the `demo_id` comment block + `switch` in all three entry files, declare its `init`/`tick` in `Demo/simple_widget_demos.h`, and add the `demo_xxx.c` to `DEMO_SOURCES` in `Simulator/CMakeLists.txt` (and to each Keil `.uvprojx`).
 
 ## Code Style
 
-- Comments are in Chinese — use targeted edits only; do not do bulk text replacement (risk of mojibake)
-- Prefer direct, readable code with minimal abstraction layers
-- Prefer static variables in demos over complex state shells
-- Keep demo code easy to copy into new projects
-
-## Tooling
-
-- `tool/bin2c/` — 将多个 bin 资源合成为单个 bin，并可转换生成对应的 `.c` / `.h` 文件
-- `tool/font2c/` — generates Font2C font files from TTF for external flash storage
-- `tool/font2c_gui/` — GUI wrapper for font2c
-- `tool/STM32F103_ex_flash_download/` — Keil flash algorithm for programming external SPI flash via debugger
-
-## Simulator Tuning
-
-`Simulator/sdl_port.h` defines `SIM_SCALE` (window pixel multiplier, default 1) and `SIM_MAX_FPS` (frame cap, default 30). Adjust these for HiDPI displays or performance testing.
+- Comments are in Chinese; make targeted edits and avoid bulk text replacement that could cause mojibake.
+- Prefer direct, readable C with minimal abstraction layers.
+- Prefer static variables in demos over complex state shells.
+- Keep demo code easy to copy into user projects.
 
 ## Key Files to Read First
 
-When starting a new session involving this repo:
-
-1. `we_user_config.h` — unified platform config (screen size, PFB rows, dirty strategy, timer counts)
-2. `we_hw_port.h` — multi-platform routing header (selects config by preprocessor define)
-3. `STM32F103/main.c` — hardware entry and demo selection
-4. `Simulator/main_sim.c` — simulator entry
-5. `Demo/simple_widget_demos.h` — all demo entry point declarations
-6. `Core/we_gui_driver.h` — core API surface
-7. `WEGUI_API_REFERENCE.md` — full API reference with usage examples
+1. `we_user_config.h` — unified screen/PFB/dirty/timer/input/storage/widget config.
+2. `we_hw_port.h` — platform routing by preprocessor define.
+3. `Core/we_gui_driver.h` — core runtime object and public API surface.
+4. `Core/we_gui_config.h` — required config macro validation.
+5. `Simulator/main_sim.c` — simulator entry and demo selection.
+6. `STM32F103/main.c` — F103 hardware entry and demo selection.
+7. `STM32F030/main.c` — F030 hardware entry and demo selection.
+8. `Demo/simple_widget_demos.h` — demo entry declarations.
+9. `WEGUI_API_REFERENCE.md` — full API reference and usage examples.

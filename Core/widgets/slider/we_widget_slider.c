@@ -19,7 +19,8 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 
 static const we_class_t _slider_class = {
     .draw_cb = _slider_draw_cb,
-    .event_cb = _slider_event_cb
+    .event_cb = _slider_event_cb,
+        .set_pos_cb = NULL
 };
 
 static const colour_t _slider_black = RGB888_CONST(0, 0, 0);
@@ -618,17 +619,7 @@ void we_slider_obj_init(we_slider_obj_t *obj, we_lcd_t *lcd,
 
     obj->value = _slider_clamp_value(obj, obj->value);
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     we_obj_invalidate((we_obj_t *)obj);
 }

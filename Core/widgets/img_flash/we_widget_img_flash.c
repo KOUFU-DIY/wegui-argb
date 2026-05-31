@@ -512,7 +512,7 @@ uint8_t nb = flash_stream_get(&stream);
         else if ((flag & 0xC0U) == 0xC0U)
         {
             uint8_t  run         = (flag & 0x3FU) + 1U;
-            uint8_t  final_alpha = (uint8_t)(((uint16_t)cur_alpha * opacity) / 255U);
+            uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
 colour_t fg          = we_color_from_rgb565(cur_pixel);
 
             while (run--)
@@ -544,7 +544,7 @@ we_store_blended_color(dst, fg, final_alpha);
         {
             if (cur_x >= ix_start && cur_x < clip_x_end)
             {
-                uint8_t  final_alpha = (uint8_t)(((uint16_t)cur_alpha * opacity) / 255U);
+                uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
                 colour_t *dst = p_lcd->pfb_gram +
                                 ((base_dest_y + cur_y) * dst_stride) +
                                 (base_dest_x + cur_x);
@@ -622,7 +622,7 @@ uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
                                int16_t x, int16_t y,
                                uint32_t flash_addr, uint8_t opacity)
 {
-    static const we_class_t _flash_img_class = {.draw_cb = _flash_img_draw_cb, .event_cb = NULL};
+    static const we_class_t _flash_img_class = {.draw_cb = _flash_img_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
     uint8_t hdr[6]; /* 资源头：[res_type][format][w_H][w_L][h_H][h_L] */
 
@@ -664,19 +664,7 @@ uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
     obj->base.parent   = NULL;
 
     /* 挂入 LCD 控件链表 */
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-        {
-            tail = tail->next;
-        }
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
     {

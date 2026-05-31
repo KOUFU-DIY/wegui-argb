@@ -38,7 +38,8 @@ static void _progress_draw_track_bar(we_progress_obj_t *obj, we_lcd_t *lcd, colo
 
 static const we_class_t _progress_class = {
     .draw_cb = _progress_draw_cb,
-    .event_cb = _progress_event_cb
+    .event_cb = _progress_event_cb,
+        .set_pos_cb = NULL
 };
 
 /**
@@ -115,14 +116,16 @@ static void _progress_invalidate_fill_change(we_progress_obj_t *obj, uint16_t ol
 }
 
 /**
- * @brief 使用完整圆角轨道的公共 mask，对左侧进度区域执行裁剪填充。
+ * @brief 使用完整圆角轨道的公共 mask，对指定左侧进度区域执行逐像素填充。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
- * @param w 目标区域宽度（像素）。
+ * @param x0 屏幕绝对起始 X 坐标。
+ * @param x1 屏幕绝对结束 X 坐标。
  * @param color 目标颜色值。
  * @return 无。
  */
-static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, uint16_t w, colour_t color)
+static void _progress_draw_fill_mask_span(we_progress_obj_t *obj, we_lcd_t *lcd,
+                                          int16_t x0, int16_t x1, colour_t color)
 {
     uint16_t r;
     int16_t draw_x0;
@@ -134,28 +137,18 @@ static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, ui
     uint16_t stride;
     colour_t *row;
 
-    if (obj == NULL || lcd == NULL || w == 0U)
+    if (obj == NULL || lcd == NULL || x0 > x1)
         return;
-
-    if (w >= (uint16_t)obj->base.w)
-    {
-        _progress_draw_track_bar(obj, lcd, color);
-        return;
-    }
 
     r = obj->radius;
+    if (r > (uint16_t)obj->base.w / 2U)
+        r = (uint16_t)obj->base.w / 2U;
     if (r > (uint16_t)obj->base.h / 2U)
         r = (uint16_t)obj->base.h / 2U;
 
-    if (r == 0U)
-    {
-        we_fill_rect(lcd, obj->base.x, obj->base.y, w, (uint16_t)obj->base.h, color, obj->opacity);
-        return;
-    }
-
-    draw_x0 = obj->base.x;
+    draw_x0 = x0;
     draw_y0 = obj->base.y;
-    draw_x1 = (int16_t)(obj->base.x + (int16_t)w - 1);
+    draw_x1 = x1;
     draw_y1 = (int16_t)(obj->base.y + obj->base.h - 1);
 
     if (draw_x0 < (int16_t)lcd->pfb_area.x0) draw_x0 = (int16_t)lcd->pfb_area.x0;
@@ -187,12 +180,83 @@ static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, ui
             }
             else
             {
-                uint32_t alpha = ((uint32_t)obj->opacity * mask_alpha + 127U) / 255U;
-                if (alpha > 255U)
-                    alpha = 255U;
-                we_store_blended_color(p, color, (uint8_t)alpha);
+                uint8_t alpha = we_div255((uint32_t)obj->opacity * mask_alpha);
+                we_store_blended_color(p, color, alpha);
             }
         }
+    }
+}
+
+/**
+ * @brief 使用完整圆角轨道的公共 mask，对左侧进度区域执行裁剪填充。
+ * @param obj 目标控件对象指针。
+ * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param w 目标区域宽度（像素）。
+ * @param color 目标颜色值。
+ * @return 无。
+ */
+static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, uint16_t w, colour_t color)
+{
+    uint16_t r;
+    int16_t fill_x1;
+    int16_t left_x0;
+    int16_t left_x1;
+    int16_t mid_x0;
+    int16_t mid_x1;
+    int16_t right_x0;
+    int16_t right_mask_x0;
+
+    if (obj == NULL || lcd == NULL || w == 0U)
+        return;
+
+    if (w >= (uint16_t)obj->base.w)
+    {
+        _progress_draw_track_bar(obj, lcd, color);
+        return;
+    }
+
+    r = obj->radius;
+    if (r > (uint16_t)obj->base.w / 2U)
+        r = (uint16_t)obj->base.w / 2U;
+    if (r > (uint16_t)obj->base.h / 2U)
+        r = (uint16_t)obj->base.h / 2U;
+
+    if (r == 0U)
+    {
+        we_fill_rect(lcd, obj->base.x, obj->base.y, w, (uint16_t)obj->base.h, color, obj->opacity);
+        return;
+    }
+
+    fill_x1 = (int16_t)(obj->base.x + (int16_t)w - 1);
+
+    /* 小宽度仍走完整 mask，避免左圆角被矩形快路径削平。 */
+    if (w <= r)
+    {
+        _progress_draw_fill_mask_span(obj, lcd, obj->base.x, fill_x1, color);
+        return;
+    }
+
+    /* 左右圆角区域保留逐像素 mask；中间实心区域直接填充。 */
+    left_x0 = obj->base.x;
+    left_x1 = (int16_t)(obj->base.x + (int16_t)r - 1);
+    _progress_draw_fill_mask_span(obj, lcd, left_x0, left_x1, color);
+
+    mid_x0 = (int16_t)(obj->base.x + (int16_t)r);
+    mid_x1 = fill_x1;
+    right_mask_x0 = (int16_t)(obj->base.x + obj->base.w - (int16_t)r);
+    if (mid_x1 >= right_mask_x0)
+        mid_x1 = (int16_t)(right_mask_x0 - 1);
+
+    if (mid_x0 <= mid_x1)
+    {
+        we_fill_rect(lcd, mid_x0, obj->base.y, (uint16_t)(mid_x1 - mid_x0 + 1),
+                     (uint16_t)obj->base.h, color, obj->opacity);
+    }
+
+    right_x0 = (mid_x1 < fill_x1) ? (int16_t)(mid_x1 + 1) : (int16_t)(fill_x1 + 1);
+    if (right_x0 <= fill_x1)
+    {
+        _progress_draw_fill_mask_span(obj, lcd, right_x0, fill_x1, color);
     }
 }
 
@@ -211,6 +275,8 @@ static void _progress_draw_track_bar(we_progress_obj_t *obj, we_lcd_t *lcd, colo
         return;
 
     draw_r = obj->radius;
+    if (draw_r > (uint16_t)obj->base.w / 2U)
+        draw_r = (uint16_t)obj->base.w / 2U;
     if (draw_r > (uint16_t)obj->base.h / 2U)
         draw_r = (uint16_t)obj->base.h / 2U;
 
@@ -383,17 +449,7 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
     obj->opacity = opacity;
     obj->radius = WE_PROGRESS_RADIUS;
 
-    if (lcd->obj_list_head == NULL)
-    {
-        lcd->obj_list_head = (we_obj_t *)obj;
-    }
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     obj->task_id = _we_gui_task_register_with_data(lcd, _progress_task_cb, obj);
 }

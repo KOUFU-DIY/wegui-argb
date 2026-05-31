@@ -346,7 +346,7 @@ static void SetSysClock(void)
     RCC->CFGR |= (uint32_t)RCC_CFGR_PPRE_DIV1;
 
     // PLL configuration = (HSI/2) * 12 = 48 MHz
-    RCC_PLLConfig(RCC_PLLSource_HSI_Div2, RCC_PLLMul_16); // 8M/2 * 12 = 48M
+    RCC_PLLConfig(RCC_PLLSource_HSI_Div2, RCC_PLLMul_12); // 8M/2 * 12 = 48M
 
     /* Enable PLL */
     RCC->CR |= RCC_CR_PLLON;

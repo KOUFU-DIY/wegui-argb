@@ -163,6 +163,51 @@ min_y = WE_MIN(min_y, cy - outer_r);
 }
 #endif
 
+/**
+ * @brief 标记圆弧包围盒，但排除内圆内接安全空洞。
+ * @param obj 圆弧控件对象指针。
+ * @param bx 包围盒左上角 X 坐标。
+ * @param by 包围盒左上角 Y 坐标。
+ * @param bw 包围盒宽度。
+ * @param bh 包围盒高度。
+ * @param cx 圆心 X 坐标。
+ * @param cy 圆心 Y 坐标。
+ * @return 无。
+ */
+static void _arc_invalidate_bbox_exclude_hole(we_arc_obj_t *obj,
+                                              int16_t bx, int16_t by, int16_t bw, int16_t bh,
+                                              int16_t cx, int16_t cy)
+{
+    int16_t inner_r;
+    int16_t hole_half;
+    int16_t hole_size;
+
+    if (obj == NULL || obj->base.lcd == NULL || bw <= 0 || bh <= 0)
+        return;
+
+    inner_r = (int16_t)obj->radius - (int16_t)obj->thickness;
+    if (inner_r <= 4)
+    {
+        we_obj_invalidate_area((we_obj_t *)obj, bx, by, bw, bh);
+        return;
+    }
+
+    /* 使用内圆的内接正方形作为安全空洞：181/256 ≈ 1/sqrt(2)，再留 2px 抗锯齿余量。 */
+    hole_half = (int16_t)(((uint32_t)inner_r * 181U) >> 8);
+    if (hole_half > 2)
+        hole_half = (int16_t)(hole_half - 2);
+    else
+    {
+        we_obj_invalidate_area((we_obj_t *)obj, bx, by, bw, bh);
+        return;
+    }
+
+    hole_size = (int16_t)(hole_half * 2 + 1);
+    we_obj_invalidate_area_exclude((we_obj_t *)obj, bx, by, bw, bh,
+                                   (int16_t)(cx - hole_half), (int16_t)(cy - hole_half),
+                                   hole_size, hole_size);
+}
+
 /* =========================================================================
  * 渲染引擎 (极致精简指令流版)
  * ========================================================================= */
@@ -333,6 +378,11 @@ final_fg_a = WE_MAX(fg_body_a, WE_MAX(cap_s_a, cap_efg_a));
     }
 }
 
+static void _arc_set_pos_cb(void *ptr, int16_t x, int16_t y)
+{
+    we_arc_obj_set_pos((we_arc_obj_t *)ptr, x, y);
+}
+
 /* =========================================================================
  * API 接口
  * ========================================================================= */
@@ -400,22 +450,14 @@ _calc_arc_tight_bbox(cx, cy, r, th, s, span, &bx, &by, &bw, &bh);
     obj->bg_color = bg_color;
     obj->opacity = opacity;
 
-    static const we_class_t _arc_class = {.draw_cb = _arc_draw_cb, .event_cb = NULL};
+    static const we_class_t _arc_class = {.draw_cb = _arc_draw_cb, .event_cb = NULL, .set_pos_cb = _arc_set_pos_cb};
     obj->base.class_p = &_arc_class;
     obj->base.next = NULL;
 
-    if (lcd->obj_list_head == NULL)
-        lcd->obj_list_head = (we_obj_t *)obj;
-    else
-    {
-        we_obj_t *tail = lcd->obj_list_head;
-        while (tail->next != NULL)
-            tail = tail->next;
-        tail->next = (we_obj_t *)obj;
-    }
+    we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0)
-we_obj_invalidate((we_obj_t *)obj);
+_arc_invalidate_bbox_exclude_hole(obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h, cx, cy);
 }
 
 /**
@@ -458,7 +500,9 @@ by = WE_MAX(by, obj->base.y);
 
         if (ex >= bx && ey >= by)
         {
-we_obj_invalidate_area((we_obj_t *)obj, bx, by, ex - bx + 1, ey - by + 1);
+_arc_invalidate_bbox_exclude_hole(obj, bx, by, ex - bx + 1, ey - by + 1,
+                                  (int16_t)(obj->base.x + obj->center_off_x),
+                                  (int16_t)(obj->base.y + obj->center_off_y));
         }
 #endif
     }
@@ -475,5 +519,44 @@ void we_arc_set_opacity(we_arc_obj_t *obj, uint8_t opacity)
     if (obj == NULL || obj->base.lcd == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
-we_obj_invalidate((we_obj_t *)obj);
+_arc_invalidate_bbox_exclude_hole(obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h,
+                                  (int16_t)(obj->base.x + obj->center_off_x),
+                                  (int16_t)(obj->base.y + obj->center_off_y));
+}
+
+/**
+ * @brief 设置圆弧控件在对象树中的左上角坐标，并避开中心空洞标脏。
+ * @param obj 圆弧控件对象指针。
+ * @param x 新的左上角 X 坐标。
+ * @param y 新的左上角 Y 坐标。
+ * @return 无。
+ */
+void we_arc_obj_set_pos(we_arc_obj_t *obj, int16_t x, int16_t y)
+{
+    int16_t old_cx;
+    int16_t old_cy;
+    int16_t new_cx;
+    int16_t new_cy;
+
+    if (obj == NULL || obj->base.lcd == NULL)
+        return;
+    if (obj->base.x == x && obj->base.y == y)
+        return;
+
+    old_cx = (int16_t)(obj->base.x + obj->center_off_x);
+    old_cy = (int16_t)(obj->base.y + obj->center_off_y);
+    if (obj->opacity > 0U)
+    {
+_arc_invalidate_bbox_exclude_hole(obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h, old_cx, old_cy);
+    }
+
+    obj->base.x = x;
+    obj->base.y = y;
+
+    new_cx = (int16_t)(obj->base.x + obj->center_off_x);
+    new_cy = (int16_t)(obj->base.y + obj->center_off_y);
+    if (obj->opacity > 0U)
+    {
+_arc_invalidate_bbox_exclude_hole(obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h, new_cx, new_cy);
+    }
 }

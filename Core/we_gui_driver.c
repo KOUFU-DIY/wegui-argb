@@ -216,11 +216,42 @@ static void _we_gui_flush_dirty(we_lcd_t *p_lcd)
     }
 
     /* 只要这一轮真正消费了脏区并完成提交，就记作 1 帧渲染。 */
+#if (WE_CFG_ENABLE_RENDER_STATS == 1)
     p_lcd->stat_render_frames++;
+#endif
 
     /* 所有脏区处理完成后，清空管理器，等待业务层下一轮标脏。 */
     we_dirty_clear(&p_lcd->dirty_mgr);
 }
+
+#if (WE_CFG_DEBUG_PERF_STRESS == 1)
+/* --------------------------------------------------------------------------
+ * 控件性能压测：每帧强制标脏所有顶层控件
+ *
+ * 仅在 WE_CFG_DEBUG_PERF_STRESS == 1 时编译进来。开启后，主任务每轮都会把
+ * 当前对象链表里的每个控件按其自身区域重新标脏，使 GUI 持续全量重绘，
+ * 从而暴露当前页面控件的最坏情况渲染吞吐，配合 FPS / stat 计数器观察性能。
+ * -------------------------------------------------------------------------- */
+/**
+ * @brief 强制把所有顶层控件按自身区域标脏（性能压测专用）
+ * @param p_lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ * @note 只遍历顶层 obj_list_head；子容器内的子控件会随父容器整块重绘，
+ *       因此无需递归进入 children_head。
+ */
+static void _we_gui_perf_stress_invalidate(we_lcd_t *p_lcd)
+{
+    we_obj_t *curr;
+
+    if (p_lcd == NULL)
+        return;
+
+    for (curr = p_lcd->obj_list_head; curr != NULL; curr = curr->next)
+    {
+        we_obj_invalidate(curr);
+    }
+}
+#endif
 
 /**
  * @brief  在局部帧缓冲(PFB)中绘制一张原始 RGB565 图片
@@ -342,55 +373,64 @@ void we_img_render_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t
  * 3. 只保留当前实际会用到的解码能力
  * -------------------------------------------------------------------------- */
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-/**
- * @brief  在局部帧缓冲(PFB)中绘制索引 QOI 压缩的 RGB565 图片
- * @param  p_lcd    传入，当前 GUI 屏幕上下文指针
- * @param  x0       传入，图片左上角屏幕坐标 X
- * @param  y0       传入，图片左上角屏幕坐标 Y
- * @param  img      传入，索引 QOI 图片资源描述
- * @param  opacity  传入，全局透明度，0 为完全透明，255 为完全不透明
- * @return 无
- */
-void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
+/* --------------------------------------------------------------------------
+ * 索引 QOI 解码上下文
+ *
+ * RGB565 与 ARGB8565 两条解码路径共用同一套“头部解析 + 索引跳转 + 裁剪参数”
+ * 前置逻辑，这里用一个上下文结构体收口，避免两个入口函数各维护一份完全相同
+ * 的约 70 行解析代码，显著压缩 Flash 占用。
+ * -------------------------------------------------------------------------- */
+typedef struct
 {
-    if (opacity == 0)
-        return;
+    uint16_t img_w;
+    uint16_t img_h;
+    uint16_t ix_start;
+    uint16_t iy_start;
+    uint16_t clip_x_end;
+    uint16_t clip_y_end;
+    int16_t base_dest_x;
+    int16_t base_dest_y;
+    uint16_t dst_stride;
+    const uint8_t *arry;     /* 解码起点指针（已跳到最近的字节偏移） */
+    uint16_t cur_x;
+    uint16_t cur_y;
+    uint32_t decoded_pixels;
+    uint32_t max_pixels;
+} _we_qoi_dec_t;
 
-    /* ---------------- 1. 包围盒和裁剪参数准备 ---------------- */
+/**
+ * @brief 解析索引 QOI 头部、按目标区域跳转解码起点并算好裁剪参数
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x0 传入：图片左上角屏幕 X 坐标
+ * @param y0 传入：图片左上角屏幕 Y 坐标
+ * @param img 传入：索引 QOI 图片资源描述
+ * @param dec 传出：解码上下文（裁剪范围、起点指针、起始像素坐标等）
+ * @return 1 表示需要继续解码，0 表示整图不在当前 PFB 切片内或数据非法
+ * @note RGB565 / ARGB8565 两条解码路径共用本函数完成全部前置准备。
+ */
+static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
+                                      const uint8_t *img, _we_qoi_dec_t *dec)
+{
     uint16_t img_w = IMG_DAT_WIDTH(img);
     uint16_t img_h = IMG_DAT_HEIGHT(img);
     int16_t x1 = x0 + img_w - 1;
     int16_t y1 = y0 + img_h - 1;
 
-    // 如果整张图不在当前 PFB 切片内，直接返回。
-    if ((x0 > p_lcd->pfb_area.x1) || (x1 < p_lcd->pfb_area.x0) || (y0 > p_lcd->pfb_y_end) || (y1 < p_lcd->pfb_y_start))
-    {
-        return;
-    }
+    /* 整张图与当前 PFB 切片无交集时直接剔除。 */
+    if ((x0 > p_lcd->pfb_area.x1) || (x1 < p_lcd->pfb_area.x0) ||
+        (y0 > p_lcd->pfb_y_end) || (y1 < p_lcd->pfb_y_start))
+        return 0U;
 
     uint16_t ix_start = (x0 < p_lcd->pfb_area.x0) ? (p_lcd->pfb_area.x0 - x0) : 0;
     uint16_t iy_start = (y0 < p_lcd->pfb_y_start) ? (p_lcd->pfb_y_start - y0) : 0;
-
     uint16_t draw_width = img_w - ix_start - ((x1 > p_lcd->pfb_area.x1) ? (x1 - p_lcd->pfb_area.x1) : 0);
     uint16_t draw_height = img_h - iy_start - ((y1 > p_lcd->pfb_y_end) ? (y1 - p_lcd->pfb_y_end) : 0);
 
-    uint16_t clip_x_end = ix_start + draw_width;
-    uint16_t clip_y_end = iy_start + draw_height;
-
-    int16_t base_dest_x = x0 - p_lcd->pfb_area.x0;
-    int16_t base_dest_y = y0 - p_lcd->pfb_y_start;
-    uint16_t dst_stride = p_lcd->pfb_width;
-
-    /* ---------------- 2. 解析索引 QOI 头部 (跳过6字节通用信息头) ---------------- */
     const uint8_t *dat = IMG_DAT_PIXELS(img);
     if (dat == 0)
-        return;
+        return 0U;
 
     uint8_t head_size = dat[0];
-
-    // 如需进一步做健壮性校验，可在这里检查头部长度。
-    // if (head_size != 13) return;
-
     uint16_t interval = (dat[5] << 8) | dat[6];
     uint16_t u16_size = (dat[7] << 8) | dat[8];
     uint16_t u24_size = (dat[9] << 8) | dat[10];
@@ -406,17 +446,15 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     const uint8_t *idx_u32 = idx_u24 + u24_size;
     const uint8_t *qoi_start = idx_u32 + u32_size;
 
-    /* ---------------- 3. 根据索引表跳到最接近目标区域的解码起点 ---------------- */
     uint32_t first_needed_pixel = (uint32_t)iy_start * img_w + ix_start;
     uint32_t skip_intervals = (interval > 0) ? (first_needed_pixel / interval) : 0;
-
     uint32_t byte_offset = 0;
 
     if (skip_intervals > 0)
     {
         uint32_t target_idx = skip_intervals;
 
-        // 索引越界保护，避免错误头部导致读取越界。
+        /* 索引越界保护，避免错误头部导致读取越界。 */
         if (target_idx >= total_indices)
         {
             target_idx = (total_indices > 0) ? (total_indices - 1) : 0;
@@ -441,11 +479,70 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     }
 
     uint32_t jump_pixel_idx = skip_intervals * interval;
-    uint16_t cur_x = jump_pixel_idx % img_w;
-    uint16_t cur_y = jump_pixel_idx / img_w;
 
-    /* ---------------- 4. 初始化解码状态 ---------------- */
-    const uint8_t *arry = qoi_start + byte_offset; // 跳到最近的字节偏移位置
+    dec->img_w = img_w;
+    dec->img_h = img_h;
+    dec->ix_start = ix_start;
+    dec->iy_start = iy_start;
+    dec->clip_x_end = (uint16_t)(ix_start + draw_width);
+    dec->clip_y_end = (uint16_t)(iy_start + draw_height);
+    dec->base_dest_x = (int16_t)(x0 - p_lcd->pfb_area.x0);
+    dec->base_dest_y = (int16_t)(y0 - p_lcd->pfb_y_start);
+    dec->dst_stride = p_lcd->pfb_width;
+    dec->arry = qoi_start + byte_offset;
+    dec->cur_x = (uint16_t)(jump_pixel_idx % img_w);
+    dec->cur_y = (uint16_t)(jump_pixel_idx / img_w);
+    dec->decoded_pixels = jump_pixel_idx;
+    dec->max_pixels = (uint32_t)img_w * img_h;
+    return 1U;
+}
+
+/**
+ * @brief  在局部帧缓冲(PFB)中绘制索引 QOI 压缩的 RGB565 图片
+ * @param  p_lcd    传入，当前 GUI 屏幕上下文指针
+ * @param  x0       传入，图片左上角屏幕坐标 X
+ * @param  y0       传入，图片左上角屏幕坐标 Y
+ * @param  img      传入，索引 QOI 图片资源描述
+ * @param  opacity  传入，全局透明度，0 为完全透明，255 为完全不透明
+ * @return 无
+ */
+void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
+{
+    _we_qoi_dec_t dec;
+    uint16_t img_w;
+    uint16_t ix_start;
+    uint16_t iy_start;
+    uint16_t clip_x_end;
+    uint16_t clip_y_end;
+    int16_t base_dest_x;
+    int16_t base_dest_y;
+    uint16_t dst_stride;
+    const uint8_t *arry;
+    uint16_t cur_x;
+    uint16_t cur_y;
+    uint32_t decoded_pixels;
+    uint32_t max_pixels;
+
+    if (opacity == 0)
+        return;
+
+    /* 头部解析 + 索引跳转 + 裁剪参数，与 ARGB8565 共用同一前置逻辑。 */
+    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, &dec))
+        return;
+
+    img_w = dec.img_w;
+    ix_start = dec.ix_start;
+    iy_start = dec.iy_start;
+    clip_x_end = dec.clip_x_end;
+    clip_y_end = dec.clip_y_end;
+    base_dest_x = dec.base_dest_x;
+    base_dest_y = dec.base_dest_y;
+    dst_stride = dec.dst_stride;
+    arry = dec.arry;
+    cur_x = dec.cur_x;
+    cur_y = dec.cur_y;
+    decoded_pixels = dec.decoded_pixels;
+    max_pixels = dec.max_pixels;
 
     uint8_t flag;
     uint8_t r = 0, g = 0, b = 0;
@@ -458,12 +555,7 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     colour_t *row_dst = 0;
     int32_t row_dst_y = -1;
 
-    /* 像素计数上限：图片总像素数。
-     * 作为解码循环的安全终止条件，防止 byte_offset 损坏时越界读取。 */
-    uint32_t max_pixels = (uint32_t)img_w * img_h;
-    uint32_t decoded_pixels = jump_pixel_idx;
-
-    /* ---------------- 5. 主解码循环 ---------------- */
+    /* ---------------- 主解码循环 ---------------- */
     while (decoded_pixels < max_pixels)
     {
         flag = *arry++;
@@ -574,89 +666,41 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
  */
 void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
 {
+    _we_qoi_dec_t dec;
+    uint16_t img_w;
+    uint16_t ix_start;
+    uint16_t iy_start;
+    uint16_t clip_x_end;
+    uint16_t clip_y_end;
+    int16_t base_dest_x;
+    int16_t base_dest_y;
+    uint16_t dst_stride;
+    const uint8_t *arry;
+    uint16_t cur_x;
+    uint16_t cur_y;
+    uint32_t decoded_pixels;
+    uint32_t max_pixels;
+
     if (opacity == 0)
         return;
 
-    /* ---------------- 1. 包围盒和裁剪参数准备 ---------------- */
-    uint16_t img_w = IMG_DAT_WIDTH(img);
-    uint16_t img_h = IMG_DAT_HEIGHT(img);
-    int16_t x1 = x0 + img_w - 1;
-    int16_t y1 = y0 + img_h - 1;
-
-    if ((x0 > p_lcd->pfb_area.x1) || (x1 < p_lcd->pfb_area.x0) || (y0 > p_lcd->pfb_y_end) || (y1 < p_lcd->pfb_y_start))
+    /* 头部解析 + 索引跳转 + 裁剪参数，与 RGB565 共用同一前置逻辑。 */
+    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, &dec))
         return;
 
-    uint16_t ix_start = (x0 < p_lcd->pfb_area.x0) ? (p_lcd->pfb_area.x0 - x0) : 0;
-    uint16_t iy_start = (y0 < p_lcd->pfb_y_start) ? (p_lcd->pfb_y_start - y0) : 0;
-
-    uint16_t draw_width = img_w - ix_start - ((x1 > p_lcd->pfb_area.x1) ? (x1 - p_lcd->pfb_area.x1) : 0);
-    uint16_t draw_height = img_h - iy_start - ((y1 > p_lcd->pfb_y_end) ? (y1 - p_lcd->pfb_y_end) : 0);
-
-    uint16_t clip_x_end = ix_start + draw_width;
-    uint16_t clip_y_end = iy_start + draw_height;
-
-    int16_t base_dest_x = x0 - p_lcd->pfb_area.x0;
-    int16_t base_dest_y = y0 - p_lcd->pfb_y_start;
-    uint16_t dst_stride = p_lcd->pfb_width;
-
-    /* ---------------- 2. 解析索引 QOI 头部 ---------------- */
-    const uint8_t *dat = IMG_DAT_PIXELS(img);
-    if (dat == 0)
-        return;
-
-    uint8_t head_size = dat[0];
-    uint16_t interval = (dat[5] << 8) | dat[6];
-    uint16_t u16_size = (dat[7] << 8) | dat[8];
-    uint16_t u24_size = (dat[9] << 8) | dat[10];
-    uint16_t u32_size = (dat[11] << 8) | dat[12];
-
-    uint16_t num_u16 = u16_size / 2;
-    uint16_t num_u24 = u24_size / 3;
-    uint16_t num_u32 = u32_size / 4;
-    uint32_t total_indices = num_u16 + num_u24 + num_u32;
-
-    const uint8_t *idx_u16 = dat + head_size;
-    const uint8_t *idx_u24 = idx_u16 + u16_size;
-    const uint8_t *idx_u32 = idx_u24 + u24_size;
-    const uint8_t *qoi_start = idx_u32 + u32_size;
-
-    /* ---------------- 3. 根据索引表跳到解码起点 ---------------- */
-    uint32_t first_needed_pixel = (uint32_t)iy_start * img_w + ix_start;
-    uint32_t skip_intervals = (interval > 0) ? (first_needed_pixel / interval) : 0;
-    uint32_t byte_offset = 0;
-
-    if (skip_intervals > 0)
-    {
-        uint32_t target_idx = skip_intervals;
-        if (target_idx >= total_indices)
-        {
-            target_idx = (total_indices > 0) ? (total_indices - 1) : 0;
-            skip_intervals = target_idx;
-        }
-
-        if (target_idx < num_u16)
-        {
-            uint32_t i = target_idx * 2;
-            byte_offset = (idx_u16[i] << 8) | idx_u16[i + 1];
-        }
-        else if (target_idx < num_u16 + num_u24)
-        {
-            uint32_t i = (target_idx - num_u16) * 3;
-            byte_offset = (idx_u24[i] << 16) | (idx_u24[i + 1] << 8) | idx_u24[i + 2];
-        }
-        else
-        {
-            uint32_t i = (target_idx - num_u16 - num_u24) * 4;
-            byte_offset = (idx_u32[i] << 24) | (idx_u32[i + 1] << 16) | (idx_u32[i + 2] << 8) | idx_u32[i + 3];
-        }
-    }
-
-    uint32_t jump_pixel_idx = skip_intervals * interval;
-    uint16_t cur_x = jump_pixel_idx % img_w;
-    uint16_t cur_y = jump_pixel_idx / img_w;
-
-    /* ---------------- 4. 初始化解码状态 ---------------- */
-    const uint8_t *arry = qoi_start + byte_offset;
+    img_w = dec.img_w;
+    ix_start = dec.ix_start;
+    iy_start = dec.iy_start;
+    clip_x_end = dec.clip_x_end;
+    clip_y_end = dec.clip_y_end;
+    base_dest_x = dec.base_dest_x;
+    base_dest_y = dec.base_dest_y;
+    dst_stride = dec.dst_stride;
+    arry = dec.arry;
+    cur_x = dec.cur_x;
+    cur_y = dec.cur_y;
+    decoded_pixels = dec.decoded_pixels;
+    max_pixels = dec.max_pixels;
 
     uint8_t flag;
     uint8_t r = 0, g = 0, b = 0;
@@ -671,10 +715,7 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     colour_t *row_dst = 0;
     int32_t row_dst_y = -1;
 
-    uint32_t max_pixels = (uint32_t)img_w * img_h;
-    uint32_t decoded_pixels = jump_pixel_idx;
-
-    /* ---------------- 5. 主解码循环 ---------------- */
+    /* ---------------- 主解码循环 ---------------- */
     while (decoded_pixels < max_pixels)
     {
         flag = *arry++;
@@ -816,30 +857,50 @@ void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h,
     {
 #if (LCD_DEEP == DEEP_RGB565)
         uint16_t color_val = color.dat16;
+        /* 双像素打包成一个 32 位字，一次写 2 个像素，吞吐翻倍。
+         * Cortex-M0 不支持非对齐 32 位访问，因此每行先补齐到 4 字节边界，
+         * 再走 32 位主循环，最后收尾剩余像素。 */
+        uint32_t color_val32 = ((uint32_t)color_val << 16) | color_val;
 
         for (py = draw_y_start; py <= draw_y_end; py++)
         {
             colour_t *p_dst = dst_line;
-            uint16_t blocks = span / 8U;
-            uint16_t rem = span % 8U;
+            uint16_t count = span;
 
-            while (blocks--)
-            {
-                p_dst[0].dat16 = color_val;
-                p_dst[1].dat16 = color_val;
-                p_dst[2].dat16 = color_val;
-                p_dst[3].dat16 = color_val;
-                p_dst[4].dat16 = color_val;
-                p_dst[5].dat16 = color_val;
-                p_dst[6].dat16 = color_val;
-                p_dst[7].dat16 = color_val;
-                p_dst += 8;
-            }
-
-            while (rem--)
+            /* 1. 行首未 4 字节对齐时，先单独写一个像素补齐。 */
+            if (((uintptr_t)p_dst & 0x3U) != 0U)
             {
                 p_dst->dat16 = color_val;
                 p_dst++;
+                count--;
+            }
+
+            /* 2. 32 位主循环，每次写 2 个像素，再按 4 字一组展开。 */
+            {
+                uint32_t *p32 = (uint32_t *)p_dst;
+                uint16_t pairs = (uint16_t)(count >> 1);
+                uint16_t blocks = (uint16_t)(pairs / 4U);
+                uint16_t pair_rem = (uint16_t)(pairs % 4U);
+
+                while (blocks--)
+                {
+                    p32[0] = color_val32;
+                    p32[1] = color_val32;
+                    p32[2] = color_val32;
+                    p32[3] = color_val32;
+                    p32 += 4;
+                }
+                while (pair_rem--)
+                {
+                    *p32++ = color_val32;
+                }
+                p_dst = (colour_t *)p32;
+            }
+
+            /* 3. 收尾：奇数像素剩 1 个时单独写。 */
+            if (count & 1U)
+            {
+                p_dst->dat16 = color_val;
             }
 
             dst_line += dst_stride;
@@ -1087,19 +1148,74 @@ uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
  * @param opacity 传入，全局透明度(0~255)
  * @return 无
  */
+/**
+ * @brief 绘制单个抗锯齿圆角（仅处理一个 r×r 角落方块）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param cx 传入：角落外接方块左上角 X 坐标（屏幕绝对坐标）
+ * @param cy 传入：角落外接方块左上角 Y 坐标
+ * @param r 传入：圆角半径（= 方块边长）
+ * @param quadrant 传入：象限标识（WE_MASK_QUADRANT_LT/RT/LB/RB）
+ * @param color 传入：填充颜色
+ * @param opacity 传入：整体透明度（0~255）
+ * @return 无
+ * @note 仅在 r×r 角落区域执行 quarter-circle 子采样抗锯齿，
+ *       直边和中心实心区域由调用方用 we_fill_rect 快速填充。
+ */
+static void _we_draw_round_corner(we_lcd_t *p_lcd, int16_t cx, int16_t cy, uint16_t r,
+                                  uint8_t quadrant, colour_t color, uint8_t opacity)
+{
+    int16_t cx0 = cx;
+    int16_t cy0 = cy;
+    int16_t cx1 = (int16_t)(cx + (int16_t)r - 1);
+    int16_t cy1 = (int16_t)(cy + (int16_t)r - 1);
+    int16_t px;
+    int16_t py;
+    uint16_t stride;
+    colour_t *row;
+
+    /* 先把角落方块裁剪到当前 PFB 切片，避免越界写入。 */
+    if (cx0 < (int16_t)p_lcd->pfb_area.x0) cx0 = (int16_t)p_lcd->pfb_area.x0;
+    if (cy0 < (int16_t)p_lcd->pfb_y_start) cy0 = (int16_t)p_lcd->pfb_y_start;
+    if (cx1 > (int16_t)p_lcd->pfb_area.x1) cx1 = (int16_t)p_lcd->pfb_area.x1;
+    if (cy1 > (int16_t)p_lcd->pfb_y_end) cy1 = (int16_t)p_lcd->pfb_y_end;
+    if (cx0 > cx1 || cy0 > cy1)
+        return;
+
+    stride = p_lcd->pfb_width;
+    row = p_lcd->pfb_gram
+        + (uint32_t)(cy0 - (int16_t)p_lcd->pfb_y_start) * stride
+        + (uint32_t)(cx0 - (int16_t)p_lcd->pfb_area.x0);
+
+    for (py = cy0; py <= cy1; py++, row += stride)
+    {
+        colour_t *p = row;
+
+        for (px = cx0; px <= cx1; px++, p++)
+        {
+            uint8_t mask_alpha = we_mask_quarter_circle_alpha(cx, cy, r, quadrant, px, py);
+            if (mask_alpha == 0U)
+                continue;
+            if (mask_alpha >= 250U && opacity >= 250U)
+            {
+                we_store_color(p, color);
+            }
+            else
+            {
+                /* 用 we_div255 近似替换软件除法（M0 上每次 /255 约 90+ cycle）。 */
+                uint8_t alpha = we_div255((uint32_t)opacity * mask_alpha);
+                we_store_blended_color(p, color, alpha);
+            }
+        }
+    }
+}
+
 void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
                                       uint16_t w, uint16_t h, uint16_t radius,
                                       colour_t color, uint8_t opacity)
 {
     uint16_t r;
-    int16_t draw_x0;
-    int16_t draw_y0;
-    int16_t draw_x1;
-    int16_t draw_y1;
-    int16_t px;
-    int16_t py;
-    uint16_t stride;
-    colour_t *row;
+    int16_t x1;
+    int16_t y1;
 
     if (p_lcd == NULL || w == 0U || h == 0U || opacity == 0U)
         return;
@@ -1116,45 +1232,47 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
         return;
     }
 
-    draw_x0 = x;
-    draw_y0 = y;
-    draw_x1 = (int16_t)(x + (int16_t)w - 1);
-    draw_y1 = (int16_t)(y + (int16_t)h - 1);
+    x1 = (int16_t)(x + (int16_t)w - 1);
+    y1 = (int16_t)(y + (int16_t)h - 1);
 
-    if (draw_x0 < (int16_t)p_lcd->pfb_area.x0) draw_x0 = (int16_t)p_lcd->pfb_area.x0;
-    if (draw_y0 < (int16_t)p_lcd->pfb_y_start) draw_y0 = (int16_t)p_lcd->pfb_y_start;
-    if (draw_x1 > (int16_t)p_lcd->pfb_area.x1) draw_x1 = (int16_t)p_lcd->pfb_area.x1;
-    if (draw_y1 > (int16_t)p_lcd->pfb_y_end) draw_y1 = (int16_t)p_lcd->pfb_y_end;
-    if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
+    /* --- 1. 中间整块实心带（圆角上下两条带之间），直接走快速矩形填充 ---
+     * 行范围 [y+r, y1-r]，高度 h-2r；当 h==2r（如胶囊/圆形）时高度为 0，
+     * we_fill_rect 会因 h==0 直接返回。 */
+    we_fill_rect(p_lcd, x, (int16_t)(y + (int16_t)r), w, (uint16_t)(h - 2U * r), color, opacity);
+
+    /* --- 2. 上下两条带的中心实心区（去掉左右两个圆角列）---
+     * 宽度 w-2r；当 w==2r 时宽度为 0，we_fill_rect 直接返回。 */
+    we_fill_rect(p_lcd, (int16_t)(x + (int16_t)r), y, (uint16_t)(w - 2U * r), r, color, opacity);
+    we_fill_rect(p_lcd, (int16_t)(x + (int16_t)r), (int16_t)(y1 - (int16_t)r + 1),
+                 (uint16_t)(w - 2U * r), r, color, opacity);
+
+    /* --- 3. 仅在 4 个 r×r 角落方块内做抗锯齿，函数调用与子采样开销集中于此 --- */
+    _we_draw_round_corner(p_lcd, x, y, r, WE_MASK_QUADRANT_LT, color, opacity);
+    _we_draw_round_corner(p_lcd, (int16_t)(x1 - (int16_t)r + 1), y, r, WE_MASK_QUADRANT_RT, color, opacity);
+    _we_draw_round_corner(p_lcd, x, (int16_t)(y1 - (int16_t)r + 1), r, WE_MASK_QUADRANT_LB, color, opacity);
+    _we_draw_round_corner(p_lcd, (int16_t)(x1 - (int16_t)r + 1), (int16_t)(y1 - (int16_t)r + 1),
+                          r, WE_MASK_QUADRANT_RB, color, opacity);
+}
+
+/**
+ * @brief 带裁剪的单像素写入（内联版，供 we_draw_pixel / we_draw_line 等热路径复用）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param px 传入：像素 X 坐标（屏幕绝对坐标）
+ * @param py 传入：像素 Y 坐标
+ * @param color 传入：像素颜色
+ * @param opacity 传入：透明度（0~255）
+ * @return 无
+ * @note static inline，调用方循环内可被编译器内联，省去函数调用开销并复用 PFB 字段加载。
+ */
+static __inline void _we_put_pixel_clipped(we_lcd_t *p_lcd, int16_t px, int16_t py, colour_t color, uint8_t opacity)
+{
+    colour_t *dst;
+
+    if (px < p_lcd->pfb_area.x0 || px > p_lcd->pfb_area.x1 || py < p_lcd->pfb_y_start || py > p_lcd->pfb_y_end)
         return;
 
-    stride = p_lcd->pfb_width;
-    row = p_lcd->pfb_gram
-        + (uint32_t)(draw_y0 - (int16_t)p_lcd->pfb_y_start) * stride
-        + (uint32_t)(draw_x0 - (int16_t)p_lcd->pfb_area.x0);
-
-    for (py = draw_y0; py <= draw_y1; py++, row += stride)
-    {
-        colour_t *p = row;
-
-        for (px = draw_x0; px <= draw_x1; px++, p++)
-        {
-            uint8_t mask_alpha = we_mask_round_rect_alpha(x, y, w, h, r, px, py);
-            if (mask_alpha == 0U)
-                continue;
-            if (mask_alpha >= 250U && opacity >= 250U)
-            {
-                we_store_color(p, color);
-            }
-            else
-            {
-                /* 用 we_div255 近似替换软件除法（M0 上每次 /255 约 90+ cycle）。
-                 * 输入上限 255*255 = 65025，we_div255 结果天然 ≤255，无需再 clamp。 */
-                uint8_t alpha = we_div255((uint32_t)opacity * mask_alpha);
-                we_store_blended_color(p, color, alpha);
-            }
-        }
-    }
+    dst = p_lcd->pfb_gram + (py - p_lcd->pfb_y_start) * p_lcd->pfb_width + (px - p_lcd->pfb_area.x0);
+    we_store_blended_color(dst, color, opacity);
 }
 
 /**
@@ -1167,14 +1285,7 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
  */
 void we_draw_pixel(we_lcd_t *p_lcd, int16_t px, int16_t py, colour_t color, uint8_t opacity)
 {
-    colour_t *dst;
-
-    if (px < p_lcd->pfb_area.x0 || px > p_lcd->pfb_area.x1 || py < p_lcd->pfb_y_start || py > p_lcd->pfb_y_end)
-        return;
-
-    dst = p_lcd->pfb_gram + (py - p_lcd->pfb_y_start) * p_lcd->pfb_width + (px - p_lcd->pfb_area.x0);
-
-    we_store_blended_color(dst, color, opacity);
+    _we_put_pixel_clipped(p_lcd, px, py, color, opacity);
 }
 
 /**
@@ -1253,25 +1364,22 @@ void we_draw_line(we_lcd_t *p_lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y
 
         if (steep)
         {
-            we_draw_pixel(p_lcd, (int16_t)(yi + lo - 1), x, color, a1);
+            _we_put_pixel_clipped(p_lcd, (int16_t)(yi + lo - 1), x, color, a1);
             for (t = lo; t <= hi; t++)
-                we_draw_pixel(p_lcd, (int16_t)(yi + t), x, color, opacity);
-            we_draw_pixel(p_lcd, (int16_t)(yi + hi + 1), x, color, a2);
+                _we_put_pixel_clipped(p_lcd, (int16_t)(yi + t), x, color, opacity);
+            _we_put_pixel_clipped(p_lcd, (int16_t)(yi + hi + 1), x, color, a2);
         }
         else
         {
-            we_draw_pixel(p_lcd, x, (int16_t)(yi + lo - 1), color, a1);
+            _we_put_pixel_clipped(p_lcd, x, (int16_t)(yi + lo - 1), color, a1);
             for (t = lo; t <= hi; t++)
-                we_draw_pixel(p_lcd, x, (int16_t)(yi + t), color, opacity);
-            we_draw_pixel(p_lcd, x, (int16_t)(yi + hi + 1), color, a2);
+                _we_put_pixel_clipped(p_lcd, x, (int16_t)(yi + t), color, opacity);
+            _we_put_pixel_clipped(p_lcd, x, (int16_t)(yi + hi + 1), color, a2);
         }
 
         y_fp += grad;
     }
 }
-
-#include <stdbool.h>
-#include <stdint.h>
 
 /* =========================================================================
  * 预计算 0~128 步(对应 0°~90°)正弦表，Q15 格式，1.0 = 32767
@@ -1430,38 +1538,49 @@ void we_fill_gram(we_lcd_t *p_lcd, colour_t c)
 #error ("Not support DEEP_RGB332 yet!")
 
 #elif (LCD_DEEP == DEEP_RGB565)
-    // RGB565 直接用原生 16 位指针写入，避免非对齐访问问题。
+    // RGB565 用 32 位双像素写入，吞吐翻倍。
     colour_t *gram16 = p_lcd->pfb_gram;
     uint16_t color_val = c.dat16; // 提前提取到局部变量，避免循环里重复解引用
+    uint32_t color_val32 = ((uint32_t)color_val << 16) | color_val;
 
-    // 每次展开 8 像素，在 F103 这类 MCU 上通常是更稳的折中。
-    blocks = total_pixels / 8;
-    rem = total_pixels % 8;
-
-    for (i = 0; i < blocks; i++)
+    /* PFB 基址未 4 字节对齐时先补一个像素，保证后续 32 位访问对齐（M0 必需）。 */
+    if (total_pixels > 0U && ((uintptr_t)gram16 & 0x3U) != 0U)
     {
         gram16->dat16 = color_val;
         gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
-        gram16->dat16 = color_val;
-        gram16++;
+        total_pixels--;
     }
 
-    for (i = 0; i < rem; i++)
+    {
+        uint32_t *gram32 = (uint32_t *)gram16;
+        uint32_t pairs = total_pixels >> 1;
+
+        blocks = pairs / 8U; // 每块 8 个 32 位字 = 16 像素
+        rem = pairs % 8U;
+
+        for (i = 0; i < blocks; i++)
+        {
+            gram32[0] = color_val32;
+            gram32[1] = color_val32;
+            gram32[2] = color_val32;
+            gram32[3] = color_val32;
+            gram32[4] = color_val32;
+            gram32[5] = color_val32;
+            gram32[6] = color_val32;
+            gram32[7] = color_val32;
+            gram32 += 8;
+        }
+        for (i = 0; i < rem; i++)
+        {
+            *gram32++ = color_val32;
+        }
+        gram16 = (colour_t *)gram32;
+    }
+
+    /* 收尾奇数像素。 */
+    if (total_pixels & 1U)
     {
         gram16->dat16 = color_val;
-        gram16++;
     }
 
 #elif (LCD_DEEP == DEEP_RGB888)
@@ -1546,6 +1665,17 @@ static void _we_engine_refresh(we_lcd_t *p_lcd)
         }
         curr = curr->next;
     }
+
+    /* 3. LCD 级 overlay popup 永远最后绘制，避免被普通父容器裁剪。 */
+    if (p_lcd->popup_layer.active && p_lcd->popup_layer.draw_cb != NULL)
+    {
+        we_area_t *a = &p_lcd->popup_layer.area;
+        if ((a->x1 >= p_lcd->pfb_area.x0) && (a->x0 <= p_lcd->pfb_area.x1) &&
+            (a->y1 >= (int16_t)p_lcd->pfb_y_start) && (a->y0 <= (int16_t)p_lcd->pfb_y_end))
+        {
+            p_lcd->popup_layer.draw_cb(p_lcd->popup_layer.owner);
+        }
+    }
 }
 
 /**
@@ -1617,16 +1747,22 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
     if (y + h > p_lcd->height)
         h = p_lcd->height - y;
 
-    /* 5. 记录这次真实下发到底层的块数和像素数。
+    /* 5. 核心端口回调缺失时直接跳过，避免异常初始化下统计失真或空指针调用。 */
+    if (p_lcd->set_addr_cb == NULL || p_lcd->flush_cb == NULL)
+        return;
+
+    /* 6. 记录这次真实下发到底层的块数和像素数。
      * 统计放在裁剪之后，才能更接近 LCD 真正处理的有效负载。 */
+#if (WE_CFG_ENABLE_RENDER_STATS == 1)
     p_lcd->stat_pfb_pushes++;
     p_lcd->stat_pushed_pixels += (uint32_t)w * h;
+#endif
 
-    /* 6. 预计算本次刷新的最终区域信息。 */
+    /* 7. 预计算本次刷新的最终区域信息。 */
     uint16_t x1 = x + w - 1;
     uint16_t y1 = y + h - 1;
 
-    /* 7. 根据当前宽度和 GRAM_NUM，算出单次最多能刷多少行。 */
+    /* 8. 根据当前宽度和 GRAM_NUM，算出单次最多能刷多少行。 */
     uint16_t max_lines = p_lcd->pfb_size / w;
 
     if (max_lines == 0)
@@ -1638,15 +1774,13 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
     p_lcd->pfb_area.y1 = y1;
     p_lcd->pfb_width = w;
 
-    /* 8. 先告诉底层 LCD 本轮整块刷新的目标窗口。 */
-    if (p_lcd->set_addr_cb == NULL)
-        return;
+    /* 9. 先告诉底层 LCD 本轮整块刷新的目标窗口。 */
     p_lcd->set_addr_cb((uint16_t)x, (uint16_t)y, x1, y1);
 
     uint16_t current_y = y;
     uint16_t lines_left = h;
 
-    /* 9. 按块循环：
+    /* 10. 按块循环：
      *    每次只生成当前块的 PFB 内容，再立即推到底层端口。 */
     while (lines_left > 0)
     {
@@ -1656,7 +1790,7 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
         p_lcd->pfb_y_start = current_y;
         p_lcd->pfb_y_end = current_y + lines_this_chunk - 1;
 
-        /* 10. 先重绘当前块对应的 PFB 内容。 */
+        /* 11. 先重绘当前块对应的 PFB 内容。 */
         _we_engine_refresh(p_lcd);
 
 #if (WE_CFG_DEBUG_DIRTY_RECT == 1)
@@ -1888,6 +2022,11 @@ void we_gui_task_handler(we_lcd_t *p_lcd)
     _we_gui_run_tasks(p_lcd, elapsed_ms);
     _we_gui_run_timers(p_lcd, elapsed_ms);
 
+#if (WE_CFG_DEBUG_PERF_STRESS == 1)
+    /* 性能压测：在刷新前强制标脏所有控件，制造每帧全量重绘负载。 */
+    _we_gui_perf_stress_invalidate(p_lcd);
+#endif
+
     /* 3. 消费脏矩形并推屏。 */
     _we_gui_flush_dirty(p_lcd);
 }
@@ -1910,38 +2049,60 @@ void we_obj_set_pos(we_obj_t *obj, int16_t new_x, int16_t new_y)
     if (obj->x == new_x && obj->y == new_y)
         return;
 
+    if (obj->class_p != NULL && obj->class_p->set_pos_cb != NULL)
+    {
+        obj->class_p->set_pos_cb(obj, new_x, new_y);
+        return;
+    }
+
     // 1. 先把旧位置标脏，保证移动后旧区域会被重绘擦除。
     we_obj_invalidate(obj);
 
-#if 0
-    if (obj->parent != NULL)
-    {
-        we_container_obj_t *parent = (we_container_obj_t *)obj->parent;
-
-        curr = parent->children_head;
-        prev = NULL;
-        while (curr != NULL)
-        {
-            if (curr == obj)
-            {
-                if (prev == NULL)
-                    parent->children_head = curr->next;
-                else
-                    prev->next = curr->next;
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
-        }
-    }
-
-    // 2. 更新对象坐标。
-#endif
+    // 2. 更新对象坐标；移动不改变所属链表和绘制顺序。
     obj->x = new_x;
     obj->y = new_y;
 
     // 3. 再把新位置标脏，保证新区域会被绘制出来。
     we_obj_invalidate(obj);
+}
+
+/**
+ * @brief 将对象追加到指定对象链表尾部
+ * @param head_p 传入，链表头指针地址
+ * @param obj 传入，待追加对象
+ * @return 无
+ */
+void we_obj_append_to_list(we_obj_t **head_p, we_obj_t *obj)
+{
+    we_obj_t *tail;
+
+    if (head_p == NULL || obj == NULL)
+        return;
+
+    obj->next = NULL;
+    if (*head_p == NULL)
+    {
+        *head_p = obj;
+        return;
+    }
+
+    tail = *head_p;
+    while (tail->next != NULL)
+        tail = tail->next;
+    tail->next = obj;
+}
+
+/**
+ * @brief 将对象追加到 LCD 顶层对象链表尾部
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @param obj 传入，待追加对象
+ * @return 无
+ */
+void we_obj_attach_to_lcd(we_lcd_t *lcd, we_obj_t *obj)
+{
+    if (lcd == NULL)
+        return;
+    we_obj_append_to_list(&lcd->obj_list_head, obj);
 }
 
 /**
@@ -2080,6 +2241,54 @@ void we_obj_invalidate_area(we_obj_t *obj, int16_t x, int16_t y, int16_t w, int1
 }
 
 /**
+ * @brief 基于父节点裁剪后的局部区域标脏函数，并排除一个安全空洞矩形
+ * @param obj 传入，目标对象指针
+ * @param x 传入，整体脏区左上角 X 坐标（屏幕绝对坐标）
+ * @param y 传入，整体脏区左上角 Y 坐标（屏幕绝对坐标）
+ * @param w 传入，整体脏区宽度
+ * @param h 传入，整体脏区高度
+ * @param ex 传入，排除区域左上角 X 坐标（屏幕绝对坐标）
+ * @param ey 传入，排除区域左上角 Y 坐标（屏幕绝对坐标）
+ * @param ew 传入，排除区域宽度
+ * @param eh 传入，排除区域高度
+ * @return 无
+ * @note 该接口只在新增 dirty 时拆分 bbox - hole；不会从已有 dirty list 中删除区域。
+ */
+void we_obj_invalidate_area_exclude(we_obj_t *obj, int16_t x, int16_t y, int16_t w, int16_t h,
+                                    int16_t ex, int16_t ey, int16_t ew, int16_t eh)
+{
+    int16_t x0;
+    int16_t y0;
+    int16_t x1;
+    int16_t y1;
+    we_obj_t *p;
+
+    if (obj == NULL || obj->lcd == NULL || w <= 0 || h <= 0)
+        return;
+
+    x0 = x;
+    y0 = y;
+    x1 = (int16_t)(x + w - 1);
+    y1 = (int16_t)(y + h - 1);
+
+    p = obj->parent;
+    while (p)
+    {
+        x0 = WE_MAX(x0, p->x);
+        y0 = WE_MAX(y0, p->y);
+        x1 = WE_MIN(x1, p->x + p->w - 1);
+        y1 = WE_MIN(y1, p->y + p->h - 1);
+        p = p->parent;
+    }
+
+    if (x0 <= x1 && y0 <= y1)
+    {
+        we_dirty_invalidate_exclude(&obj->lcd->dirty_mgr, x0, y0, x1 - x0 + 1, y1 - y0 + 1,
+                                    ex, ey, ew, eh);
+    }
+}
+
+/**
  * @brief 基于父节点层层裁剪的智能标脏函数，默认标脏整个控件
  * @param obj 传入，目标对象指针
  * @return 无
@@ -2090,6 +2299,138 @@ void we_obj_invalidate(we_obj_t *obj)
     if (obj == NULL)
         return;
     we_obj_invalidate_area(obj, obj->x, obj->y, obj->w, obj->h);
+}
+
+/**
+ * @brief 标脏当前 LCD 的 overlay popup 区域。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_popup_layer_invalidate(we_lcd_t *lcd)
+{
+    we_area_t *a;
+
+    if (lcd == NULL || lcd->popup_layer.active == 0U)
+        return;
+
+    a = &lcd->popup_layer.area;
+    we_dirty_invalidate(&lcd->dirty_mgr, a->x0, a->y0,
+                        (int16_t)(a->x1 - a->x0 + 1), (int16_t)(a->y1 - a->y0 + 1));
+}
+
+/**
+ * @brief 判断指定 owner 是否为当前 overlay popup。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @param owner 传入，popup 拥有者
+ * @return 1 表示匹配，0 表示否
+ */
+uint8_t we_popup_layer_is_owner(we_lcd_t *lcd, void *owner)
+{
+    if (lcd == NULL || owner == NULL)
+        return 0U;
+    return (lcd->popup_layer.active && lcd->popup_layer.owner == owner) ? 1U : 0U;
+}
+
+/**
+ * @brief 关闭当前 overlay popup。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_popup_layer_close_any(we_lcd_t *lcd)
+{
+    void (*close_cb)(void *owner);
+    void *owner;
+    we_area_t old_area;
+
+    if (lcd == NULL || lcd->popup_layer.active == 0U)
+        return;
+
+    close_cb = lcd->popup_layer.close_cb;
+    owner = lcd->popup_layer.owner;
+    old_area = lcd->popup_layer.area;
+
+    lcd->popup_layer.active = 0U;
+    lcd->popup_layer.type = WE_POPUP_TYPE_NONE;
+    lcd->popup_layer.owner = NULL;
+    lcd->popup_layer.draw_cb = NULL;
+    lcd->popup_layer.event_cb = NULL;
+    lcd->popup_layer.close_cb = NULL;
+
+    we_dirty_invalidate(&lcd->dirty_mgr, old_area.x0, old_area.y0,
+                        (int16_t)(old_area.x1 - old_area.x0 + 1),
+                        (int16_t)(old_area.y1 - old_area.y0 + 1));
+
+    if (close_cb != NULL)
+        close_cb(owner);
+}
+
+/**
+ * @brief 若 owner 匹配则关闭当前 overlay popup。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @param owner 传入，popup 拥有者
+ * @return 无
+ */
+void we_popup_layer_close(we_lcd_t *lcd, void *owner)
+{
+    if (we_popup_layer_is_owner(lcd, owner))
+        we_popup_layer_close_any(lcd);
+}
+
+/**
+ * @brief 打开一个 LCD 级 overlay popup。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @param type 传入，popup 类型
+ * @param owner 传入，popup 拥有者
+ * @param area 传入，popup 区域
+ * @param draw_cb 传入，popup 绘制回调
+ * @param event_cb 传入，popup 事件回调
+ * @param close_cb 传入，popup 关闭回调
+ * @return 无
+ */
+void we_popup_layer_open(we_lcd_t *lcd, uint8_t type, void *owner,
+                         const we_area_t *area,
+                         void (*draw_cb)(void *owner),
+                         uint8_t (*event_cb)(void *owner, we_event_t event, we_indev_data_t *data),
+                         void (*close_cb)(void *owner))
+{
+    if (lcd == NULL || owner == NULL || area == NULL || draw_cb == NULL)
+        return;
+
+    if (lcd->popup_layer.active)
+        we_popup_layer_close_any(lcd);
+
+    lcd->popup_layer.active = 1U;
+    lcd->popup_layer.type = type;
+    lcd->popup_layer.owner = owner;
+    lcd->popup_layer.area = *area;
+    lcd->popup_layer.draw_cb = draw_cb;
+    lcd->popup_layer.event_cb = event_cb;
+    lcd->popup_layer.close_cb = close_cb;
+
+    we_popup_layer_invalidate(lcd);
+}
+
+/**
+ * @brief 更新当前 overlay popup 区域。
+ * @param lcd 传入，GUI 屏幕上下文指针
+ * @param owner 传入，popup 拥有者
+ * @param area 传入，新 popup 区域
+ * @return 无
+ */
+void we_popup_layer_set_area(we_lcd_t *lcd, void *owner, const we_area_t *area)
+{
+    we_area_t old_area;
+
+    if (!we_popup_layer_is_owner(lcd, owner) || area == NULL)
+        return;
+
+    old_area = lcd->popup_layer.area;
+    lcd->popup_layer.area = *area;
+
+    we_dirty_invalidate(&lcd->dirty_mgr, old_area.x0, old_area.y0,
+                        (int16_t)(old_area.x1 - old_area.x0 + 1),
+                        (int16_t)(old_area.y1 - old_area.y0 + 1));
+    we_popup_layer_invalidate(lcd);
 }
 
 /**
@@ -2145,9 +2486,11 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
         p_lcd->timer_list[i].repeat = 0U;
         p_lcd->timer_list[i].active = 0U;
     }
+#if (WE_CFG_ENABLE_RENDER_STATS == 1)
     p_lcd->stat_render_frames = 0U;
     p_lcd->stat_pfb_pushes = 0U;
     p_lcd->stat_pushed_pixels = 0U;
+#endif
     p_lcd->indev_data.x = 0;
     p_lcd->indev_data.y = 0;
     p_lcd->indev_data.state = WE_TOUCH_STATE_NONE;
@@ -2196,6 +2539,27 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
 
     if (lcd == NULL || data == NULL)
         return;
+
+    /* LCD 级 overlay popup 拥有最高输入优先级：
+     * popup 激活时，先把原始触摸状态事件交给 popup 处理，
+     * 若 popup 消费（返回非 0），直接结束，普通对象不再收到本次事件。
+     * 这样点击 popup 外部可由 popup 自行决定关闭，避免穿透到下层控件。 */
+    if (lcd->popup_layer.active && lcd->popup_layer.event_cb != NULL)
+    {
+        we_event_t pe = WE_EVENT_STAY;
+        if (data->state == WE_TOUCH_STATE_PRESSED)
+            pe = WE_EVENT_PRESSED;
+        else if (data->state == WE_TOUCH_STATE_RELEASED)
+            pe = WE_EVENT_RELEASED;
+        else if (data->state == WE_TOUCH_STATE_STAY)
+            pe = WE_EVENT_STAY;
+
+        if (data->state != WE_TOUCH_STATE_NONE)
+        {
+            if (lcd->popup_layer.event_cb(lcd->popup_layer.owner, pe, data) != 0U)
+                return;
+        }
+    }
 
     we_obj_t *target = NULL;
     we_obj_t *curr = lcd->obj_list_head;
