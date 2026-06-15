@@ -58,6 +58,7 @@ set(DEMO_SOURCES
     "../Demo/demo_dropdown.c"
     "../Demo/demo_stepper.c"
     "../Demo/demo_indicator.c"
+    "../Demo/demo_showcase.c"
     "../tool/font2c/output/arial_16_4bbp.c"
     "../tool/font2c/output/msyh_16_4bbp_ascii_menu_mix.c"
     "../tool/font2c/output/msyh_24_2bbp_ascii_menu_mix.c"

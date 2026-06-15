@@ -162,27 +162,34 @@ static uint8_t _checkbox_event_cb(void *ptr, we_event_t event, we_indev_data_t *
 {
     we_checkbox_obj_t *cb = (we_checkbox_obj_t *)ptr;
 
-    if (cb->user_event_cb != NULL)
-        return cb->user_event_cb(ptr, event, data);
-
-    (void)data;
-
+    /* 叠加语义：默认按压视觉始终执行；业务（CLICKED 是否勾选）
+     * 在有用户回调时交给用户回调，避免默认勾选与用户逻辑双重生效。 */
     switch (event)
     {
     case WE_EVENT_PRESSED:
         cb->pressed = 1;
-        _cb_invalidate_box(cb);
+        /* 按压样式同时改变方框与文字颜色，须整控件标脏，
+         * 只标方框会让右侧文字停留在旧色。 */
+        we_obj_invalidate((we_obj_t *)cb);
         break;
     case WE_EVENT_RELEASED:
         cb->pressed = 0;
-        _cb_invalidate_box(cb);
-        break;
-    case WE_EVENT_CLICKED:
-        we_checkbox_toggle(cb);
+        we_obj_invalidate((we_obj_t *)cb);
         break;
     default:
         break;
     }
+
+    if (cb->user_event_cb != NULL)
+    {
+        (void)cb->user_event_cb(ptr, event, data);
+        return 1;
+    }
+
+    (void)data;
+
+    if (event == WE_EVENT_CLICKED)
+        we_checkbox_toggle(cb);
     return 1;
 }
 
@@ -249,6 +256,7 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
     obj->opacity = 255;
     obj->checked = 0;
     obj->pressed = 0;
+    obj->changed_cb = NULL;
 
     /* 默认指向 Flash 内置样式表 */
     obj->styles = _default_styles;
@@ -292,6 +300,22 @@ void we_checkbox_toggle(we_checkbox_obj_t *obj)
         return;
     obj->checked = obj->checked ? 0U : 1U;
 _cb_invalidate_box(obj);
+
+    if (obj->changed_cb != NULL)
+        obj->changed_cb(obj, obj->checked);
+}
+
+/**
+ * @brief 注册勾选状态改变回调（替代轮询 is_checked）。
+ * @param obj 目标控件对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_checkbox_set_changed_cb(we_checkbox_obj_t *obj, we_checkbox_changed_cb_t cb)
+{
+    if (obj == NULL)
+        return;
+    obj->changed_cb = cb;
 }
 
 /**

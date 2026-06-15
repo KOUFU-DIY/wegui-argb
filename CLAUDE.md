@@ -98,7 +98,7 @@ The runtime centers on one `we_lcd_t` instance (`Core/we_gui_driver.h`). That ob
 - the partial frame buffer (PFB/GRAM) and LCD flush callbacks,
 - the dirty-rectangle manager,
 - the root linked list of GUI objects,
-- GUI internal task slots and user timer slots,
+- GUI internal task slots, user timer slots, and the central animation list (`anim_head`),
 - input state (`we_indev_data_t`) and optional storage callback,
 - render statistics counters.
 
@@ -152,6 +152,8 @@ we_gui_timer_delete(lcd, id);
 
 Timer/task storage is fixed-size: `WE_CFG_GUI_TASK_MAX_NUM` for GUI internal tasks and `WE_CFG_GUI_TIMER_MAX_NUM` for user timers.
 
+**Widget animations do NOT use task slots.** They run on the central animation engine: a `we_anim_t` node embedded in each widget struct, linked into `lcd->anim_head` via `we_anim_start()`/`we_anim_stop()` and stepped by `we_gui_task_handler()` each cycle. `we_anim_start` cannot fail and the count is unbounded; finished animations unlink themselves (idle cost = one NULL check). Rule: widget delete functions must call `we_anim_stop` before `we_obj_delete` (the node is owned by the widget). Users: toggle, progress, indicator, msgbox, slideshow, scroll_panel, dropdown (scrollbar fade).
+
 ### Widgets and Important Semantics
 
 Widget implementations live in `Core/`; demos are in `Demo/`. Current main widgets include `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`, `dropdown`, `stepper`, and `indicator`.
@@ -160,14 +162,14 @@ Important non-obvious semantics:
 - `img_ex` and `label_ex` use a **512-step angle unit** (`0..511` = full circle; 90° = 128; 180° = 256). Use `WE_ANGLE(deg)` or `WE_DEG(deg)`.
 - `img_ex`/`label_ex` scale uses a **256-step scale unit** (`256` = 1.0×, `128` = 0.5×, `512` = 2.0×).
 - For `img_ex`, `cx/cy` are the screen transform center, while `pivot_ofs_x/y` are source-image local pivot offsets; do not merge those coordinate systems. Input images must be RGB565 uncompressed.
-- `group` is the lightweight child-container and structural base for composites such as `slideshow`; children use local coordinates with opacity propagation and coordinated movement.
+- `group` is the lightweight child-container and structural base for composites such as `slideshow`; children use local coordinates with opacity propagation and coordinated movement. Opacity propagation works via the lcd-level `opa_scale` multiplier: containers (group/slideshow/scroll_panel) multiply their opacity into it around the children pass, and every drawing primitive consumes it once at entry (`we_opa_apply`, zero cost when no fade is active). A fully transparent group also stops intercepting input.
 - `slideshow` handles paged local-coordinate children and swipe/page snapping.
 - `msgbox` is a modal `we_popup_obj_t`; show/hide through `we_popup_show()` / `we_popup_hide()`.
 - `chart` uses a circular buffer and pixel-space data values. There is no Y-axis scaling API; callers must pre-scale raw data to pixels before pushing. `stroke` controls line width and `WE_CHART_AA_MAX` caps anti-aliased feather height.
 - `progress` uses a direct `0..255` target value with smooth animated display transitions.
 - `dropdown` is data-driven: the caller owns the `we_dropdown_option_t` array (the widget stores only a pointer, never copies text). Its expanded list draws through the LCD-level overlay popup so it is not clipped by `group`/`scroll_panel`/`slideshow` parents. Only one popup may be open screen-wide, enforced by the driver's single `popup_layer` slot (`we_popup_layer_open/close/...` in `we_gui_driver.h`).
 - `stepper` stores its value as a **fixed-point `int32`**: real value = `value / 10^decimals`. Decimals are split out only at draw time to avoid Cortex-M0 soft-float cost. Continuous hold-to-repeat reuses the `STAY` event and does **not** consume a timer slot.
-- `indicator` is a circular status lamp that animates an on/off color transition (optional glow) via a per-object GUI task and `we_lerp`/`we_ease_*`. Default is read-only; enable `we_indicator_set_clickable()` for click-toggle. The glow stays inside the base box so it never leaks past dirty rectangles.
+- `indicator` is a circular status lamp that animates an on/off color transition (optional glow) via the central animation engine (`we_anim_t`, no task slot) and `we_lerp`/`we_ease_*`. Default is read-only; enable `we_indicator_set_clickable()` for click-toggle. The glow stays inside the base box so it never leaks past dirty rectangles.
 - `Core/we_motion.h` provides easing helpers accepting `t ∈ [0, 256]`.
 
 ### Dirty Rectangles and PFB/GRAM

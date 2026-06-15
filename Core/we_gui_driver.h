@@ -240,14 +240,30 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     } we_obj_t;
 
     /* 可挂子控件对象的最小公共前缀：
-     * base + task_id + children_head。
-     * 目前 slideshow 等复合控件用它与 driver 共享父子摘链语义。 */
+     * base + children_head。
+     * 目前 group/slideshow/scroll_panel 用它与 driver 共享父子摘链语义。
+     * （历史上前缀里还有 int8_t task_id；控件动画迁入中央动画引擎后已移除，
+     *  若新增复合容器，结构体前两个成员必须保持 base、children_head 顺序。） */
     typedef struct
     {
         we_obj_t base;
-        int8_t task_id;
         we_obj_t *children_head;
     } we_child_owner_t;
+
+    /* ---------------- 中央动画引擎 ----------------
+     * 动画节点内嵌在控件结构体里：零堆、零 GUI task 槽、数量无上限。
+     * we_gui_task_handler 每个调度周期遍历该链表并调用 step_cb；
+     * 控件动画到达目标态后在 step_cb 内自行 we_anim_stop 摘链。
+     * 约定：
+     * 1. step_cb 内只允许摘除自身节点，不得摘除其他节点；
+     * 2. 删除带动画的控件前必须先 we_anim_stop（节点归控件所有，
+     *    内核无法代摘，否则链上留悬空指针——同 pressed_obj 教训）。 */
+    typedef struct we_anim_s
+    {
+        struct we_anim_s *next;                            /* 侵入式链表指针 */
+        void (*step_cb)(void *owner, uint16_t elapsed_ms); /* 每周期推进回调 */
+        void *owner;                                       /* 回指控件实例 */
+    } we_anim_t;
 
     typedef struct we_lcd_t
     {
@@ -270,13 +286,17 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         we_obj_t *obj_list_head;
         we_gui_task_node_t task_list[WE_CFG_GUI_TASK_MAX_NUM];    // GUI 内部周期任务表
         we_gui_timer_node_t timer_list[WE_CFG_GUI_TIMER_MAX_NUM]; // 面向用户的 GUI 定时器表
+        we_anim_t *anim_head;                                     // 中央动画链表头（控件动画不占 task 槽）
         uint16_t tick_elapsed_ms;                                 // GUI 内核累计的未消费时间
         we_indev_data_t indev_data;                               // 当前 LCD 实例绑定的输入状态缓存
         int16_t gesture_press_x;                                  // 手势识别：按下时 X 坐标
         int16_t gesture_press_y;                                  // 手势识别：按下时 Y 坐标
+        we_obj_t *pressed_obj;                                    // 当前按压中的对象（we_obj_delete 会同步清空，防悬空派发）
+        uint8_t gesture_had_stay;                                 // 本次触摸序列是否经历过 STAY（拖拽）
         we_input_read_cb_t input_read_cb;                         // 当前 LCD 绑定的输入读取接口
         we_storage_read_cb_t storage_read_cb;                     // 当前 LCD 绑定的外部存储读取接口
         we_popup_layer_t popup_layer;                             // LCD 级单 overlay popup
+        uint8_t opa_scale;                                        // 容器透明度级联乘子，255=无衰减（group 画子时设置，原语入口消费）
 
         /* 渲染统计信息
          *
@@ -295,6 +315,19 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
 #endif
     } we_lcd_t;
 
+    /* ---------------- 容器透明度级联 ----------------
+     * group/slideshow/scroll_panel 绘制子控件前把自身 opacity 乘进
+     * lcd->opa_scale，所有绘图原语在入口消费一次（不进内环）。
+     * 常态 opa_scale==255 时仅一次比较，零额外开销。 */
+    static __inline uint8_t we_opa_apply(const we_lcd_t *p_lcd, uint8_t opacity)
+    {
+        uint32_t v;
+        if (p_lcd->opa_scale == 255U)
+            return opacity;
+        v = (uint32_t)opacity * p_lcd->opa_scale;
+        return (uint8_t)((v + (v >> 8) + 1U) >> 8); /* 同 we_div255 的 /255 近似 */
+    }
+
     typedef struct
     {
         uint16_t adv_w;   // 步进宽度 (用于光标前进)
@@ -306,6 +339,27 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     } we_glyph_info_t;
 
     // API 声明
+
+    /**
+     * @brief 将动画节点挂入中央动画链表（已在链上则仅更新回调与 owner）
+     * @param lcd 传入，当前 GUI 屏幕上下文指针
+     * @param anim 传入，内嵌于控件的动画节点
+     * @param step_cb 传入，每调度周期推进回调（elapsed_ms 为本周期毫秒数）
+     * @param owner 传入，回调透传的控件实例指针
+     * @return 无
+     * @note 不占用 GUI task 槽、不会失败；动画完成后请在 step_cb 内调用
+     *       we_anim_stop 摘链，删除控件前必须先 we_anim_stop。
+     */
+    void we_anim_start(we_lcd_t *lcd, we_anim_t *anim,
+                       void (*step_cb)(void *owner, uint16_t elapsed_ms), void *owner);
+
+    /**
+     * @brief 将动画节点从中央动画链表摘除（不在链上则为空操作）
+     * @param lcd 传入，当前 GUI 屏幕上下文指针
+     * @param anim 传入，待摘除的动画节点
+     * @return 无
+     */
+    void we_anim_stop(we_lcd_t *lcd, we_anim_t *anim);
     /**
      * @brief 初始化脏矩形管理器
      * @param mgr 传入：待初始化的脏矩形管理器指针

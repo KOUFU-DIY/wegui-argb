@@ -21,7 +21,7 @@ extern "C"
 typedef struct
 {
     we_obj_t base;
-    int8_t task_id;
+    we_anim_t anim; /* 中央动画引擎节点（不占 GUI task 槽） */
 
     uint8_t value;
     uint8_t display_value;
@@ -38,7 +38,7 @@ typedef struct
 } we_progress_obj_t;
 
 /**
- * @brief 初始化进度条对象并注册动画任务。
+ * @brief 初始化进度条对象（动画由中央动画引擎驱动，不占 task 槽）。
  * @param obj 进度条对象指针。
  * @param lcd 所属 LCD 上下文。
  * @param x 控件左上角 X 坐标。

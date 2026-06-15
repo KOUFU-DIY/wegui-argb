@@ -71,10 +71,10 @@ typedef struct we_dropdown_obj_t
     int16_t drag_start_y;       /* 按下时的 Y 坐标 */
     int32_t drag_start_scroll;  /* 按下时的 scroll_px */
     uint8_t dragging;           /* 本次触摸是否已判定为拖拽滚动 */
-    /* --- 滚动条自动淡出状态，由每对象周期任务驱动 --- */
+    /* --- 滚动条自动淡出状态，由中央动画引擎驱动 --- */
     uint8_t  sb_alpha;          /* 滚动条当前透明度（0~255），0=完全隐藏 */
     uint16_t sb_idle_ms;        /* 自上次滚动以来累计的空闲毫秒 */
-    int8_t   sb_task_id;        /* 淡出动画 task 槽，-1 表示未注册 */
+    we_anim_t sb_anim;          /* 淡出动画节点（不占 GUI task 槽，收敛即摘链） */
 } we_dropdown_obj_t;
 
 /**

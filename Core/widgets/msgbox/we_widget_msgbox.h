@@ -64,7 +64,7 @@ typedef struct we_popup_obj_t
     uint16_t panel_h;
     uint16_t anim_elapsed_ms;
     uint16_t anim_duration_ms;
-    int8_t task_id;
+    we_anim_t anim; /* 中央动画引擎节点（滑入/滑出动画，不占 GUI task 槽） */
     uint8_t layout;
     uint8_t pressed_btn; /* 0=none, 1=confirm, 2=cancel */
     uint8_t armed_btn;   /* 记录本次按下命中的按钮，供 CLICKED 阶段确认 */

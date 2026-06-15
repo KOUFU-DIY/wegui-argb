@@ -372,6 +372,21 @@ static uint8_t _slider_value_from_point(const we_slider_obj_t *obj, int16_t x, i
 }
 
 /**
+ * @brief 应用交互产生的新值：赋值、差分标脏、触发 changed 回调。
+ * @param obj 滑条对象指针。
+ * @param old_value 变更前的值。
+ * @param new_value 变更后的值。
+ * @return 无。
+ */
+static void _slider_apply_value(we_slider_obj_t *obj, uint8_t old_value, uint8_t new_value)
+{
+    obj->value = new_value;
+    _slider_invalidate_value_change(obj, old_value, new_value);
+    if (obj->changed_cb != NULL)
+        obj->changed_cb(obj, new_value);
+}
+
+/**
  * @brief 绘制滑条轨道或填充段。
  * @param obj 滑条对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
@@ -508,8 +523,7 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
             new_value = _slider_value_from_point(obj, data->x, data->y);
             if (new_value != old_value)
             {
-                obj->value = new_value;
-                _slider_invalidate_value_change(obj, old_value, new_value);
+                _slider_apply_value(obj, old_value, new_value);
             }
             else
             {
@@ -528,8 +542,7 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
             new_value = _slider_value_from_point(obj, data->x, data->y);
             if (new_value != old_value)
             {
-                obj->value = new_value;
-                _slider_invalidate_value_change(obj, old_value, new_value);
+                _slider_apply_value(obj, old_value, new_value);
             }
         }
         break;
@@ -544,8 +557,7 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
             new_value = _slider_value_from_point(obj, data->x, data->y);
             if (new_value != old_value)
             {
-                obj->value = new_value;
-                _slider_invalidate_value_change(obj, old_value, new_value);
+                _slider_apply_value(obj, old_value, new_value);
             }
         }
         break;
@@ -616,12 +628,26 @@ void we_slider_obj_init(we_slider_obj_t *obj, we_lcd_t *lcd,
     obj->track_color = track_color;
     obj->fill_color = fill_color;
     obj->thumb_color = thumb_color;
+    obj->changed_cb = NULL;
 
     obj->value = _slider_clamp_value(obj, obj->value);
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     we_obj_invalidate((we_obj_t *)obj);
+}
+
+/**
+ * @brief 注册数值改变回调（替代轮询 get_value）。
+ * @param obj 滑条对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_slider_set_changed_cb(we_slider_obj_t *obj, we_slider_changed_cb_t cb)
+{
+    if (obj == NULL)
+        return;
+    obj->changed_cb = cb;
 }
 
 /**

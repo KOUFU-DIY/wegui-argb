@@ -23,8 +23,9 @@
 - `WE_BTN_DRAW_MODE`：边框圆角绘制模式
 
 ## 事件与行为
-- `event_cb == NULL`：使用内部默认行为，按下/释放时自动切换按钮状态
-- `event_cb != NULL`：事件优先交给用户回调处理，适合作为事件例程
+- **按压视觉始终由控件默认维护**（叠加语义）：按下变 PRESSED、释放回 NORMAL，用户回调无需补样式
+- `event_cb != NULL`：在默认视觉之后被调用，只需处理业务（通常只看 `WE_EVENT_CLICKED`）
+- 类回调恒返回 1，容器（group/slideshow/scroll_panel）据此正确锁定并转发后续事件
 - 常用事件：`WE_EVENT_PRESSED`、`WE_EVENT_RELEASED`、`WE_EVENT_CLICKED`
 
 ## 注意事项

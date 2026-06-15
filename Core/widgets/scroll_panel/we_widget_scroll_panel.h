@@ -66,9 +66,9 @@ typedef struct
 
 typedef struct
 {
-    we_obj_t base;
-    int8_t task_id;
+    we_obj_t base;  /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
+    we_anim_t anim; /* 中央动画引擎节点（惯性/回弹动画，不占 GUI task 槽） */
     int16_t scroll_y;
     int16_t content_h;
     uint16_t radius;

@@ -426,8 +426,9 @@ static void _popup_refresh_layout(we_popup_obj_t *obj)
     if (title_h > 0U && msg_h > 0U)
         desired_h = (uint16_t)(desired_h + 8U);
 
-    if (desired_h > obj->panel_h)
-        obj->panel_h = desired_h;
+    /* 双向跟随内容高度（desired_h 自带 88px 结构性下限），
+     * 不做"只增不减"棘轮，否则长文本切短后面板高度回不去。 */
+    obj->panel_h = desired_h;
 
     obj->hidden_y = (int16_t)(-(int16_t)obj->panel_h - 8);
     if (obj->target_y > (int16_t)(obj->base.lcd->height - obj->panel_h))
@@ -469,15 +470,35 @@ static void _popup_invalidate_panel(const we_popup_obj_t *obj)
  */
 static void _popup_stop_anim(we_popup_obj_t *obj)
 {
-    if (obj == NULL || obj->base.lcd == NULL)
+    if (obj == NULL)
         return;
-    if (obj->task_id >= 0)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->task_id);
-        obj->task_id = -1;
-    }
+    we_anim_stop(obj->base.lcd, &obj->anim);
     obj->animating = 0U;
     obj->anim_hiding = 0U;
+}
+
+/**
+ * @brief 同步命中区域与可见状态：显示时铺满全屏（模态拦截），隐藏时收零。
+ * @param obj 目标控件对象指针。
+ * @return 无。
+ * @note 核心命中测试只看 bbox + event_cb 非空，不检查 visible、也不看返回值。
+ *       隐藏的 msgbox 若保持全屏 bbox，会按 Z 序吞掉整屏输入——
+ *       只要它比其他交互控件晚初始化，所有触摸都会被它截胡。
+ */
+static void _popup_sync_hit_area(we_popup_obj_t *obj)
+{
+    if (obj->visible)
+    {
+        obj->base.x = 0;
+        obj->base.y = 0;
+        obj->base.w = (int16_t)obj->base.lcd->width;
+        obj->base.h = (int16_t)obj->base.lcd->height;
+    }
+    else
+    {
+        obj->base.w = 0;
+        obj->base.h = 0;
+    }
 }
 
 /**
@@ -899,14 +920,12 @@ static uint8_t _popup_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _popup_anim_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _popup_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_popup_obj_t *obj = (we_popup_obj_t *)user_data;
+    we_popup_obj_t *obj = (we_popup_obj_t *)owner;
     uint16_t t;
     uint16_t eased;
     int16_t next_y;
-
-    (void)lcd;
 
     if (obj == NULL || obj->visible == 0U)
     {
@@ -944,7 +963,10 @@ eased = obj->anim_hiding ? _msgbox_ease_hide(t) : _msgbox_ease_slide(t);
     {
     _popup_set_panel_y(obj, obj->anim_to_y);
         if (obj->anim_hiding)
+        {
             obj->visible = 0U;
+            _popup_sync_hit_area(obj); /* 隐藏完成：命中区收零，停止吞输入 */
+        }
     _popup_stop_anim(obj);
     }
 }
@@ -991,8 +1013,10 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->base.lcd = lcd;
     obj->base.x = 0;
     obj->base.y = 0;
-    obj->base.w = lcd->width;
-    obj->base.h = lcd->height;
+    /* 初始为隐藏态：命中区收零，避免吞掉整屏输入；
+     * we_popup_show 时再铺满全屏做模态拦截。 */
+    obj->base.w = 0;
+    obj->base.h = 0;
     obj->base.parent = NULL;
     obj->base.class_p = &_popup_class;
     obj->base.next = NULL;
@@ -1003,7 +1027,9 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->target_y = target_y;
     obj->anim_elapsed_ms = 0U;
     obj->anim_duration_ms = WE_POPUP_ANIM_DURATION_MS;
-    obj->task_id = -1;
+    obj->anim.next = NULL;
+    obj->anim.step_cb = NULL;
+    obj->anim.owner = NULL;
     obj->layout = (uint8_t)layout;
     obj->pressed_btn = WE_POPUP_BTN_NONE;
     obj->armed_btn = WE_POPUP_BTN_NONE;
@@ -1226,6 +1252,7 @@ void we_popup_show(we_popup_obj_t *obj)
 
     _popup_bring_to_front(obj);
     obj->visible = 1U;
+    _popup_sync_hit_area(obj); /* 显示：命中区铺满全屏（模态拦截） */
     obj->pressed_btn = WE_POPUP_BTN_NONE;
     obj->armed_btn = WE_POPUP_BTN_NONE;
     obj->anim_elapsed_ms = 0U;
@@ -1241,12 +1268,9 @@ void we_popup_show(we_popup_obj_t *obj)
 #endif
 
 #if WE_MSGBOX_USE_ANIM
-    if (obj->task_id < 0)
-obj->task_id = _we_gui_task_register_with_data(obj->base.lcd, _popup_anim_task, obj);
-    if (obj->task_id >= 0)
-        obj->animating = 1U;
-    else
-    _popup_set_panel_y(obj, obj->target_y);
+    /* 挂入中央动画链表（不占 task 槽、不会失败，无需直达兜底） */
+    we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
+    obj->animating = 1U;
 #else
     obj->animating = 0U;
 #endif
@@ -1278,19 +1302,13 @@ void we_popup_hide(we_popup_obj_t *obj)
     obj->anim_to_y = obj->hidden_y;
 
 #if WE_MSGBOX_USE_ANIM
-    if (obj->task_id < 0)
-obj->task_id = _we_gui_task_register_with_data(obj->base.lcd, _popup_anim_task, obj);
-    if (obj->task_id >= 0)
-        obj->animating = 1U;
-    else
-    {
-    _popup_set_panel_y(obj, obj->hidden_y);
-        obj->visible = 0U;
-    _popup_stop_anim(obj);
-    }
+    /* 挂入中央动画链表（不占 task 槽、不会失败，无需直达兜底） */
+    we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
+    obj->animating = 1U;
 #else
     _popup_set_panel_y(obj, obj->hidden_y);
     obj->visible = 0U;
+    _popup_sync_hit_area(obj); /* 隐藏：命中区收零 */
     obj->animating = 0U;
     obj->anim_hiding = 0U;
 #endif

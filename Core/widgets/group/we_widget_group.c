@@ -110,6 +110,10 @@ we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
         uint16_t old_y_start = lcd->pfb_y_start;
         uint16_t old_y_end = lcd->pfb_y_end;
         colour_t *old_gram = lcd->pfb_gram;
+        uint8_t old_scale = lcd->opa_scale;
+
+        /* 子控件透明度级联：把本容器 opacity 乘进全局乘子（嵌套自动链乘） */
+        lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
 int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
 int16_t new_y0 = WE_MAX(old_y_start, obj->base.y);
 int16_t new_x1 = WE_MIN(old_pfb_area.x1, obj->base.x + obj->base.w - 1);
@@ -136,11 +140,124 @@ int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
             }
         }
 
+        lcd->opa_scale = old_scale;
         lcd->pfb_area = old_pfb_area;
         lcd->pfb_y_start = old_y_start;
         lcd->pfb_y_end = old_y_end;
         lcd->pfb_gram = old_gram;
     }
+}
+
+/* --------------------------------------------------------------------------
+ * 命中转发：核心输入分发只扫顶层链表，不递归 children_head。
+ * group 通过自身 event_cb 把触摸事件转发给命中的子控件，
+ * 否则放进裸 group 的交互控件（btn/checkbox/...）永远收不到输入。
+ * 子控件存绝对坐标，直接矩形命中即可；后挂的子控件层级更高，取最后命中者。
+ * -------------------------------------------------------------------------- */
+
+/**
+ * @brief 在组内查找命中坐标的可交互子控件。
+ * @param obj 目标控件对象指针。
+ * @param x 屏幕绝对 X 坐标。
+ * @param y 屏幕绝对 Y 坐标。
+ * @return 命中的子控件指针；无命中返回 NULL。
+ */
+static we_obj_t *_group_hit_child(we_group_obj_t *obj, int16_t x, int16_t y)
+{
+    we_obj_t *child = obj->children_head;
+    we_obj_t *target = NULL;
+
+    while (child != NULL)
+    {
+        if (child->class_p != NULL && child->class_p->event_cb != NULL &&
+            x >= child->x && x < (child->x + child->w) &&
+            y >= child->y && y < (child->y + child->h))
+        {
+            target = child;
+        }
+        child = child->next;
+    }
+    return target;
+}
+
+/**
+ * @brief 组容器事件回调：按压时锁定子控件，后续事件按序转发。
+ * @param ptr 回调透传对象指针。
+ * @param event 输入事件类型。
+ * @param data 输入设备事件数据指针。
+ * @return 1 已处理，0 未处理。
+ */
+static uint8_t _group_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
+{
+    we_group_obj_t *obj = (we_group_obj_t *)ptr;
+    we_obj_t *child;
+
+    if (obj == NULL || data == NULL || obj->opacity == 0U)
+        return 0U; /* 完全透明（淡出隐藏）的容器不拦截输入 */
+
+    if (event == WE_EVENT_PRESSED)
+    {
+        child = _group_hit_child(obj, data->x, data->y);
+        obj->last_pressed_child = child;
+        if (child != NULL)
+        {
+            child->class_p->event_cb(child, WE_EVENT_PRESSED, data);
+            return 1U;
+        }
+        /* 未命中交互子控件时返回 0：让外层容器（如 slideshow）
+         * 把这次按压用于拖拽翻页，group 空白区不吞手势。 */
+        return 0U;
+    }
+
+    /* 仅转发触摸序列事件；SCROLLED 等广播事件不属于转发范围 */
+    if (event != WE_EVENT_RELEASED && event != WE_EVENT_STAY && event != WE_EVENT_CLICKED &&
+        event != WE_EVENT_SWIPE_LEFT && event != WE_EVENT_SWIPE_RIGHT &&
+        event != WE_EVENT_SWIPE_UP && event != WE_EVENT_SWIPE_DOWN)
+        return 0U;
+
+    child = obj->last_pressed_child;
+    if (child == NULL)
+        return 0U;
+    if (child->class_p == NULL || child->class_p->event_cb == NULL)
+    {
+        /* 子控件已在按压期间被删除/失效，丢弃引用 */
+        obj->last_pressed_child = NULL;
+        return 0U;
+    }
+
+    if (event == WE_EVENT_CLICKED)
+    {
+        /* 点击需复核释放点仍落在原子控件上，按下后拖出再松手不触发 */
+        if (data->x >= child->x && data->x < (child->x + child->w) &&
+            data->y >= child->y && data->y < (child->y + child->h))
+            child->class_p->event_cb(child, WE_EVENT_CLICKED, data);
+        obj->last_pressed_child = NULL;
+        return 1U;
+    }
+
+    child->class_p->event_cb(child, event, data);
+    return 1U;
+}
+
+/**
+ * @brief 容器移动回调：平移外框的同时按局部坐标同步全部子控件。
+ * @param ptr 回调透传对象指针。
+ * @param new_x 新的左上角 X 坐标。
+ * @param new_y 新的左上角 Y 坐标。
+ * @return 无。
+ * @note 没有它时，外层容器（如 slideshow 翻页）经 we_obj_set_pos 移动
+ *       group 只会挪外框，子控件会留在原地。子控件经 we_obj_set_pos
+ *       跟随，嵌套 group / 带 set_pos_cb 的控件（img_ex 等）自动级联。
+ */
+static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
+{
+    we_group_obj_t *obj = (we_group_obj_t *)ptr;
+
+    we_obj_invalidate((we_obj_t *)obj);
+    obj->base.x = new_x;
+    obj->base.y = new_y;
+    we_group_relayout(obj); /* 按 slot 局部坐标刷新全部子控件绝对位置 */
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -158,7 +275,7 @@ int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
 void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int16_t w, int16_t h,
                        colour_t bg_color, uint8_t opacity)
 {
-    static const we_class_t _group_class = { .draw_cb = _group_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
+    static const we_class_t _group_class = { .draw_cb = _group_draw_cb, .event_cb = _group_event_cb, .set_pos_cb = _group_set_pos_cb};
     uint16_t i;
 
     if (obj == NULL || lcd == NULL)
@@ -172,10 +289,10 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
     obj->base.class_p = &_group_class;
     obj->base.next = NULL;
     obj->base.parent = NULL;
-    obj->task_id = -1;
     obj->children_head = NULL;
     obj->bg_color = bg_color;
     obj->opacity = opacity;
+    obj->last_pressed_child = NULL;
 
     for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
         obj->child_slots[i].used = 0U;
@@ -270,6 +387,10 @@ we_group_child_slot_t *slot = _group_find_slot(obj, child);
 _group_detach_obj(child);
     slot->used = 0U;
     slot->child = NULL;
+
+    /* 被移除的子控件若正处于按压转发状态，同步丢弃引用 */
+    if (obj->last_pressed_child == child)
+        obj->last_pressed_child = NULL;
 }
 
 /**

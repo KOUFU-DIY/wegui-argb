@@ -105,16 +105,21 @@
  * -------------------------------------------------------------------------- */
 typedef uint8_t (*we_toggle_event_cb_t)(void *obj, we_event_t event, we_indev_data_t *data);
 
+/* 状态改变回调（we_toggle_toggle 翻转时触发；obj 为 we_toggle_obj_t*） */
+typedef void (*we_toggle_changed_cb_t)(void *obj, uint8_t checked);
+
 typedef struct
 {
     we_obj_t base;
     we_toggle_event_cb_t user_event_cb;
+    we_toggle_changed_cb_t changed_cb; /* 可为 NULL（默认轮询 is_checked） */
     uint8_t opacity;
     uint8_t checked : 1; /* 目标状态：1=ON，0=OFF */
     uint8_t pressed : 1; /* 当前是否被按下 */
 #if WE_TOGGLE_USE_ANIM
     uint8_t anim_step;   /* 当前动画步数：0=完全 OFF，WE_TOGGLE_ANIM_STEPS=完全 ON */
-    uint16_t anim_acc_ms;/* GUI task 累计的未消费动画时间 */
+    uint16_t anim_acc_ms;/* 累计的未消费动画时间 */
+    we_anim_t anim;      /* 中央动画引擎节点（不占 GUI task 槽） */
 #endif
 } we_toggle_obj_t;
 
@@ -158,6 +163,21 @@ void we_toggle_toggle(we_toggle_obj_t *obj);
 uint8_t we_toggle_is_checked(const we_toggle_obj_t *obj);
 
 /**
+ * @brief 注册状态改变回调（替代轮询 is_checked）。
+ * @param obj 开关控件对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_toggle_set_changed_cb(we_toggle_obj_t *obj, we_toggle_changed_cb_t cb);
+
+/**
+ * @brief 删除开关控件并从动画链表/对象链表摘除。
+ * @param obj 开关控件对象指针。
+ * @return 无。
+ */
+void we_toggle_obj_delete(we_toggle_obj_t *obj);
+
+/**
  * @brief 设置控件透明度并按需重绘。
  * @param obj 目标控件对象指针。
  * @param opacity 不透明度（0~255）。
@@ -172,15 +192,6 @@ void we_toggle_set_opacity(we_toggle_obj_t *obj, uint8_t opacity);
 static inline void we_toggle_update_anim(we_toggle_obj_t *obj)
 {
     (void)obj;
-}
-
-/**
- * @brief 删除开关控件对象并从对象链表移除。
- * @param obj 开关控件对象指针。
- */
-static inline void we_toggle_obj_delete(we_toggle_obj_t *obj)
-{
-we_obj_delete((we_obj_t *)obj);
 }
 
 #endif /* __WE_WIDGET_TOGGLE_H */

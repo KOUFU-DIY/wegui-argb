@@ -74,21 +74,15 @@ static void _scroll_panel_stop_anim(we_scroll_panel_obj_t *obj)
 
     obj->animating = 0U;
     obj->drag_vy = 0;
-    if (obj->task_id >= 0 && obj->base.lcd != NULL)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->task_id);
-        obj->task_id = -1;
-    }
+    we_anim_stop(obj->base.lcd, &obj->anim);
 }
 
-static void _scroll_panel_anim_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _scroll_panel_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_scroll_panel_obj_t *obj = (we_scroll_panel_obj_t *)user_data;
+    we_scroll_panel_obj_t *obj = (we_scroll_panel_obj_t *)owner;
     int16_t max_scroll;
     int16_t overshoot;
     int16_t step;
-
-    (void)lcd;
 
     if (obj == NULL || elapsed_ms == 0U)
         return;
@@ -152,10 +146,9 @@ static void _scroll_panel_start_anim(we_scroll_panel_obj_t *obj)
     if (obj == NULL || obj->base.lcd == NULL)
         return;
 
-    if (obj->task_id < 0)
-        obj->task_id = _we_gui_task_register_with_data(obj->base.lcd, _scroll_panel_anim_task, obj);
-    if (obj->task_id >= 0)
-        obj->animating = 1U;
+    /* 挂入中央动画链表（不占 task 槽、不会失败，不再有"无槽退化为无惯性"） */
+    we_anim_start(obj->base.lcd, &obj->anim, _scroll_panel_anim_step_cb, obj);
+    obj->animating = 1U;
 }
 
 static we_scroll_panel_child_slot_t *_scroll_panel_find_slot(we_scroll_panel_obj_t *obj, we_obj_t *child)
@@ -336,6 +329,7 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
     uint16_t old_y_start;
     uint16_t old_y_end;
     colour_t *old_gram;
+    uint8_t old_scale;
     int16_t new_x0;
     int16_t new_y0;
     int16_t new_x1;
@@ -365,6 +359,10 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
     old_y_start = lcd->pfb_y_start;
     old_y_end = lcd->pfb_y_end;
     old_gram = lcd->pfb_gram;
+    old_scale = lcd->opa_scale;
+
+    /* 子控件透明度级联（嵌套自动链乘） */
+    lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
 
     new_x0 = WE_MAX(old_pfb_area.x0, obj->inner_x);
     new_y0 = WE_MAX(old_y_start, obj->inner_y);
@@ -392,6 +390,7 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
         }
     }
 
+    lcd->opa_scale = old_scale;
     lcd->pfb_area = old_pfb_area;
     lcd->pfb_y_start = old_y_start;
     lcd->pfb_y_end = old_y_end;
@@ -527,7 +526,10 @@ static uint8_t _scroll_panel_event_cb(void *ptr, we_event_t event, we_indev_data
                 we_scroll_panel_relayout(obj);
             }
         }
-        obj->tracking_press = 0U;
+        /* 注意：这里不能清 tracking_press——核心在 RELEASED 之后才派发
+         * CLICKED/SWIPE，提前关闸会让函数顶部的 !tracking_press 早退
+         * 把它们全部拦掉（子控件永远收不到点击）。收尾统一交给
+         * CLICKED/SWIPE 分支；若本次没有后续事件，下次 PRESSED 会重新武装。 */
         obj->dragging = 0U;
         return 1U;
     }
@@ -595,7 +597,9 @@ void we_scroll_panel_obj_init(we_scroll_panel_obj_t *obj, we_lcd_t *lcd,
     obj->base.class_p = &_scroll_panel_class;
     obj->base.next = NULL;
     obj->base.parent = NULL;
-    obj->task_id = -1;
+    obj->anim.next = NULL;
+    obj->anim.step_cb = NULL;
+    obj->anim.owner = NULL;
     obj->children_head = NULL;
     obj->scroll_y = 0;
     obj->content_h = h;

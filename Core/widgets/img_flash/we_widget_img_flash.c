@@ -165,6 +165,10 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
     uint32_t idx_off   = head_size;
     uint32_t dat_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
 
+    /* 防御：索引头固定读取 13 字节，head_size 小于 13 说明资源头已损坏。 */
+    if (head_size < 13U)
+        return;
+
     int16_t  x0    = obj->base.x;
     int16_t  y0    = obj->base.y;
     uint16_t img_w = (uint16_t)obj->base.w;
@@ -260,8 +264,14 @@ flash_stream_seek(&stream, byte_offset);
     uint32_t max_pixels  = (uint32_t)img_w * img_h;
     uint32_t decoded     = jump_pixel;
 
+    /* 防御：用"最坏 4 字节/像素 + 余量"的保守流长上界拦截损坏索引表的
+     * 任意偏移跳转，并给解码循环一个硬性停止线（合法码流必然短于上界）。 */
+    uint32_t stream_max  = (max_pixels << 2) + 16U;
+    if (byte_offset >= stream_max)
+        return;
+
     /* ---- 主解码循环（与 RAM 版本完全相同，只是读字节换成 flash_stream_get） ---- */
-    while (decoded < max_pixels)
+    while ((decoded < max_pixels) && (stream.cur_pos < stream_max))
     {
 flag = flash_stream_get(&stream);
 
@@ -376,6 +386,10 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
     uint32_t idx_off   = head_size;
     uint32_t dat_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
 
+    /* 防御：索引头固定读取 13 字节，head_size 小于 13 说明资源头已损坏。 */
+    if (head_size < 13U)
+        return;
+
     int16_t  x0    = obj->base.x;
     int16_t  y0    = obj->base.y;
     uint16_t img_w = (uint16_t)obj->base.w;
@@ -468,7 +482,12 @@ flash_stream_seek(&stream, byte_offset);
     uint32_t max_pixels = (uint32_t)img_w * img_h;
     uint32_t decoded    = jump_pixel;
 
-    while (decoded < max_pixels)
+    /* 防御：与 RGB565 版本相同的保守流长上界，拦截损坏索引表 + 停止越界解码。 */
+    uint32_t stream_max = (max_pixels << 2) + 16U;
+    if (byte_offset >= stream_max)
+        return;
+
+    while ((decoded < max_pixels) && (stream.cur_pos < stream_max))
     {
 flag = flash_stream_get(&stream);
 
@@ -583,19 +602,24 @@ static void _flash_img_draw_cb(void *ptr)
         return;
     }
 
+    /* 容器透明度级联：入口算一次有效透明度，避免白读 flash */
+    uint8_t eff_op = we_opa_apply(obj->base.lcd, obj->opacity);
+    if (eff_op == 0U)
+        return;
+
     switch (obj->fmt)
     {
     case IMG_RGB565:
-_flash_render_rgb565(obj->base.lcd, obj, obj->opacity);
+_flash_render_rgb565(obj->base.lcd, obj, eff_op);
         break;
 
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
     case IMG_RGB565_INDEXQOI:
-_flash_render_indexed_qoi_rgb565(obj->base.lcd, obj, obj->opacity);
+_flash_render_indexed_qoi_rgb565(obj->base.lcd, obj, eff_op);
         break;
 
     case IMG_ARGB8565_INDEXQOI:
-_flash_render_indexed_qoi_argb8565(obj->base.lcd, obj, obj->opacity);
+_flash_render_indexed_qoi_argb8565(obj->base.lcd, obj, eff_op);
         break;
 #endif
 
@@ -651,14 +675,23 @@ uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
         return 0U;
     }
 
+    /* 防御：宽或高为 0 视为损坏资源/错误 flash 地址，拒绝初始化，
+     * 否则 INDEX-QOI 解码路径的 % img_w、/ img_w 会触发除零硬 fault。 */
+    uint16_t img_w = (uint16_t)(((uint16_t)hdr[2] << 8) | hdr[3]);
+    uint16_t img_h = (uint16_t)(((uint16_t)hdr[4] << 8) | hdr[5]);
+    if (img_w == 0U || img_h == 0U)
+    {
+        return 0U;
+    }
+
     /* 填充 we_obj_t 基类字段；w/h 复用存储图片宽高 */
     obj->flash_addr    = flash_addr;
     obj->opacity       = opacity;
     obj->base.lcd      = lcd;
     obj->base.x        = x;
     obj->base.y        = y;
-    obj->base.w        = (int16_t)(((uint16_t)hdr[2] << 8) | hdr[3]);
-    obj->base.h        = (int16_t)(((uint16_t)hdr[4] << 8) | hdr[5]);
+    obj->base.w        = (int16_t)img_w;
+    obj->base.h        = (int16_t)img_h;
     obj->base.class_p  = &_flash_img_class;
     obj->base.next     = NULL;
     obj->base.parent   = NULL;

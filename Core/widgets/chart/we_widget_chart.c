@@ -172,11 +172,9 @@ static __inline uint8_t _chart_get_aa_alpha(uint8_t aa_h, uint8_t edge_idx, uint
  * @param bh 绘制区域高度（像素）。
  * @return 返回对应计算结果。
  */
-static __inline int32_t _get_sy(int32_t col_idx, uint16_t idx0,
-                                 const we_chart_obj_t *obj,
-                                 int16_t by, int16_t bh)
+static __inline int32_t _get_sy_at(const we_chart_obj_t *obj, uint16_t ri,
+                                   int16_t by, int16_t bh)
 {
-    uint16_t ri = _chart_value_at_visible(obj, idx0, (uint16_t)col_idx);
     return _chart_value_to_sy(obj->data[ri], by, bh);
 }
 
@@ -347,7 +345,7 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
  * @param color 目标颜色值。
  * @return 无。
  */
-static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t y1, colour_t color)
+static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t y1, colour_t color, uint8_t alpha)
 {
     int16_t draw_y0;
     int16_t draw_y1;
@@ -365,10 +363,21 @@ static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t
     dst = lcd->pfb_gram + (uint16_t)(draw_y0 - (int16_t)lcd->pfb_y_start) * lcd->pfb_width +
           (uint16_t)(x - (int16_t)lcd->pfb_area.x0);
 
-    for (int16_t y = draw_y0; y <= draw_y1; y++)
+    if (alpha >= 250U)
     {
-        *dst = color;
-        dst += lcd->pfb_width;
+        for (int16_t y = draw_y0; y <= draw_y1; y++)
+        {
+            *dst = color;
+            dst += lcd->pfb_width;
+        }
+    }
+    else /* 容器淡入淡出期：网格随整体透明度混色 */
+    {
+        for (int16_t y = draw_y0; y <= draw_y1; y++)
+        {
+            *dst = we_colour_blend(color, *dst, alpha);
+            dst += lcd->pfb_width;
+        }
     }
 }
 
@@ -381,7 +390,7 @@ static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t
  * @param color 目标颜色值。
  * @return 无。
  */
-static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_t y, colour_t color)
+static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_t y, colour_t color, uint8_t alpha)
 {
     int16_t draw_x0;
     int16_t draw_x1;
@@ -399,9 +408,20 @@ static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_
     dst = lcd->pfb_gram + (uint16_t)(y - (int16_t)lcd->pfb_y_start) * lcd->pfb_width +
           (uint16_t)(draw_x0 - (int16_t)lcd->pfb_area.x0);
 
-    for (int16_t x = draw_x0; x <= draw_x1; x++)
+    if (alpha >= 250U)
     {
-        *dst++ = color;
+        for (int16_t x = draw_x0; x <= draw_x1; x++)
+        {
+            *dst++ = color;
+        }
+    }
+    else /* 容器淡入淡出期：网格随整体透明度混色 */
+    {
+        for (int16_t x = draw_x0; x <= draw_x1; x++)
+        {
+            *dst = we_colour_blend(color, *dst, alpha);
+            dst++;
+        }
     }
 }
 
@@ -414,25 +434,34 @@ static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_
  * @param bh 绘制区域高度（像素）。
  * @return 无。
  */
-static void _chart_draw_grid(we_lcd_t *lcd, int16_t bx, int16_t by, int16_t bw, int16_t bh)
+static void _chart_draw_grid(we_lcd_t *lcd, const we_chart_obj_t *obj,
+                             int16_t bx, int16_t by, int16_t bw, int16_t bh, uint8_t alpha)
 {
-#if (WE_CHART_GRID_COLS > 0) || (WE_CHART_GRID_ROWS > 0)
+#if (WE_CHART_GRID_COLS > 1) || (WE_CHART_GRID_ROWS > 1)
     colour_t gc = RGB888TODEV(WE_CHART_GRID_R, WE_CHART_GRID_G, WE_CHART_GRID_B);
+#else
+    (void)obj;
+    (void)bw;
+    (void)bh;
+    (void)alpha;
 #endif
 
-#if WE_CHART_GRID_COLS > 0
+    /* 分割点在 init 时已预计算（见 we_chart_obj_init），
+     * 这里只做加法；网格每个 PFB 带都重绘，省掉的是每帧
+     * (COLS+ROWS)×带数 次软件除法。 */
+#if (WE_CHART_GRID_COLS > 1)
     for (uint8_t c = 1U; c < (uint8_t)WE_CHART_GRID_COLS; c++)
     {
-        int16_t gx = (int16_t)(bx + (int32_t)bw * c / WE_CHART_GRID_COLS);
-        _chart_draw_grid_vline(lcd, gx, by, (int16_t)(by + bh - 1), gc);
+        int16_t gx = (int16_t)(bx + obj->grid_dx[c - 1U]);
+        _chart_draw_grid_vline(lcd, gx, by, (int16_t)(by + bh - 1), gc, alpha);
     }
 #endif
 
-#if WE_CHART_GRID_ROWS > 0
+#if (WE_CHART_GRID_ROWS > 1)
     for (uint8_t r = 1U; r < (uint8_t)WE_CHART_GRID_ROWS; r++)
     {
-        int16_t gy = (int16_t)(by + (int32_t)bh * r / WE_CHART_GRID_ROWS);
-        _chart_draw_grid_hline(lcd, bx, (int16_t)(bx + bw - 1), gy, gc);
+        int16_t gy = (int16_t)(by + obj->grid_dy[r - 1U]);
+        _chart_draw_grid_hline(lcd, bx, (int16_t)(bx + bw - 1), gy, gc, alpha);
     }
 #endif
 }
@@ -608,9 +637,9 @@ static void _chart_draw_cb(void *ptr)
     int16_t   pfb_y0   = p_lcd->pfb_y_start;
     int16_t   pfb_y1   = p_lcd->pfb_y_end;
     colour_t  color    = obj->line_color;
-    uint8_t   opacity  = obj->opacity;
+    uint8_t   opacity  = we_opa_apply(p_lcd, obj->opacity); /* 容器透明度级联 */
 
-    _chart_draw_grid(p_lcd, bx, by, bw, bh);
+    _chart_draw_grid(p_lcd, obj, bx, by, bw, bh, opacity);
 
     uint16_t draw_cnt = (obj->data_count < (uint16_t)bw)
                         ? obj->data_count : (uint16_t)bw;
@@ -652,17 +681,23 @@ static void _chart_draw_cb(void *ptr)
     }
     if (sc_lo > sc_hi) return;
 
-    /* A: 主循环里 y_cur 沿用上一轮的 y_nxt，每列只调一次 _get_sy。
-     *    先把起点 y_cur prime 出来。 */
-    int32_t col_idx = sc_lo - sc_start;
-    int32_t y_cur   = _get_sy(col_idx, idx0, obj, by, bh);
+    /* A: 主循环里 y_cur 沿用上一轮的 y_nxt，每列只取一次采样。
+     *    环形索引改用游标 +1 与比较回绕维护：入口仅一次 % 归一化，
+     *    列循环内零取模/零除法（M0 无硬件除法，且本循环每个 PFB 带
+     *    都会完整执行，逐列 % 是被放大的真实热点）。 */
+    int32_t col_idx  = sc_lo - sc_start;
+    uint16_t ri_cur  = _chart_value_at_visible(obj, idx0, (uint16_t)col_idx);
+    int32_t y_cur    = _get_sy_at(obj, ri_cur, by, bh);
 
     for (int32_t sc = sc_lo; sc <= sc_hi; sc++)
     {
         int16_t sx       = (int16_t)(bx + sc);
         int32_t col_next = col_idx + 1;
+        uint16_t ri_next = (uint16_t)(ri_cur + 1U);
+        if (ri_next >= obj->data_cap)
+            ri_next = 0U;
         int32_t y_nxt    = (col_next < (int32_t)draw_cnt)
-                           ? _get_sy(col_next, idx0, obj, by, bh)
+                           ? _get_sy_at(obj, ri_next, by, bh)
                            : y_cur;
 
         /* 顶锚刷子：top = 最小屏幕 Y（最高处） */
@@ -678,9 +713,10 @@ static void _chart_draw_cb(void *ptr)
         _chart_draw_wave_col(obj, cb, pfb_w, pfb_y0, clip_y0, clip_y1,
                              span_top, span_bot, color, a_solid, opacity);
 
-        /* 滑动一格：本轮的 y_nxt 即下一轮的 y_cur。 */
+        /* 滑动一格：本轮的 y_nxt / ri_next 即下一轮的 y_cur / ri_cur。 */
         y_cur   = y_nxt;
         col_idx = col_next;
+        ri_cur  = ri_next;
     }
 }
 
@@ -721,6 +757,16 @@ void we_chart_obj_init(we_chart_obj_t *obj, we_lcd_t *lcd,
     obj->stroke     = (stroke > 0U) ? stroke : 2U;
     obj->opacity    = opacity;
 
+    /* 预计算网格分割点偏移：绘制热路径（每 PFB 带重绘）只做加法。 */
+#if (WE_CHART_GRID_COLS > 1)
+    for (uint8_t c = 1U; c < (uint8_t)WE_CHART_GRID_COLS; c++)
+        obj->grid_dx[c - 1U] = (int16_t)((int32_t)w * c / WE_CHART_GRID_COLS);
+#endif
+#if (WE_CHART_GRID_ROWS > 1)
+    for (uint8_t r = 1U; r < (uint8_t)WE_CHART_GRID_ROWS; r++)
+        obj->grid_dy[r - 1U] = (int16_t)((int32_t)h * r / WE_CHART_GRID_ROWS);
+#endif
+
     obj->base.x       = x;
     obj->base.y       = y;
     obj->base.w       = (int16_t)w;
@@ -747,7 +793,9 @@ void we_chart_push(we_chart_obj_t *obj, int16_t value)
     if (!obj || !obj->data) return;
     _chart_invalidate_push(obj, value);
     obj->data[obj->data_head] = value;
-    obj->data_head = (uint16_t)((obj->data_head + 1U) % obj->data_cap);
+    obj->data_head++;
+    if (obj->data_head >= obj->data_cap) /* 比较回绕替代 %，省 M0 软件除法 */
+        obj->data_head = 0U;
     if (obj->data_count < obj->data_cap) obj->data_count++;
 }
 

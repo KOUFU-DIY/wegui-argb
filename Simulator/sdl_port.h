@@ -10,7 +10,7 @@ extern "C"
 #endif
 
 #define SIM_SCALE 1
-#define SIM_MAX_FPS 30
+#define SIM_MAX_FPS 1000
 
     /**
      * @brief 初始化 SDL 显示资源（窗口、渲染器、纹理和屏幕缓冲）

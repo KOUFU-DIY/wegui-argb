@@ -481,7 +481,10 @@ void we_draw_string(we_lcd_t *p_lcd, int16_t x, int16_t y, const unsigned char *
     int16_t cursor_x;
     int16_t cursor_y;
 
-    if (p_lcd == NULL || str == NULL || font_array == NULL || opacity == 0U)
+    if (p_lcd == NULL || str == NULL || font_array == NULL)
+        return;
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
+    if (opacity == 0U)
         return;
 
     font = (const font_internal_t *)font_array;

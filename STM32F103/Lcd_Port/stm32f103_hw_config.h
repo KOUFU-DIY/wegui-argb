@@ -36,6 +36,11 @@
 #error ("Not support LCD_PORT!")
 #endif
 
+/* 端口刷屏是否真异步（DMA 后台发送、flush 立即返回）。
+ * 只有真异步端口才值得启用 GRAM 双缓冲（GRAM_DMA_BUFF_EN）；
+ * 阻塞端口下双缓冲只会把可用 PFB 白白砍半、flush 次数翻倍。 */
+#define WE_PORT_FLUSH_ASYNC ((LCD_PORT == _DMA_4SPI) ? 1 : 0)
+
 #if ((LCD_PORT == _HARD_4SPI) || (LCD_PORT == _DMA_4SPI))
 #define RCC_HCLK_Divx RCC_HCLK_Div1
 #define LCD_SPI_BaudRatePrescaler_x SPI_BaudRatePrescaler_2

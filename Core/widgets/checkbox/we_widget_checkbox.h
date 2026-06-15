@@ -24,12 +24,16 @@ typedef struct
 
 typedef uint8_t (*we_checkbox_event_cb_t)(void *obj, we_event_t event, we_indev_data_t *data);
 
+/* 勾选状态改变回调（we_checkbox_toggle 翻转时触发；obj 为 we_checkbox_obj_t*） */
+typedef void (*we_checkbox_changed_cb_t)(void *obj, uint8_t checked);
+
 typedef struct
 {
     we_obj_t base;
     const char *text; /* 右侧文本 (可为 NULL) */
     const unsigned char *font;
     we_checkbox_event_cb_t user_event_cb;
+    we_checkbox_changed_cb_t changed_cb;   /* 可为 NULL（默认轮询 is_checked） */
     const we_cb_style_t *styles;           /* 指向样式表 (默认指向内置 Flash 表) */
     uint16_t box_size; /* 方框边长 */
     uint16_t radius;   /* 方框圆角半径 */
@@ -74,6 +78,14 @@ void we_checkbox_toggle(we_checkbox_obj_t *obj);
  * @return 1 表示已勾选，0 表示未勾选。
  */
 uint8_t we_checkbox_is_checked(const we_checkbox_obj_t *obj);
+
+/**
+ * @brief 注册勾选状态改变回调（替代轮询 is_checked）。
+ * @param obj 目标控件对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_checkbox_set_changed_cb(we_checkbox_obj_t *obj, we_checkbox_changed_cb_t cb);
 
 /**
  * @brief 设置文本内容并触发重排或重绘。

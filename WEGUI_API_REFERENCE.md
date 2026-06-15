@@ -128,6 +128,35 @@ int8_t hide_id = we_gui_timer_create(&mylcd, hide_cb, 2000U, 0U);
 
 Slots are limited by `WE_CFG_GUI_TIMER_MAX_NUM` (default 8).
 
+### 3.1 中央动画引擎 (we_anim_t)
+
+控件动画统一由中央动画引擎驱动，**不占用任何 GUI task 槽**、数量无上限、不会注册失败。
+动画节点内嵌在控件结构体中（零堆分配），`we_gui_task_handler()` 每个调度周期遍历链表并调用 step 回调：
+
+```c
+// 节点（通常内嵌在控件结构体里）
+typedef struct we_anim_s {
+    struct we_anim_s *next;
+    void (*step_cb)(void *owner, uint16_t elapsed_ms);
+    void *owner;
+} we_anim_t;
+
+// 挂入动画链表（已在链上则仅更新回调；不会失败）
+we_anim_start(&mylcd, &obj->anim, my_step_cb, obj);
+
+// 摘链（不在链上则为空操作）
+we_anim_stop(&mylcd, &obj->anim);
+```
+
+约定：
+1. 动画到达目标态后在 step_cb 内自行 `we_anim_stop` 摘链（空闲零开销）；
+2. step_cb 内只允许摘除自身节点；
+3. **删除带动画的控件前必须先 `we_anim_stop`**（节点归控件所有，内核无法代摘）——
+   各控件的 `we_xxx_obj_delete()` 已内置此调用，自定义删除路径须自行保证。
+
+内置使用者：`toggle`、`progress`、`indicator`、`msgbox`、`slideshow`、`scroll_panel`、
+`dropdown`（滚动条淡出）。`WE_CFG_GUI_TASK_MAX_NUM` 的 4 个 task 槽完整保留给内核/用户扩展。
+
 ---
 
 ## 4. Widget API
@@ -298,12 +327,24 @@ For per-widget API and behavior, see the corresponding `widget.md` under:
 - `Core/widgets/msgbox/widget.md`
 - `Core/widgets/img_flash/widget.md`
 - `Core/widgets/font_flash/widget.md`
+- `Core/widgets/slider/widget.md`
+- `Core/widgets/scroll_panel/widget.md`
+- `Core/widgets/dropdown/widget.md`
+- `Core/widgets/stepper/widget.md`
+- `Core/widgets/indicator/widget.md`
 
 Notable rendering notes:
 
 - `toggle` track and thumb are drawn via the shared analytic round-rect fill renderer.
 - `checkbox` box geometry is drawn via the shared analytic round-rect fill.
 - `chart` waveform-body / feathering ideas reference Arm-2D, but the implementation has been rewritten for WeGui's ring-buffer, dirty-rectangle, PFB clipping and integer coordinate pipeline.
+- `dropdown` expanded list uses pixel-level free scrolling; the scrollbar auto-fades to a residual minimum opacity (`WE_DROPDOWN_SB_IDLE_ALPHA`) after idle, driven by the central animation engine (no task slot). Its overlay popup draws through the single LCD-level `popup_layer`, so only one popup is open screen-wide.
+- `stepper` stores its value as fixed-point `int32` (real value = `value / 10^decimals`); hold-to-repeat reuses the `STAY` event and consumes no timer slot.
+- `indicator` animates its on/off color transition (optional glow) via the central animation engine (see 3.1, no task slot); default is read-only, opt into click-toggle with `we_indicator_set_clickable()`.
+- All widget animations (`toggle`/`progress`/`indicator`/`msgbox`/`slideshow`/`scroll_panel`/`dropdown`) run on the central animation engine — none of them consume GUI task slots.
+- `slider`/`toggle`/`checkbox` support a value-changed callback (`we_xxx_set_changed_cb`), fired only on user interaction (programmatic setters do not fire it); `dropdown`/`stepper` had equivalent callbacks already.
+- A bare `group` now hit-forwards touch events to its children (press-lock + click re-verification), so interactive widgets inside a plain group receive input; a fully transparent group does not intercept input.
+- Container opacity propagates to children: `we_group_set_opacity` (and slideshow/scroll_panel opacity) fades the whole subtree. Mechanism: containers multiply into the lcd-level `opa_scale` around their children pass; every primitive applies it once at entry (`we_opa_apply`) — zero per-pixel cost when no fade is active, nesting composes automatically.
 
 ---
 
@@ -581,6 +622,10 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 - `img_BG`
 
 ### Existing Demos (demo_id for simulator)
+
+Simulator numbering skips retired id 9 (former `key` demo). STM32 entries omit the
+gap, so STM32 ids from checkbox onward are one less than the simulator ids below.
+
 | ID | Demo |
 |----|------|
 | 1 | label |
@@ -591,7 +636,6 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 | 6 | group |
 | 7 | slideshow |
 | 8 | concentric arc |
-| 9 | key |
 | 10 | checkbox |
 | 11 | label_ex |
 | 12 | chart |
@@ -601,7 +645,10 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 | 16 | flash img |
 | 17 | flash font |
 | 18 | slider |
-| 19 | dropdown |
+| 19 | scroll_panel |
+| 20 | dropdown |
+| 21 | stepper |
+| 22 | indicator |
 
 ---
 

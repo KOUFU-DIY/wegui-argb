@@ -104,15 +104,19 @@ static int8_t _we_gui_find_free_timer_slot(we_lcd_t *p_lcd)
  * 2. pfb_gram_base 始终保存整块缓冲的起始地址；
  * 3. pfb_gram 始终指向“当前正在被 GUI 绘制”的那一半。
  * -------------------------------------------------------------------------- */
+/* PFB 真双缓冲条件：用户开启双缓冲 且 端口确为异步发送（WE_PORT_FLUSH_ASYNC）。
+ * 阻塞端口（如 F103 默认 _SOFT_4SPI、SDL 模拟器）自动退回整块 PFB。 */
+#define WE_PFB_DOUBLE_BUF ((GRAM_DMA_BUFF_EN == 1) && (WE_PORT_FLUSH_ASYNC == 1))
+
 /**
  * @brief 在 DMA 双缓冲模式下切换当前 PFB 工作区
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
  * @return 无
- * @note 仅在 GRAM_DMA_BUFF_EN == 1 时生效，非双缓冲模式下为空操作。
+ * @note 仅在真双缓冲（WE_PFB_DOUBLE_BUF）时生效，否则为空操作。
  */
 static void _we_lcd_swap_pfb(we_lcd_t *p_lcd)
 {
-#if (GRAM_DMA_BUFF_EN == 1)
+#if WE_PFB_DOUBLE_BUF
     /* pfb_gram 是 colour_t *，sizeof(colour_t) 随色深变化，
      * 指针步进天然覆盖 RGB565 和 RGB888，无需按色深分支。 */
     if (p_lcd->pfb_gram == p_lcd->pfb_gram_base)
@@ -264,6 +268,7 @@ static void _we_gui_perf_stress_invalidate(we_lcd_t *p_lcd)
 void we_img_render_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
 {
     // 完全透明时直接返回，避免进入后续裁剪和逐像素循环。
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
@@ -392,6 +397,7 @@ typedef struct
     int16_t base_dest_y;
     uint16_t dst_stride;
     const uint8_t *arry;     /* 解码起点指针（已跳到最近的字节偏移） */
+    const uint8_t *data_end; /* 解码字节流保守硬上界（最坏 4 字节/像素），防越界读 */
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
@@ -413,6 +419,11 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
 {
     uint16_t img_w = IMG_DAT_WIDTH(img);
     uint16_t img_h = IMG_DAT_HEIGHT(img);
+
+    /* 防御：宽或高为 0 视为损坏资源，直接拒绝（同时避免后面 % img_w 除零）。 */
+    if (img_w == 0U || img_h == 0U)
+        return 0U;
+
     int16_t x1 = x0 + img_w - 1;
     int16_t y1 = y0 + img_h - 1;
 
@@ -435,6 +446,10 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     uint16_t u16_size = (dat[7] << 8) | dat[8];
     uint16_t u24_size = (dat[9] << 8) | dat[10];
     uint16_t u32_size = (dat[11] << 8) | dat[12];
+
+    /* 防御：索引头固定读取 dat[0..12]，head_size 小于 13 说明头部已损坏。 */
+    if (head_size < 13U)
+        return 0U;
 
     uint16_t num_u16 = u16_size / 2;
     uint16_t num_u24 = u24_size / 3;
@@ -478,6 +493,16 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
         }
     }
 
+    /* 防御：资源头没有总长度字段，这里用"最坏 4 字节/像素 + 余量"的保守流长上界，
+     * 拦截损坏索引表带来的任意地址跳转，并给解码循环一个硬性越界停止线。
+     * 合法码流必然短于该上界，正常资源不受影响。 */
+    uint32_t max_pixels = (uint32_t)img_w * img_h;
+    if (max_pixels > ((0xFFFFFFFFUL - 16UL) >> 2))
+        return 0U;
+    uint32_t stream_max = (max_pixels << 2) + 16UL;
+    if (byte_offset >= stream_max)
+        return 0U;
+
     uint32_t jump_pixel_idx = skip_intervals * interval;
 
     dec->img_w = img_w;
@@ -490,10 +515,11 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     dec->base_dest_y = (int16_t)(y0 - p_lcd->pfb_y_start);
     dec->dst_stride = p_lcd->pfb_width;
     dec->arry = qoi_start + byte_offset;
+    dec->data_end = qoi_start + stream_max;
     dec->cur_x = (uint16_t)(jump_pixel_idx % img_w);
     dec->cur_y = (uint16_t)(jump_pixel_idx / img_w);
     dec->decoded_pixels = jump_pixel_idx;
-    dec->max_pixels = (uint32_t)img_w * img_h;
+    dec->max_pixels = max_pixels;
     return 1U;
 }
 
@@ -518,11 +544,13 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     int16_t base_dest_y;
     uint16_t dst_stride;
     const uint8_t *arry;
+    const uint8_t *data_end;
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
     uint32_t max_pixels;
 
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
@@ -539,6 +567,7 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     base_dest_y = dec.base_dest_y;
     dst_stride = dec.dst_stride;
     arry = dec.arry;
+    data_end = dec.data_end;
     cur_x = dec.cur_x;
     cur_y = dec.cur_y;
     decoded_pixels = dec.decoded_pixels;
@@ -555,8 +584,9 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     colour_t *row_dst = 0;
     int32_t row_dst_y = -1;
 
-    /* ---------------- 主解码循环 ---------------- */
-    while (decoded_pixels < max_pixels)
+    /* ---------------- 主解码循环 ----------------
+     * arry < data_end 是损坏资源的硬性越界停止线（保守上界，正常码流不受影响）。 */
+    while ((decoded_pixels < max_pixels) && (arry < data_end))
     {
         flag = *arry++;
 
@@ -676,11 +706,13 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     int16_t base_dest_y;
     uint16_t dst_stride;
     const uint8_t *arry;
+    const uint8_t *data_end;
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
     uint32_t max_pixels;
 
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
@@ -697,6 +729,7 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     base_dest_y = dec.base_dest_y;
     dst_stride = dec.dst_stride;
     arry = dec.arry;
+    data_end = dec.data_end;
     cur_x = dec.cur_x;
     cur_y = dec.cur_y;
     decoded_pixels = dec.decoded_pixels;
@@ -715,8 +748,9 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     colour_t *row_dst = 0;
     int32_t row_dst_y = -1;
 
-    /* ---------------- 主解码循环 ---------------- */
-    while (decoded_pixels < max_pixels)
+    /* ---------------- 主解码循环 ----------------
+     * arry < data_end 是损坏资源的硬性越界停止线（保守上界，正常码流不受影响）。 */
+    while ((decoded_pixels < max_pixels) && (arry < data_end))
     {
         flag = *arry++;
 
@@ -825,7 +859,10 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
  * @param opacity 传入，全局透明度(0~255)
  * @return 无
  */
-void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, colour_t color, uint8_t opacity)
+/* 免级联缩放的内部实现：opacity 须为最终值（公开原语入口已缩放）。
+ * 供 analytic_fill 等原语内部组合调用，避免 opa_scale 被双重应用
+ * （否则圆角(×s¹)与矩形主体(×s²)在容器淡入淡出时出现亮度断层）。 */
+static void _we_fill_rect_no_scale(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, colour_t color, uint8_t opacity)
 {
     int16_t x1, y1;
     int16_t draw_x_start, draw_y_start, draw_x_end, draw_y_end;
@@ -1217,7 +1254,10 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
     int16_t x1;
     int16_t y1;
 
-    if (p_lcd == NULL || w == 0U || h == 0U || opacity == 0U)
+    if (p_lcd == NULL || w == 0U || h == 0U)
+        return;
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
+    if (opacity == 0U)
         return;
 
     r = radius;
@@ -1228,7 +1268,8 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
 
     if (r == 0U)
     {
-        we_fill_rect(p_lcd, x, y, w, h, color, opacity);
+        /* 入口已做级联缩放，内部组合走免缩放版避免双重应用 */
+        _we_fill_rect_no_scale(p_lcd, x, y, w, h, color, opacity);
         return;
     }
 
@@ -1238,13 +1279,15 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
     /* --- 1. 中间整块实心带（圆角上下两条带之间），直接走快速矩形填充 ---
      * 行范围 [y+r, y1-r]，高度 h-2r；当 h==2r（如胶囊/圆形）时高度为 0，
      * we_fill_rect 会因 h==0 直接返回。 */
-    we_fill_rect(p_lcd, x, (int16_t)(y + (int16_t)r), w, (uint16_t)(h - 2U * r), color, opacity);
+    _we_fill_rect_no_scale(p_lcd, x, (int16_t)(y + (int16_t)r), w, (uint16_t)(h - 2U * r), color, opacity);
 
     /* --- 2. 上下两条带的中心实心区（去掉左右两个圆角列）---
-     * 宽度 w-2r；当 w==2r 时宽度为 0，we_fill_rect 直接返回。 */
-    we_fill_rect(p_lcd, (int16_t)(x + (int16_t)r), y, (uint16_t)(w - 2U * r), r, color, opacity);
-    we_fill_rect(p_lcd, (int16_t)(x + (int16_t)r), (int16_t)(y1 - (int16_t)r + 1),
-                 (uint16_t)(w - 2U * r), r, color, opacity);
+     * 宽度 w-2r；当 w==2r 时宽度为 0，填充函数因 w==0 直接返回。
+     * 注意走免缩放内部版：本函数入口已应用级联，主体与圆角必须同一份 opacity，
+     * 否则容器淡入淡出时四角与矩形主体出现亮度断层。 */
+    _we_fill_rect_no_scale(p_lcd, (int16_t)(x + (int16_t)r), y, (uint16_t)(w - 2U * r), r, color, opacity);
+    _we_fill_rect_no_scale(p_lcd, (int16_t)(x + (int16_t)r), (int16_t)(y1 - (int16_t)r + 1),
+                           (uint16_t)(w - 2U * r), r, color, opacity);
 
     /* --- 3. 仅在 4 个 r×r 角落方块内做抗锯齿，函数调用与子采样开销集中于此 --- */
     _we_draw_round_corner(p_lcd, x, y, r, WE_MASK_QUADRANT_LT, color, opacity);
@@ -1285,7 +1328,7 @@ static __inline void _we_put_pixel_clipped(we_lcd_t *p_lcd, int16_t px, int16_t 
  */
 void we_draw_pixel(we_lcd_t *p_lcd, int16_t px, int16_t py, colour_t color, uint8_t opacity)
 {
-    _we_put_pixel_clipped(p_lcd, px, py, color, opacity);
+    _we_put_pixel_clipped(p_lcd, px, py, color, we_opa_apply(p_lcd, opacity));
 }
 
 /**
@@ -1313,6 +1356,7 @@ void we_draw_line(we_lcd_t *p_lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y
     uint8_t steep;
     int16_t lo, hi;
 
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
@@ -1830,6 +1874,7 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
         _we_lcd_swap_pfb(p_lcd);
 #elif (LCD_DEEP == DEEP_RGB888)
         p_lcd->flush_cb((uint8_t *)p_lcd->pfb_gram, pixels_to_push * 3U);
+        _we_lcd_swap_pfb(p_lcd); /* 真双缓冲下与 RGB565 路径同样乒乓，否则为空操作 */
 #endif
         current_y += lines_this_chunk;
         lines_left -= lines_this_chunk;
@@ -2022,6 +2067,19 @@ void we_gui_task_handler(we_lcd_t *p_lcd)
     _we_gui_run_tasks(p_lcd, elapsed_ms);
     _we_gui_run_timers(p_lcd, elapsed_ms);
 
+    /* 2.5 推进中央动画链表（控件动画，不占 task 槽）。
+     *     先存 next 再调 step_cb，允许回调内摘除自身节点。 */
+    if (elapsed_ms != 0U)
+    {
+        we_anim_t *an = p_lcd->anim_head;
+        while (an != NULL)
+        {
+            we_anim_t *an_next = an->next;
+            an->step_cb(an->owner, elapsed_ms);
+            an = an_next;
+        }
+    }
+
 #if (WE_CFG_DEBUG_PERF_STRESS == 1)
     /* 性能压测：在刷新前强制标脏所有控件，制造每帧全量重绘负载。 */
     _we_gui_perf_stress_invalidate(p_lcd);
@@ -2166,11 +2224,80 @@ void we_obj_delete(we_obj_t *obj)
     // 2. 从所在链表中摘掉当前对象。
     _we_obj_unlink_from(_we_obj_owner_head(obj), obj);
 
+    // 2.5 若该对象正处于按压状态，同步清空输入派发缓存，
+    //     防止 RELEASED/STAY/SWIPE 阶段经悬空指针回调。
+    if (obj->lcd->pressed_obj == obj)
+        obj->lcd->pressed_obj = NULL;
+
     // 3. 清空对象状态，避免后续误用。
     obj->next = NULL;
     obj->parent = NULL;
     obj->class_p = NULL;
     obj->lcd = NULL;
+}
+
+/* --------------------------------------------------------------------------
+ * 中央动画引擎
+ *
+ * 控件动画不再占用 GUI task 槽：节点内嵌在控件结构体里，挂到
+ * lcd->anim_head 侵入式链表上，由 we_gui_task_handler 每周期统一推进。
+ * 空链时开销仅一次判空；start 不会失败（彻底消除"槽满→动画静默消失"）。
+ * -------------------------------------------------------------------------- */
+
+void we_anim_start(we_lcd_t *lcd, we_anim_t *anim,
+                   void (*step_cb)(void *owner, uint16_t elapsed_ms), void *owner)
+{
+    we_anim_t *it;
+
+    if (lcd == NULL || anim == NULL || step_cb == NULL)
+        return;
+
+    anim->step_cb = step_cb;
+    anim->owner = owner;
+
+    /* 已在链上则只更新回调，避免重复挂链成环 */
+    for (it = lcd->anim_head; it != NULL; it = it->next)
+    {
+        if (it == anim)
+            return;
+    }
+
+    anim->next = lcd->anim_head;
+    lcd->anim_head = anim;
+}
+
+void we_anim_stop(we_lcd_t *lcd, we_anim_t *anim)
+{
+    we_anim_t **pp;
+
+    if (lcd == NULL || anim == NULL)
+        return;
+
+    for (pp = &lcd->anim_head; *pp != NULL; pp = &(*pp)->next)
+    {
+        if (*pp == anim)
+        {
+            *pp = anim->next;
+            anim->next = NULL;
+            return;
+        }
+    }
+}
+
+/**
+ * @brief 在局部帧缓冲(PFB)中绘制实心矩形（公开入口，应用容器透明度级联）
+ * @param p_lcd 传入，当前 GUI 屏幕上下文指针
+ * @param x 传入，矩形左上角 X 坐标
+ * @param y 传入，矩形左上角 Y 坐标
+ * @param w 传入，矩形宽度
+ * @param h 传入，矩形高度
+ * @param color 传入，填充颜色
+ * @param opacity 传入，全局透明度(0~255)
+ * @return 无
+ */
+void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, colour_t color, uint8_t opacity)
+{
+    _we_fill_rect_no_scale(p_lcd, x, y, w, h, color, we_opa_apply(p_lcd, opacity));
 }
 
 void we_obj_bring_to_front(we_obj_t *obj)
@@ -2486,6 +2613,8 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
         p_lcd->timer_list[i].repeat = 0U;
         p_lcd->timer_list[i].active = 0U;
     }
+    p_lcd->anim_head = NULL; // 中央动画链表初始为空
+    p_lcd->opa_scale = 255U; // 容器透明度级联乘子，默认无衰减
 #if (WE_CFG_ENABLE_RENDER_STATS == 1)
     p_lcd->stat_render_frames = 0U;
     p_lcd->stat_pfb_pushes = 0U;
@@ -2494,6 +2623,10 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
     p_lcd->indev_data.x = 0;
     p_lcd->indev_data.y = 0;
     p_lcd->indev_data.state = WE_TOUCH_STATE_NONE;
+    p_lcd->gesture_press_x = 0;
+    p_lcd->gesture_press_y = 0;
+    p_lcd->pressed_obj = NULL;
+    p_lcd->gesture_had_stay = 0U;
 #if (WE_CFG_ENABLE_INPUT_PORT_BIND == 1)
     p_lcd->input_read_cb = NULL;
 #endif
@@ -2507,14 +2640,14 @@ p_lcd->pfb_gram = gram;
     p_lcd->pfb_gram_base = gram_base; // 记录 PFB 基址，后续双缓冲切换会用到
     p_lcd->pfb_gram = gram_base;
     /* PFB 长度约定：
-     * 1. 非 DMA 双缓冲时，pfb_size = 用户注册的总长度；
-     * 2. DMA 双缓冲时，用户仍然注册整块 USER_GRAM_NUM，
-     *    内核内部自动按一半作为“当前绘制 PFB”长度使用，
-     *    另一半留给底层异步发送使用。 */
-#if (GRAM_DMA_BUFF_EN == 0)
-    p_lcd->pfb_size = gram_size;
-#else
+     * 1. 非真双缓冲（含阻塞端口）时，pfb_size = 用户注册的总长度；
+     * 2. 真双缓冲（GRAM_DMA_BUFF_EN=1 且端口异步）时，用户仍注册整块
+     *    USER_GRAM_NUM，内核自动按一半作为"当前绘制 PFB"长度使用，
+     *    另一半留给底层 DMA 异步发送。 */
+#if WE_PFB_DOUBLE_BUF
     p_lcd->pfb_size = gram_size / 2U;
+#else
+    p_lcd->pfb_size = gram_size;
 #endif
     p_lcd->set_addr_cb = set_addr_cb;
     p_lcd->flush_cb = flush_cb;
@@ -2534,11 +2667,14 @@ p_lcd->pfb_gram = gram;
  */
 void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
 {
-    static we_obj_t *last_pressed_obj = NULL;
-    static uint8_t had_stay = 0; /* 本次触摸序列中是否经历过 STAY（拖拽） */
-
     if (lcd == NULL || data == NULL)
         return;
+
+    /* 按压/拖拽状态保存在 we_lcd_t 内（按实例隔离，多屏不串台）。
+     * 防御：若按压对象已被外部置为失效（class_p 为空），立即丢弃引用，
+     * 避免 RELEASED/STAY/SWIPE 分支经空 class_p 调用直接 HardFault。 */
+    if (lcd->pressed_obj != NULL && lcd->pressed_obj->class_p == NULL)
+        lcd->pressed_obj = NULL;
 
     /* LCD 级 overlay popup 拥有最高输入优先级：
      * popup 激活时，先把原始触摸状态事件交给 popup 处理，
@@ -2586,19 +2722,19 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
         /* 记录按下坐标，用于释放时判定滑动方向 */
         lcd->gesture_press_x = data->x;
         lcd->gesture_press_y = data->y;
-        had_stay = 0;
+        lcd->gesture_had_stay = 0U;
 
         if (target != NULL)
         {
             target->class_p->event_cb(target, WE_EVENT_PRESSED, data);
-            last_pressed_obj = target;
+            lcd->pressed_obj = target;
         }
     }
     else if (data->state == WE_TOUCH_STATE_RELEASED)
     {
-        if (last_pressed_obj != NULL)
+        if (lcd->pressed_obj != NULL)
         {
-            last_pressed_obj->class_p->event_cb(last_pressed_obj, WE_EVENT_RELEASED, data);
+            lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, WE_EVENT_RELEASED, data);
 
             /* 滑动手势识别：仅在"快速划过"（无 STAY）时才生成 SWIPE。
              * 如果经历过 STAY（手指拖拽），控件已经通过 STAY 实时跟随了，
@@ -2608,33 +2744,33 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
             int16_t abs_dx = (dx >= 0) ? dx : -dx;
             int16_t abs_dy = (dy >= 0) ? dy : -dy;
 
-            if (!had_stay && abs_dx > abs_dy && abs_dx >= WE_CFG_SWIPE_THRESHOLD)
+            if (!lcd->gesture_had_stay && abs_dx > abs_dy && abs_dx >= WE_CFG_SWIPE_THRESHOLD)
             {
                 /* 水平滑动 */
                 we_event_t swipe = (dx < 0) ? WE_EVENT_SWIPE_LEFT : WE_EVENT_SWIPE_RIGHT;
-                last_pressed_obj->class_p->event_cb(last_pressed_obj, swipe, data);
+                lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, swipe, data);
             }
-            else if (!had_stay && abs_dy >= WE_CFG_SWIPE_THRESHOLD)
+            else if (!lcd->gesture_had_stay && abs_dy >= WE_CFG_SWIPE_THRESHOLD)
             {
                 /* 垂直滑动 */
                 we_event_t swipe = (dy < 0) ? WE_EVENT_SWIPE_UP : WE_EVENT_SWIPE_DOWN;
-                last_pressed_obj->class_p->event_cb(last_pressed_obj, swipe, data);
+                lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, swipe, data);
             }
-            else if (last_pressed_obj == target)
+            else if (lcd->pressed_obj == target)
             {
                 /* 位移不足或拖拽后松手，视为点击（拖拽后不在原控件上则不触发） */
-                last_pressed_obj->class_p->event_cb(last_pressed_obj, WE_EVENT_CLICKED, data);
+                lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, WE_EVENT_CLICKED, data);
             }
         }
-        last_pressed_obj = NULL;
+        lcd->pressed_obj = NULL;
     }
     else if (data->state == WE_TOUCH_STATE_STAY)
     {
-        had_stay = 1;
+        lcd->gesture_had_stay = 1U;
         // 长按/拖拽期间持续分发 STAY 事件。
-        if (last_pressed_obj != NULL && last_pressed_obj->class_p->event_cb != NULL)
+        if (lcd->pressed_obj != NULL && lcd->pressed_obj->class_p->event_cb != NULL)
         {
-            last_pressed_obj->class_p->event_cb(last_pressed_obj, WE_EVENT_STAY, data);
+            lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, WE_EVENT_STAY, data);
         }
     }
 }
@@ -2657,6 +2793,8 @@ void we_input_init_with_port(we_lcd_t *p_lcd, we_input_read_cb_t read_cb)
     p_lcd->indev_data.x = 0;
     p_lcd->indev_data.y = 0;
     p_lcd->indev_data.state = WE_TOUCH_STATE_NONE;
+    p_lcd->pressed_obj = NULL;       /* 重绑输入时丢弃旧按压引用 */
+    p_lcd->gesture_had_stay = 0U;
 }
 #endif
 

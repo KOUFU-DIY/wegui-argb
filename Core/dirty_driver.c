@@ -307,9 +307,9 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
 #endif
 
 #if (WE_CFG_DIRTY_STRATEGY == 0)
-    // 策略 0：全局重绘
+    // 策略 0：全局重绘（用运行期尺寸，与策略 1/2 及边界裁剪保持一致）
     mgr->count = 1;
-    mgr->rects[0] = (we_rect_t){0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1};
+    mgr->rects[0] = (we_rect_t){0, 0, (int16_t)(mgr->screen_w - 1), (int16_t)(mgr->screen_h - 1)};
 
 #elif (WE_CFG_DIRTY_STRATEGY == 1)
     // 策略 1：单面包围盒

@@ -115,8 +115,8 @@ typedef struct
      */
 
     int16_t angle;
-    /* 角度
-       目前单位精度是1度。
+    /* 角度，512 分度制（512 = 整圈 360°，90° = 128，180° = 256）。
+     * 内部按 & 0x1FF 归一化，请用 WE_DEG(deg) / WE_ANGLE(deg) 从角度换算。
      */
 
     uint16_t scale_256;
