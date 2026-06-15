@@ -172,11 +172,11 @@ static void _btn_draw_cb(void *ptr)
 static uint8_t _btn_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_btn_obj_t *btn = (we_btn_obj_t *)ptr;
-    if (btn->user_event_cb != NULL)
-    {
-        return btn->user_event_cb(ptr, event, data);
-    }
-    (void)data; // 不使用具体坐标
+
+    /* 叠加语义：默认按压视觉始终执行，用户回调只补业务逻辑，
+     * 不再需要自己维护按压态、也不必关心返回值
+     * （旧"接管"语义连官方 demo 都连续踩坑：忘补样式 + 返回 0
+     *   导致容器不锁定、CLICKED 不被转发）。 */
     switch (event)
     {
     case WE_EVENT_PRESSED:
@@ -185,13 +185,17 @@ we_btn_set_state(btn, WE_BTN_STATE_PRESSED);
     case WE_EVENT_RELEASED:
 we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
         break;
-    case WE_EVENT_CLICKED:
-        /* 无用户回调时点击事件不做额外处理，默认状态由按下/释放维护。 */
-        break;
     default:
         break;
     }
-    return 1; // 按钮始终拦截并消费事件
+
+    if (btn->user_event_cb != NULL)
+    {
+        (void)btn->user_event_cb(ptr, event, data);
+    }
+
+    (void)data; // 不使用具体坐标
+    return 1; // 交互控件恒返回 1，容器（slideshow 等）据此锁定并转发后续事件
 }
 
 /**

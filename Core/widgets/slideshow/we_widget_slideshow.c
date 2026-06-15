@@ -24,7 +24,7 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _slideshow_task_cb(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms);
+static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
 static const we_class_t _slideshow_class = { .draw_cb = _slideshow_draw_cb, .event_cb = _slideshow_event_cb, .set_pos_cb = NULL};
 
@@ -104,6 +104,7 @@ static void _slideshow_clear_snap_state(we_slideshow_obj_t *obj)
 #if (WE_SLIDESHOW_SNAP_ANIM_MODE == WE_SLIDESHOW_SNAP_ANIM_COMPLEX)
     obj->snap_vx = 0;
 #endif
+    we_anim_stop(obj->group.base.lcd, &obj->anim); /* 摘链停表，空闲零开销 */
 }
 
 /**
@@ -119,6 +120,10 @@ static void _slideshow_set_snap_target(we_slideshow_obj_t *obj, int16_t target_x
 #if (WE_SLIDESHOW_SNAP_ANIM_MODE == WE_SLIDESHOW_SNAP_ANIM_COMPLEX)
     obj->snap_vx = 0;
 #endif
+    if (obj->snap_animating)
+        we_anim_start(obj->group.base.lcd, &obj->anim, _slideshow_anim_step_cb, obj);
+    else
+        we_anim_stop(obj->group.base.lcd, &obj->anim);
 }
 
 /**
@@ -376,10 +381,9 @@ static void _slideshow_anim_step(we_slideshow_obj_t *obj, uint16_t elapsed_ms)
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _slideshow_task_cb(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_slideshow_obj_t *obj = (we_slideshow_obj_t *)user_data;
-    (void)lcd;
+    we_slideshow_obj_t *obj = (we_slideshow_obj_t *)owner;
     if (obj == NULL)
         return;
     _slideshow_anim_step(obj, elapsed_ms);
@@ -407,6 +411,10 @@ static void _slideshow_draw_cb(void *ptr)
         uint16_t old_y_start = lcd->pfb_y_start;
         uint16_t old_y_end = lcd->pfb_y_end;
         colour_t *old_gram = lcd->pfb_gram;
+        uint8_t old_scale = lcd->opa_scale;
+
+        /* 子控件透明度级联（嵌套自动链乘） */
+        lcd->opa_scale = we_opa_apply(lcd, obj->group.opacity);
         int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->group.base.x);
         int16_t new_y0 = WE_MAX(old_y_start, obj->group.base.y);
         int16_t new_x1 = WE_MIN(old_pfb_area.x1, obj->group.base.x + obj->group.base.w - 1);
@@ -429,6 +437,7 @@ static void _slideshow_draw_cb(void *ptr)
             }
         }
 
+        lcd->opa_scale = old_scale;
         lcd->pfb_area = old_pfb_area;
         lcd->pfb_y_start = old_y_start;
         lcd->pfb_y_end = old_y_end;
@@ -571,7 +580,9 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
     for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
         obj->child_slots[i].used = 0U;
 
-    obj->group.task_id = _we_gui_task_register_with_data(lcd, _slideshow_task_cb, obj);
+    obj->anim.next = NULL;
+    obj->anim.step_cb = NULL;
+    obj->anim.owner = NULL;
 }
 
 /**
@@ -590,11 +601,8 @@ void we_slideshow_obj_delete(we_slideshow_obj_t *obj)
     for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
         obj->child_slots[i].used = 0U;
 
-    if (obj->group.task_id >= 0)
-    {
-        _we_gui_task_unregister(obj->group.base.lcd, obj->group.task_id);
-        obj->group.task_id = -1;
-    }
+    /* 节点归控件所有，删除前必须摘链 */
+    we_anim_stop(obj->group.base.lcd, &obj->anim);
 
     we_group_obj_delete(&obj->group);
 }

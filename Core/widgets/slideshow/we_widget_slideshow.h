@@ -64,6 +64,7 @@ typedef struct
 {
     we_group_obj_t group;
     we_obj_t *last_pressed_child;
+    we_anim_t anim; /* 中央动画引擎节点（页吸附动画，不占 GUI task 槽） */
     int16_t scroll_x;
     int16_t last_touch_x;
     int16_t last_touch_y;
@@ -113,6 +114,7 @@ uint16_t we_slideshow_add_page(we_slideshow_obj_t *obj);
  * @param obj 幻灯片控件对象指针。
  * @return 页数；obj 为 NULL 时返回 0。
  */
+uint16_t we_slideshow_get_page_count(const we_slideshow_obj_t *obj);
 
 /**
  * @brief 获取当前停留页索引。

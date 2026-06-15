@@ -274,6 +274,9 @@ static void we_img_ex_draw_cb(void *obj_ptr)
 {
     we_img_ex_obj_t *obj = (we_img_ex_obj_t *)obj_ptr;
     we_lcd_t *p_lcd = obj->base.lcd;
+    /* 容器透明度级联：入口算一次有效透明度，内环零额外成本 */
+    uint8_t eff_op = we_opa_apply(p_lcd, obj->opacity);
+    (void)eff_op; /* 个别裁剪宏组合下可能不被引用 */
     const uint8_t *img = obj->img;
     const uint8_t *img_data;
     uint16_t img_w;
@@ -323,7 +326,7 @@ static void we_img_ex_draw_cb(void *obj_ptr)
     }
 
 #if (!WE_IMG_EX_ASSUME_OPAQUE)
-    if (obj->opacity <= 5U)
+    if (eff_op <= 5U)
     {
         return;
     }
@@ -332,7 +335,7 @@ static void we_img_ex_draw_cb(void *obj_ptr)
 img_data = IMG_DAT_PIXELS(img);
 img_w = IMG_DAT_WIDTH(img);
 #if (WE_IMG_EX_ENABLE_EDGE_AA)
-    opacity_u8 = obj->opacity;
+    opacity_u8 = eff_op;
 #endif
 
     /* 步骤1：先把图片在当前 PFB 页中真正可见的区域裁出来。 */
@@ -549,7 +552,7 @@ colour_t fg = _img_ex_color_from_rgb565(final_color);
 #endif
                 }
 #else
-                if (obj->opacity >= 250U)
+                if (eff_op >= 250U)
                 {
 colour_t fg = _img_ex_color_from_rgb565(final_color);
 #if (LCD_DEEP == DEEP_RGB565)
@@ -563,13 +566,13 @@ colour_t fg = _img_ex_color_from_rgb565(final_color);
                 else
                 {
 #if (LCD_DEEP == DEEP_RGB565) && (WE_IMG_EX_ENABLE_FAST_RGB565_BLEND)
-p_dst->dat16 = we_blend_rgb565(final_color, p_dst->dat16, obj->opacity);
+p_dst->dat16 = we_blend_rgb565(final_color, p_dst->dat16, eff_op);
 #else
                     colour_t fg;
                     colour_t pixel_color;
 
 fg = _img_ex_color_from_rgb565(final_color);
-pixel_color = _blend_fast(fg, *p_dst, obj->opacity);
+pixel_color = _blend_fast(fg, *p_dst, eff_op);
 #if (LCD_DEEP == DEEP_RGB565)
                     p_dst->dat16 = pixel_color.dat16;
 #else
@@ -603,27 +606,33 @@ pixel_color = _blend_fast(fg, *p_dst, obj->opacity);
 }
 
 /* --------------------------------------------------------------------------
- * 容器滚动时，img_ex 只需要跟随平移中心点。
- * 本控件本身不消费点击，让事件继续留给父容器处理。
+ * 容器平移（group/scroll_panel/slideshow 经 we_obj_set_pos）时，
+ * 包围盒 base.x/y 与采样锚点 cx/cy 必须按同一位移差整体移动，
+ * 否则采样锚点与裁剪/标脏窗口失配，表现为位置漂移、拖影、被错误裁剪。
+ * 统一收口在 set_pos_cb 里，不再依赖 WE_EVENT_SCROLLED 同步锚点
+ * （we_group_shift_children 已先调 we_obj_set_pos，再发 SCROLLED 会双重位移）。
+ * 本控件不消费点击。
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件事件回调，处理按压/滑动/点击输入。
+ * @brief 控件移动回调，平移包围盒的同时同步平移采样锚点。
  * @param ptr 回调透传对象指针。
- * @param event 输入事件类型。
- * @param data 输入设备事件数据指针。
- * @return 返回状态标志（1 有效，0 无效）。
+ * @param new_x 新的包围盒左上角 X 坐标。
+ * @param new_y 新的包围盒左上角 Y 坐标。
+ * @return 无。
  */
-static uint8_t _img_ex_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
+static void _img_ex_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 {
-    if (event == WE_EVENT_SCROLLED && data)
-    {
-        we_img_ex_obj_t *img_ex = (we_img_ex_obj_t *)ptr;
-        img_ex->cx += data->x;
-        img_ex->cy += data->y;
-    }
+    we_img_ex_obj_t *img_ex = (we_img_ex_obj_t *)ptr;
 
-    return 0;
+we_obj_invalidate((we_obj_t *)img_ex);
+
+    img_ex->cx += (int16_t)(new_x - img_ex->base.x);
+    img_ex->cy += (int16_t)(new_y - img_ex->base.y);
+    img_ex->base.x = new_x;
+    img_ex->base.y = new_y;
+
+we_obj_invalidate((we_obj_t *)img_ex);
 }
 
 /**
@@ -660,7 +669,7 @@ void we_img_ex_obj_init(we_img_ex_obj_t *obj, we_lcd_t *p_lcd, int16_t cx, int16
      * 如果后面你换测试素材，优先检查 lcd_res.c 里该资源的 dat_type。 */
     _img_ex_update_bbox(obj);
 
-    static const we_class_t _img_ex_class = {.draw_cb = we_img_ex_draw_cb, .event_cb = _img_ex_event_cb, .set_pos_cb = NULL};
+    static const we_class_t _img_ex_class = {.draw_cb = we_img_ex_draw_cb, .event_cb = NULL, .set_pos_cb = _img_ex_set_pos_cb};
 
     obj->base.class_p = &_img_ex_class;
     obj->base.next = NULL;

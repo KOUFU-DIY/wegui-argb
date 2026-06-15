@@ -11,9 +11,19 @@
 /* LCD 输出色深 */
 #define LCD_DEEP (DEEP_RGB565)
 
-/* 屏幕宽高 */
-#define SCREEN_WIDTH (240)
+/* 屏幕宽高
+ * 模拟器与硬件目标在此处分流：
+ *   - WE_SIMULATOR（CMake 全工程定义）：大画布，供全控件汇总 demo
+ *     （demo_id=23，按 800×480 布局）等使用；
+ *   - 硬件目标：基准 280×240。改大会同时放大 USER_GRAM_NUM，
+ *     8KB RAM 的 F030 会直接链接溢出，故两侧务必分开维护。 */
+#if defined(WE_SIMULATOR)
+#define SCREEN_WIDTH (800)
+#define SCREEN_HEIGHT (480)
+#else
+#define SCREEN_WIDTH (280)
 #define SCREEN_HEIGHT (240)
+#endif
 
 /* 屏幕显存
  * 最小设置 1 行；

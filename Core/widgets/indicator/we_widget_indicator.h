@@ -74,7 +74,7 @@ typedef struct we_indicator_obj_t
     uint16_t anim_ms;         /* 动画时长（毫秒） */
     uint16_t anim_acc_ms;     /* 已累计动画时间 */
     uint16_t progress;        /* 当前视觉进度，0..256（Q8） */
-    int8_t   task_id;         /* 动画 task 槽，-1 表示未注册 */
+    we_anim_t anim;           /* 中央动画引擎节点（不占 GUI task 槽） */
     uint8_t  state;           /* 目标态：0=灭，1=亮 */
     uint8_t  opacity;         /* 整体不透明度（0~255） */
     uint8_t  pressed;         /* 当前是否被按下 */

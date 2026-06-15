@@ -23,12 +23,12 @@ typedef struct
 
 typedef struct
 {
-    we_obj_t base;
-    int8_t task_id;
+    we_obj_t base;                /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
     colour_t bg_color;
     uint8_t opacity;
     we_group_child_slot_t child_slots[WE_GROUP_CHILD_MAX];
+    we_obj_t *last_pressed_child; /* 命中转发：本次触摸序列按到的子控件 */
 } we_group_obj_t;
 
 /**

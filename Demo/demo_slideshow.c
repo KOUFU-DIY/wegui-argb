@@ -63,6 +63,8 @@ static uint8_t _slideshow_prev_cb(void *obj, we_event_t event, we_indev_data_t *
 {
     (void)obj;
     (void)data;
+
+    /* 按压视觉由 btn 默认逻辑维护（叠加语义），回调只写业务。 */
     if (event == WE_EVENT_CLICKED)
     {
         if (slideshow_current_page == 0U)
@@ -73,7 +75,7 @@ static uint8_t _slideshow_prev_cb(void *obj, we_event_t event, we_indev_data_t *
         slideshow_auto_page_timer = 0U;
         _slideshow_update_page();
     }
-    return 0U;
+    return 1U;
 }
 
 /**
@@ -87,6 +89,7 @@ static uint8_t _slideshow_next_cb(void *obj, we_event_t event, we_indev_data_t *
 {
     (void)obj;
     (void)data;
+
     if (event == WE_EVENT_CLICKED)
     {
         slideshow_current_page = (uint16_t)((slideshow_current_page + 1U) % 3U);
@@ -94,7 +97,7 @@ static uint8_t _slideshow_next_cb(void *obj, we_event_t event, we_indev_data_t *
         slideshow_auto_page_timer = 0U;
         _slideshow_update_page();
     }
-    return 0U;
+    return 1U;
 }
 
 /**

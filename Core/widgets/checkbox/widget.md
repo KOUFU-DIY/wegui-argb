@@ -13,6 +13,7 @@
 - `we_checkbox_set_checked(...)`
 - `we_checkbox_toggle(...)`
 - `we_checkbox_is_checked(...)`
+- `we_checkbox_set_changed_cb(...)` — 勾选改变回调（替代轮询）
 - `we_checkbox_set_text(...)`
 - `we_checkbox_set_styles(...)`
 
@@ -21,8 +22,10 @@
 
 ## 事件与行为
 - 支持 `WE_EVENT_PRESSED / RELEASED / CLICKED`
-- `event_cb == NULL` 时使用默认行为：点击时切换勾选状态
-- `event_cb != NULL` 时可自行扩展联动逻辑
+- **按压视觉始终由控件默认维护**（叠加语义），用户回调只写业务、无需补样式
+- `event_cb == NULL`：点击自动切换勾选并触发 `changed_cb`（若已注册）
+- `event_cb != NULL`：点击业务由回调接管（默认勾选不执行，需要时回调内自行 `we_checkbox_toggle`）
+- 类回调恒返回 1，容器（group/slideshow/scroll_panel）据此正确锁定转发
 
 ## 注意事项
 - `text == NULL` 时只显示方框

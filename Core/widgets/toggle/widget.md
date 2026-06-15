@@ -13,7 +13,9 @@ iOS 风格拨动开关控件，支持按压态、开关态和可选平滑动画�
 - `we_toggle_set_checked(...)`
 - `we_toggle_toggle(...)`
 - `we_toggle_is_checked(...)`
+- `we_toggle_set_changed_cb(...)` — 状态改变回调（替代轮询）
 - `we_toggle_set_opacity(...)`
+- `we_toggle_obj_delete(...)`
 
 ## 可调宏
 在 `we_user_config.h` 中可覆盖：
@@ -28,8 +30,8 @@ iOS 风格拨动开关控件，支持按压态、开关态和可选平滑动画�
 
 ## 事件与行为
 - 支持 `WE_EVENT_PRESSED / RELEASED / CLICKED`
-- `CLICKED` 时默认翻转状态
-- 若启用动画，滑块会自动通过内部 task 平滑切换
+- `CLICKED` 时默认翻转状态，并触发 `changed_cb`（若已注册）
+- 若启用动画，由中央动画引擎（不占 GUI task 槽）平滑切换，到位自动摘链
 
 ## 注意事项
 - `we_toggle_set_checked(...)` 是立即跳变，用于初始化或程序同步状态

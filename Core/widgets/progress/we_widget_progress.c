@@ -25,7 +25,7 @@ static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _progress_task_cb(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms);
+static void _progress_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
 /**
  * @brief 在当前 PFB 裁剪区内绘制整条轨道。
@@ -140,6 +140,9 @@ static void _progress_draw_fill_mask_span(we_progress_obj_t *obj, we_lcd_t *lcd,
     if (obj == NULL || lcd == NULL || x0 > x1)
         return;
 
+    /* 容器透明度级联：与中段 we_fill_rect 路径保持同一份有效 opacity */
+    uint8_t eff_op = we_opa_apply(lcd, obj->opacity);
+
     r = obj->radius;
     if (r > (uint16_t)obj->base.w / 2U)
         r = (uint16_t)obj->base.w / 2U;
@@ -174,13 +177,13 @@ static void _progress_draw_fill_mask_span(we_progress_obj_t *obj, we_lcd_t *lcd,
                                                           r, px, py);
             if (mask_alpha == 0U)
                 continue;
-            if (mask_alpha >= 250U && obj->opacity >= 250U)
+            if (mask_alpha >= 250U && eff_op >= 250U)
             {
                 we_store_color(p, color);
             }
             else
             {
-                uint8_t alpha = we_div255((uint32_t)obj->opacity * mask_alpha);
+                uint8_t alpha = we_div255((uint32_t)eff_op * mask_alpha);
                 we_store_blended_color(p, color, alpha);
             }
         }
@@ -360,7 +363,13 @@ static void _progress_anim_step(we_progress_obj_t *obj, uint16_t elapsed_ms)
     if (obj == NULL)
         return;
 
-    if (obj->animating)
+    if (!obj->animating)
+    {
+        /* 已无动画在途：摘链停表，空闲期零开销 */
+        we_anim_stop(obj->base.lcd, &obj->anim);
+        return;
+    }
+
     {
         old_fill_w = _progress_calc_fill_w(obj, obj->display_value);
 
@@ -370,6 +379,7 @@ static void _progress_anim_step(we_progress_obj_t *obj, uint16_t elapsed_ms)
             obj->anim_elapsed_ms = obj->anim_duration_ms;
             obj->display_value = obj->anim_to_value;
             obj->animating = 0U;
+            we_anim_stop(obj->base.lcd, &obj->anim); /* 本步到位 */
         }
         else
         {
@@ -393,16 +403,14 @@ static void _progress_anim_step(we_progress_obj_t *obj, uint16_t elapsed_ms)
 }
 
 /**
- * @brief 周期任务回调，按时间步长推进本控件动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
+ * @brief 中央动画引擎回调，按时间步长推进本控件动画。
+ * @param owner 控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _progress_task_cb(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _progress_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    (void)lcd;
-    _progress_anim_step((we_progress_obj_t *)user_data, elapsed_ms);
+    _progress_anim_step((we_progress_obj_t *)owner, elapsed_ms);
 }
 
 /**
@@ -436,7 +444,9 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
     obj->base.parent = NULL;
     obj->base.next = NULL;
 
-    obj->task_id = -1;
+    obj->anim.next = NULL;
+    obj->anim.step_cb = NULL;
+    obj->anim.owner = NULL;
     obj->value = init_value;
     obj->display_value = init_value;
     obj->anim_from_value = init_value;
@@ -450,8 +460,6 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
     obj->radius = WE_PROGRESS_RADIUS;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
-
-    obj->task_id = _we_gui_task_register_with_data(lcd, _progress_task_cb, obj);
 }
 
 /**
@@ -463,11 +471,8 @@ void we_progress_obj_delete(we_progress_obj_t *obj)
 {
     if (obj == NULL)
         return;
-    if (obj->task_id >= 0 && obj->base.lcd != NULL)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->task_id);
-        obj->task_id = -1;
-    }
+    /* 节点归控件所有，删除前必须摘链 */
+    we_anim_stop(obj->base.lcd, &obj->anim);
     we_obj_delete((we_obj_t *)obj);
 }
 
@@ -510,6 +515,8 @@ void we_progress_set_value(we_progress_obj_t *obj, uint8_t value)
         obj->anim_to_value = value;
         obj->anim_elapsed_ms = 0U;
         obj->animating = 1U;
+        /* 挂入中央动画链表（不占 task 槽、不会失败） */
+        we_anim_start(obj->base.lcd, &obj->anim, _progress_anim_step_cb, obj);
     }
 
     new_fill_w = _progress_calc_fill_w(obj, obj->display_value);

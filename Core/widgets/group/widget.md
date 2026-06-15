@@ -23,8 +23,9 @@
 - `WE_GROUP_CHILD_MAX`
 
 ## 事件与行为
-- `group` 主要负责布局与子控件管理，不是通用交互容器
-- 子控件的事件仍由各自控件处理
+- group 会把触摸事件**命中转发**给子控件（按压锁定 + CLICKED 释放点复核），组内的 btn/checkbox 等可正常交互
+- `we_group_set_opacity(...)` 会**级联到全部子控件**（经 lcd 级 `opa_scale` 乘子在原语入口生效，无淡入淡出时零开销；嵌套容器自动链乘）
+- 完全透明（opacity=0）的 group 不拦截输入
 - `we_group_shift_children(...)` 可选择是否给子控件派发 `WE_EVENT_SCROLLED`
 
 ## 注意事项

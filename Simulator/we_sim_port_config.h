@@ -10,6 +10,9 @@
  * 这里不要直接包含 sdl_port.h，否则会在 GUI 核心类型尚未定义时形成循环依赖。
  * -------------------------------------------------------------------------- */
 
+/* 模拟器分辨率在 we_user_config.h 的 WE_SIMULATOR 分支统一定义
+ * （此头只被 IC 驱动 TU 包含，在这里覆盖会造成编译单元间不一致）。 */
+
 /**
  * @brief 初始化模拟 LCD 资源
  */
@@ -148,5 +151,8 @@ static inline void we_lcd_set_addr_port(uint16_t x0, uint16_t y0, uint16_t x1, u
 #elif (LCD_DEEP == DEEP_RGB888)
 #define LCD_FLUSH_PORT lcd_rgb888_port
 #endif
+
+/* SDL 模拟器的 flush 是同步拷贝，无异步发送，双缓冲无收益。 */
+#define WE_PORT_FLUSH_ASYNC (0)
 
 #endif

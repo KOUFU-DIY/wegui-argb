@@ -19,21 +19,31 @@ static we_label_obj_t group_panel_tip;
 static uint32_t group_ticks_ms;
 static uint32_t group_fps_timer;
 static uint32_t group_last_frames;
+static uint32_t group_click_cnt;
 static char     group_fps_buf[16];
 static char     group_stat_buf[24];
+static char     group_tip_buf[24];
 
 /**
- * @brief Group 内按钮事件回调，仅消费 CLICKED
+ * @brief Group 内按钮事件回调：点击计数（按压视觉由 btn 默认逻辑维护）
  * @param obj 传入：触发事件的对象指针
  * @param event 传入：事件类型
  * @param data 传入：输入设备数据
- * @return 1 表示事件已消费，0 表示未消费
+ * @return 1 表示事件已消费
  */
 static uint8_t _group_btn_cb(void *obj, we_event_t event, we_indev_data_t *data)
 {
-    (void)obj;
     (void)data;
-    return (event == WE_EVENT_CLICKED) ? 1U : 0U;
+
+    if (event == WE_EVENT_CLICKED)
+    {
+        group_click_cnt++;
+        snprintf(group_tip_buf, sizeof(group_tip_buf), "%s CLICK x%u",
+                 ((we_btn_obj_t *)obj == &group_btn_a) ? "LEFT" : "RIGHT",
+                 (unsigned)group_click_cnt);
+        we_label_set_text(&group_panel_tip, group_tip_buf);
+    }
+    return 1U;
 }
 
 /**
@@ -58,8 +68,10 @@ void we_group_simple_demo_init(we_lcd_t *lcd)
     group_ticks_ms    = 0U;
     group_fps_timer   = 0U;
     group_last_frames = 0U;
+    group_click_cnt   = 0U;
     memset(group_fps_buf, 0, sizeof(group_fps_buf));
     memset(group_stat_buf, 0, sizeof(group_stat_buf));
+    memset(group_tip_buf, 0, sizeof(group_tip_buf));
 
     we_label_obj_init(&group_title, lcd, margin_x, title_y,
                       "GROUP DEMO", we_font_consolas_18,

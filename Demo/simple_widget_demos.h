@@ -323,4 +323,19 @@ void we_indicator_simple_demo_init(we_lcd_t *lcd);
  */
 void we_indicator_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
+/**
+ * @brief 初始化汇总 demo（仅模拟器：4 页 slideshow 串联主要控件与子系统）。
+ * @param lcd LCD 运行实例。
+ * @return 无。
+ */
+void we_showcase_simple_demo_init(we_lcd_t *lcd);
+
+/**
+ * @brief 执行汇总 demo 周期逻辑。
+ * @param lcd LCD 运行实例。
+ * @param ms_tick 本次调用累计的毫秒增量。
+ * @return 无。
+ */
+void we_showcase_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
 #endif

@@ -11,6 +11,17 @@
 - 支持外部 Flash 图片与字体资源
 - 同时支持 STM32F103 硬件目标与 SDL2 模拟器目标
 
+## 资源占用（实测）
+
+| 目标 | ROM | RAM | 口径 |
+|---|---|---|---|
+| STM32F103（Cortex-M3，72 MHz） | **22.00 KB** | **6.10 KB** | dropdown 最小可交互应用，Keil `.map` 实测 |
+| STM32F030（Cortex-M0，48 MHz，DMA 双缓冲） | **21.75 KB** | **6.07 KB** | 同上 |
+
+- 280×240 RGB565，PFB 8 行（4.48 KB，仅整屏显存的 3.3%）；ROM 含 5.9 KB 字体资产 + LCD/输入/存储端口 + 启动代码，GUI 库本体约 10 KB
+- 零 malloc、零浮点路径，Cortex-M0（无硬件除法、无 FPU）原生可用
+- 逐组件构成与复现命令见 [Report/07_footprint_实测.md](Report/07_footprint_实测.md)
+
 ## 当前控件状态
 
 当前仓库已包含并维护以下主要控件：
@@ -32,12 +43,18 @@
 - font_flash
 - slider
 - scroll_panel
+- dropdown
+- stepper
+- indicator
 
 其中：
 
 - `toggle` 的轨道和滑块已统一复用公用解析式圆角矩形填充函数
 - `checkbox` 的方框绘制已统一复用公用解析式圆角填充函数
 - `chart` 的波形主体与柔边绘制思路参考自 Arm-2D，但实现已按 WeGui 的环形缓冲、脏矩形、PFB 裁剪与整数坐标体系重写
+- `dropdown` 展开列表支持无级（像素级）拖拽滚动，滚动条按空闲时间自动淡出至常驻最低透明度
+- `stepper` 数值用定点 int32 存储，按住可连续步进且不占用 timer 槽
+- `indicator` 圆形状态灯通过每对象 task 做亮灭过渡，可选外发光晕
 
 ## 仓库结构
 
@@ -89,8 +106,12 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 
 ## Demo 选择
 
-当前 simple demo 共 **18 个**，Simulator 与 STM32 入口文件使用同一套 demo 顺序。
-为保持历史 `demo_id` 兼容，编号 9（原 key demo）已退役且不再占位，跳号至 10。
+当前 simple demo 共 **21 个**。Simulator 与 STM32 入口使用同一套控件顺序，但 `demo_id` 编号略有差异：
+
+- **Simulator**（`Simulator/main_sim.c`）：为保持历史兼容，编号 9（原 key demo）已退役且不占位，从 8 跳到 10。
+- **STM32**（`STM32F103/main.c` / `STM32F030/main.c`）：不保留退役占位，checkbox 起为 9，后续整体比 Simulator 小 1。
+
+下表为 **Simulator** 的 `demo_id`：
 
 | demo_id | 内容 |
 | --- | --- |
@@ -112,6 +133,11 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 | 17 | flash font |
 | 18 | slider |
 | 19 | scroll_panel |
+| 20 | dropdown |
+| 21 | stepper |
+| 22 | indicator |
+
+> STM32 对应编号：checkbox=9、label_ex=10 …… scroll_panel=18、dropdown=19、stepper=20、indicator=21。
 
 ### Simulator
 在 `Simulator/main_sim.c` 中修改 `demo_id`。

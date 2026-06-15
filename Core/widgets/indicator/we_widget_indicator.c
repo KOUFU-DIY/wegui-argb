@@ -25,8 +25,7 @@ static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _indicator_task_cb(we_lcd_t *lcd, void *user_data,
-                               uint16_t elapsed_ms);
+static void _indicator_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
 static const we_class_t _indicator_class = {
     .draw_cb = _indicator_draw_cb,
@@ -195,7 +194,11 @@ static void _indicator_anim_step(we_indicator_obj_t *obj, uint16_t elapsed_ms)
 
     target = obj->state ? 256U : 0U;
     if (obj->progress == target)
+    {
+        /* 已就位：摘链停表，空闲期零开销 */
+        we_anim_stop(obj->base.lcd, &obj->anim);
         return;
+    }
 
     /* 本帧线性推进量（Q8）。anim_ms 为 0 时直接到位，避免除零 */
     if (obj->anim_ms == 0U)
@@ -216,21 +219,21 @@ static void _indicator_anim_step(we_indicator_obj_t *obj, uint16_t elapsed_ms)
                           ? target : (uint16_t)(obj->progress - delta);
     }
 
+    if (obj->progress == target)
+        we_anim_stop(obj->base.lcd, &obj->anim); /* 本步到位，摘链停表 */
+
     we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 每对象周期任务，按时间片推进亮灭过渡动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针（指向控件对象）。
+ * @brief 中央动画引擎回调，按时间片推进亮灭过渡动画。
+ * @param owner 控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _indicator_task_cb(we_lcd_t *lcd, void *user_data,
-                               uint16_t elapsed_ms)
+static void _indicator_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    (void)lcd;
-    _indicator_anim_step((we_indicator_obj_t *)user_data, elapsed_ms);
+    _indicator_anim_step((we_indicator_obj_t *)owner, elapsed_ms);
 }
 
 /* --------------------------------------------------------------------------
@@ -274,7 +277,9 @@ void we_indicator_obj_init(we_indicator_obj_t *obj, we_lcd_t *lcd,
     obj->anim_ms       = WE_INDICATOR_ANIM_MS;
     obj->anim_acc_ms   = 0U;
     obj->progress      = 0U;     /* 初始熄灭 */
-    obj->task_id       = -1;
+    obj->anim.next     = NULL;
+    obj->anim.step_cb  = NULL;
+    obj->anim.owner    = NULL;
     obj->state         = 0U;
     obj->opacity       = 255U;
     obj->pressed       = 0U;
@@ -287,7 +292,6 @@ void we_indicator_obj_init(we_indicator_obj_t *obj, we_lcd_t *lcd,
     obj->clickable     = 0U;     /* 默认只读 */
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
-    obj->task_id = _we_gui_task_register_with_data(lcd, _indicator_task_cb, obj);
     we_obj_invalidate((we_obj_t *)obj);
 }
 
@@ -311,9 +315,16 @@ void we_indicator_set_state(we_indicator_obj_t *obj, uint8_t on)
     obj->state = val;
     obj->anim_acc_ms = 0U;
 
-    /* 无动画或 task 未注册：直接把视觉进度拉到目标位 */
-    if (!obj->anim_enabled || obj->task_id < 0)
+    if (!obj->anim_enabled)
+    {
+        /* 无动画：直接把视觉进度拉到目标位 */
         obj->progress = val ? 256U : 0U;
+    }
+    else
+    {
+        /* 挂入中央动画链表（不占 task 槽、不会失败） */
+        we_anim_start(obj->base.lcd, &obj->anim, _indicator_anim_step_cb, obj);
+    }
 
     we_obj_invalidate((we_obj_t *)obj);
 }
@@ -374,9 +385,10 @@ void we_indicator_set_anim(we_indicator_obj_t *obj, uint8_t enabled,
     if (enabled && duration_ms > 0U)
         obj->anim_ms = duration_ms;
 
-    /* 关闭动画时立即让视觉就位到当前目标态 */
+    /* 关闭动画时立即让视觉就位到当前目标态，并摘除进行中的动画 */
     if (!obj->anim_enabled)
     {
+        we_anim_stop(obj->base.lcd, &obj->anim);
         obj->progress = obj->state ? 256U : 0U;
         we_obj_invalidate((we_obj_t *)obj);
     }
@@ -464,11 +476,8 @@ void we_indicator_obj_delete(we_indicator_obj_t *obj)
 {
     if (obj == NULL)
         return;
-    if (obj->task_id >= 0 && obj->base.lcd != NULL)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->task_id);
-        obj->task_id = -1;
-    }
+    /* 节点归控件所有，删除前必须摘链，否则动画链表留悬空指针 */
+    we_anim_stop(obj->base.lcd, &obj->anim);
     we_obj_delete((we_obj_t *)obj);
 }
 

@@ -226,7 +226,10 @@ static void _draw_alpha_mask_row_aligned(we_lcd_t *lcd,
     uint16_t pfb_stride;
     int16_t py;
 
-    if (lcd == NULL || w == 0U || h == 0U || src_data == NULL || opacity == 0U)
+    if (lcd == NULL || w == 0U || h == 0U || src_data == NULL)
+        return;
+    opacity = we_opa_apply(lcd, opacity); /* 容器透明度级联 */
+    if (opacity == 0U)
         return;
 
     draw_x_end = x + (int16_t)w - 1;

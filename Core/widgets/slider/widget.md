@@ -16,6 +16,7 @@
 - `we_slider_add_value(...)`
 - `we_slider_sub_value(...)`
 - `we_slider_get_value(...)`
+- `we_slider_set_changed_cb(...)` — 数值改变回调（替代轮询）
 - `we_slider_set_opacity(...)`
 - `we_slider_set_colors(...)`
 - `we_slider_set_thumb_size(...)`
@@ -38,7 +39,7 @@
 ## 注意事项
 - 当前默认同时支持横向与竖向滑条
 - 将 `WE_SLIDER_ENABLE_VERTICAL` 设为 `0` 时，会裁掉竖向相关代码，`WE_SLIDER_ORIENT_VER` 会回退为横向
-- 当前不提供外部事件回调，外部通过 `get_value()` 轮询
+- 可用 `we_slider_set_changed_cb()` 注册数值改变回调（仅用户交互触发，程序 API 设值不触发）；未注册时仍可 `get_value()` 轮询
 - 轨道和滑块尺寸都支持运行时调整
 
 ## 对应 demo

@@ -25,6 +25,15 @@
 #error "GRAM_DMA_BUFF_EN must be defined by platform port config."
 #endif
 
+/* 端口异步能力契约：
+ * 平台端口配置声明 WE_PORT_FLUSH_ASYNC（1 = flush 为 DMA 异步发送，立即返回）。
+ * GRAM 双缓冲只有在"用户开启 GRAM_DMA_BUFF_EN 且端口真异步"时才生效，
+ * 阻塞端口下自动退回整块 PFB，避免砍半 PFB + 翻倍 flush 次数的负优化。
+ * 未声明的旧平台保持历史行为（跟随 GRAM_DMA_BUFF_EN）。 */
+#ifndef WE_PORT_FLUSH_ASYNC
+#define WE_PORT_FLUSH_ASYNC (GRAM_DMA_BUFF_EN)
+#endif
+
 #ifndef WE_CFG_DIRTY_STRATEGY
 #error "WE_CFG_DIRTY_STRATEGY must be defined by platform port config."
 #endif

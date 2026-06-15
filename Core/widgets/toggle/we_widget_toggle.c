@@ -25,7 +25,6 @@ static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _toggle_anim_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms);
 #endif
 
 static const we_class_t _toggle_class = {
@@ -49,29 +48,6 @@ static const colour_t _c_thumb = RGB888_CONST(WE_TOGGLE_COLOR_THUMB_R,
 static const colour_t _c_black = RGB888_CONST(0, 0, 0);
 
 #if WE_TOGGLE_USE_ANIM
-
-/**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @return 无。
- */
-static int8_t _toggle_find_anim_task_id(we_lcd_t *lcd)
-{
-    uint8_t i;
-
-    if (lcd == NULL)
-        return -1;
-
-    for (i = 0; i < WE_CFG_GUI_TASK_MAX_NUM; i++)
-    {
-        if (lcd->task_list[i].cb == NULL)
-            continue;
-        if (lcd->task_list[i].cb == _toggle_anim_task)
-            return (int8_t)i;
-    }
-
-    return -1;
-}
 
 /**
  * @brief 内部辅助：toggle_anim_advance_obj。
@@ -120,68 +96,21 @@ static void _toggle_anim_advance_obj(we_toggle_obj_t *obj, uint16_t elapsed_ms)
 }
 
 /**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
+ * @brief 中央动画引擎回调：推进单个 toggle 的过渡动画。
+ * @param owner 控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _toggle_anim_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _toggle_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_obj_t *node;
-    uint8_t has_toggle = 0U;
+    we_toggle_obj_t *obj = (we_toggle_obj_t *)owner;
+    uint8_t target;
 
-    (void)user_data;
+    _toggle_anim_advance_obj(obj, elapsed_ms);
 
-    if (lcd == NULL || elapsed_ms == 0U)
-        return;
-
-    for (node = lcd->obj_list_head; node != NULL; node = node->next)
-    {
-        if (node->class_p != &_toggle_class)
-            continue;
-
-        has_toggle = 1U;
-        _toggle_anim_advance_obj((we_toggle_obj_t *)node, elapsed_ms);
-    }
-
-    if (has_toggle == 0U)
-    {
-        int8_t task_id = _toggle_find_anim_task_id(lcd);
-        if (task_id >= 0)
-            _we_gui_task_unregister(lcd, task_id);
-    }
-}
-
-/**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @return 无。
- */
-static int8_t _toggle_ensure_anim_task(we_lcd_t *lcd)
-{
-    int8_t task_id;
-
-    if (lcd == NULL)
-        return -1;
-
-    task_id = _toggle_find_anim_task_id(lcd);
-    if (task_id >= 0)
-        return task_id;
-
-    return _we_gui_task_register_with_data(lcd, _toggle_anim_task, NULL);
-}
-#else
-
-/**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @return 无。
- */
-static int8_t _toggle_ensure_anim_task(we_lcd_t *lcd)
-{
-    (void)lcd;
-    return -1;
+    target = obj->checked ? (uint8_t)WE_TOGGLE_ANIM_STEPS : 0U;
+    if (obj->anim_step == target)
+        we_anim_stop(obj->base.lcd, &obj->anim); /* 就位即摘链，空闲零开销 */
 }
 #endif
 
@@ -373,8 +302,11 @@ void we_toggle_obj_init(we_toggle_obj_t *obj, we_lcd_t *lcd,
 #if WE_TOGGLE_USE_ANIM
     obj->anim_step = 0U; /* 初始 OFF，直接就位 */
     obj->anim_acc_ms = 0U;
-    (void)_toggle_ensure_anim_task(lcd);
+    obj->anim.next = NULL;
+    obj->anim.step_cb = NULL;
+    obj->anim.owner = NULL;
 #endif
+    obj->changed_cb = NULL;
 
     /* 加入显示链表（追加到链尾，保持 Z 轴顺序） */
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
@@ -405,6 +337,7 @@ void we_toggle_set_checked(we_toggle_obj_t *obj, uint8_t checked)
 #if WE_TOGGLE_USE_ANIM
     obj->anim_step = val ? (uint8_t)WE_TOGGLE_ANIM_STEPS : 0U;
     obj->anim_acc_ms = 0U;
+    we_anim_stop(obj->base.lcd, &obj->anim); /* 取消在途过渡 */
 #endif
 
 we_obj_invalidate((we_obj_t *)obj);
@@ -423,13 +356,43 @@ void we_toggle_toggle(we_toggle_obj_t *obj)
     obj->checked = obj->checked ? 0U : 1U;
 #if WE_TOGGLE_USE_ANIM
     obj->anim_acc_ms = 0U;
-    if (_toggle_ensure_anim_task(obj->base.lcd) < 0)
-    {
-        obj->anim_step = obj->checked ? (uint8_t)WE_TOGGLE_ANIM_STEPS : 0U;
-    }
+    /* 挂入中央动画链表（不占 task 槽、不会失败，无需快进兜底） */
+    we_anim_start(obj->base.lcd, &obj->anim, _toggle_anim_step_cb, obj);
 #endif
     /* 不重置 anim_step，让动画从当前视觉位置自然过渡到新目标 */
 we_obj_invalidate((we_obj_t *)obj);
+
+    if (obj->changed_cb != NULL)
+        obj->changed_cb(obj, obj->checked);
+}
+
+/**
+ * @brief 注册状态改变回调（替代轮询 is_checked）。
+ * @param obj 开关控件对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_toggle_set_changed_cb(we_toggle_obj_t *obj, we_toggle_changed_cb_t cb)
+{
+    if (obj == NULL)
+        return;
+    obj->changed_cb = cb;
+}
+
+/**
+ * @brief 删除开关控件并从动画链表/对象链表摘除。
+ * @param obj 开关控件对象指针。
+ * @return 无。
+ */
+void we_toggle_obj_delete(we_toggle_obj_t *obj)
+{
+    if (obj == NULL)
+        return;
+#if WE_TOGGLE_USE_ANIM
+    /* 节点归控件所有，删除前必须摘链 */
+    we_anim_stop(obj->base.lcd, &obj->anim);
+#endif
+    we_obj_delete((we_obj_t *)obj);
 }
 
 /**

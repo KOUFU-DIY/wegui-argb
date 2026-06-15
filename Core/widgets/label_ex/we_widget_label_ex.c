@@ -378,7 +378,7 @@ uint16_t line_h = we_font_get_line_height(obj->font);
     src_y0_q12 = (int32_t)((rot_y0_q15 * inv_scale_q16) >> 19) + buf_cy_q12;
 
     pfb_stride = p_lcd->pfb_width;
-    opacity    = obj->opacity;
+    opacity    = we_opa_apply(p_lcd, obj->opacity); /* 容器透明度级联 */
     fg_color   = obj->color;
 
     /* 行首 PFB 指针，每行递增 pfb_stride，免去 row*stride+col 的乘加 */

@@ -271,8 +271,10 @@ static int32_t _dropdown_max_scroll(we_dropdown_obj_t *d)
     return (m > 0) ? m : 0;
 }
 
+static void _dropdown_sb_fade_step_cb(void *owner, uint16_t elapsed_ms);
+
 /**
- * @brief 唤醒滚动条：透明度拉满、空闲计时清零（随后由淡出 task 自动隐藏）。
+ * @brief 唤醒滚动条：透明度拉满、空闲计时清零（随后由淡出动画自动隐藏）。
  *        仅当内容确实可滚动时才生效。
  * @param d 下拉控件指针。
  * @return 无。
@@ -287,6 +289,8 @@ static void _dropdown_sb_wake(we_dropdown_obj_t *d)
         d->sb_alpha = _DD_SB_THUMB_OPA;
         we_popup_layer_invalidate(d->base.lcd);
     }
+    /* 重新挂入淡出动画（收敛/收起后节点会自行摘链，这里再次唤醒） */
+    we_anim_start(d->base.lcd, &d->sb_anim, _dropdown_sb_fade_step_cb, d);
 }
 
 /**
@@ -320,16 +324,19 @@ static void _dropdown_scroll_to(we_dropdown_obj_t *d, int32_t new_scroll)
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
-static void _dropdown_sb_fade_task(we_lcd_t *lcd, void *user_data, uint16_t elapsed_ms)
+static void _dropdown_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_dropdown_obj_t *d = (we_dropdown_obj_t *)user_data;
+    we_dropdown_obj_t *d = (we_dropdown_obj_t *)owner;
     uint32_t step;
 
-    (void)lcd;
-    if (d == NULL || !d->opened || elapsed_ms == 0U)
-        return; /* 未展开：task 空转，不产生重绘 */
-    if (d->sb_alpha <= WE_DROPDOWN_SB_IDLE_ALPHA)
-        return; /* 已降到常驻最低透明度，无需继续淡出 */
+    if (d == NULL || elapsed_ms == 0U)
+        return;
+    if (!d->opened || d->sb_alpha <= WE_DROPDOWN_SB_IDLE_ALPHA)
+    {
+        /* 已收起或已收敛到常驻最低透明度：摘链停表，等待下次 wake 重新挂入 */
+        we_anim_stop(d->base.lcd, &d->sb_anim);
+        return;
+    }
 
     /* 拖拽中保持完全显示，不淡出 */
     if (d->dragging)
@@ -391,18 +398,47 @@ static void _dropdown_fill_item_rounded(we_dropdown_obj_t *d, const we_area_t *a
         iy = a->y0;
     if (row_y1 > a->y1)
         row_y1 = a->y1;
+    if (iy > row_y1)
+        return;
 
-    /* 仅当本行接近 popup 上/下边缘时才需要 mask；中间行整体是直边，
-     * 但统一走 mask 也只是多算覆盖率，逻辑简单、开销可接受。 */
-    for (py = iy; py <= row_y1; py++)
+    /* 圆角只影响 popup 顶部/底部各 r 行；滚动时绝大多数高亮行
+     * 不与圆角带相交，整块直填（we_fill_rect 行级写入），
+     * 只有圆角带内的行才对左右各 r 列查覆盖率，行中段仍直填。
+     * 相比全行逐像素 mask + we_draw_pixel，滚动热路径开销下降一个数量级。 */
     {
-        for (px = a->x0; px <= a->x1; px++)
+        int16_t top_band_y1 = (int16_t)(a->y0 + (int16_t)r - 1);
+        int16_t bot_band_y0 = (int16_t)(a->y1 - (int16_t)r + 1);
+        int16_t mid_y0 = (iy > (int16_t)(top_band_y1 + 1)) ? iy : (int16_t)(top_band_y1 + 1);
+        int16_t mid_y1 = (row_y1 < (int16_t)(bot_band_y0 - 1)) ? row_y1 : (int16_t)(bot_band_y0 - 1);
+
+        if (mid_y0 <= mid_y1)
+            we_fill_rect(lcd, a->x0, mid_y0, (uint16_t)pw,
+                         (uint16_t)(mid_y1 - mid_y0 + 1), color, 255U);
+
+        for (py = iy; py <= row_y1; py++)
         {
-            uint8_t m = we_mask_round_rect_alpha(a->x0, a->y0, (uint16_t)pw,
-                                                 (uint16_t)ph, r, px, py);
-            if (m == 0U)
-                continue;
-            we_draw_pixel(lcd, px, py, color, m);
+            if (py >= mid_y0 && py <= mid_y1)
+                continue; /* 中段行已整块填过 */
+
+            for (px = a->x0; px < (int16_t)(a->x0 + (int16_t)r); px++)
+            {
+                uint8_t m = we_mask_round_rect_alpha(a->x0, a->y0, (uint16_t)pw,
+                                                     (uint16_t)ph, r, px, py);
+                if (m != 0U)
+                    we_draw_pixel(lcd, px, py, color, m);
+            }
+
+            if (pw > (int16_t)(2U * r))
+                we_fill_rect(lcd, (int16_t)(a->x0 + (int16_t)r), py,
+                             (uint16_t)((uint16_t)pw - 2U * r), 1U, color, 255U);
+
+            for (px = (int16_t)(a->x1 - (int16_t)r + 1); px <= a->x1; px++)
+            {
+                uint8_t m = we_mask_round_rect_alpha(a->x0, a->y0, (uint16_t)pw,
+                                                     (uint16_t)ph, r, px, py);
+                if (m != 0U)
+                    we_draw_pixel(lcd, px, py, color, m);
+            }
         }
     }
 }
@@ -726,13 +762,10 @@ void we_dropdown_open(we_dropdown_obj_t *obj)
     }
 
     obj->opened = 1U;
-    /* 展开期间注册淡出 task；展开即让滚动条短暂可见，提示"此处可滚动"，
-     * 随后由淡出 task 自动隐藏。 */
+    /* 展开即让滚动条短暂可见，提示"此处可滚动"，
+     * 随后由中央动画引擎驱动的淡出动画自动隐藏（wake 内挂链）。 */
     obj->sb_alpha = 0U;
     obj->sb_idle_ms = 0U;
-    if (obj->sb_task_id < 0)
-        obj->sb_task_id = _we_gui_task_register_with_data(obj->base.lcd,
-                                                          _dropdown_sb_fade_task, obj);
     _dropdown_sb_wake(obj);
     we_obj_invalidate((we_obj_t *)obj); /* 重绘主框箭头方向 */
 }
@@ -752,12 +785,7 @@ void we_dropdown_close(we_dropdown_obj_t *obj)
     obj->dragging = 0U;
     obj->sb_alpha = 0U;   /* 复位淡出状态，下次展开重新计时 */
     obj->sb_idle_ms = 0U;
-    /* 释放展开期间占用的淡出 task 槽。 */
-    if (obj->sb_task_id >= 0 && obj->base.lcd != NULL)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->sb_task_id);
-        obj->sb_task_id = -1;
-    }
+    we_anim_stop(obj->base.lcd, &obj->sb_anim); /* 摘除淡出动画 */
     we_popup_layer_close(obj->base.lcd, obj);
     we_obj_invalidate((we_obj_t *)obj); /* 重绘主框箭头方向 */
 }
@@ -863,11 +891,12 @@ void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
     obj->dragging = 0U;
     obj->sb_alpha = 0U;
     obj->sb_idle_ms = 0U;
-    obj->sb_task_id = -1;
+    obj->sb_anim.next = NULL;
+    obj->sb_anim.step_cb = NULL;
+    obj->sb_anim.owner = NULL;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
-    /* 滚动条淡出 task 仅在展开期间注册（见 we_dropdown_open），
-     * 因全屏同时只有一个 popup，最多占用一个 task 槽。 */
+    /* 滚动条淡出由中央动画引擎驱动（见 _dropdown_sb_wake），不占 task 槽。 */
     we_obj_invalidate((we_obj_t *)obj);
 }
 
@@ -985,11 +1014,8 @@ void we_dropdown_obj_delete(we_dropdown_obj_t *obj)
     if (obj->base.lcd != NULL && we_popup_layer_is_owner(obj->base.lcd, obj))
         we_popup_layer_close(obj->base.lcd, obj);
     obj->opened = 0U;
-    if (obj->sb_task_id >= 0 && obj->base.lcd != NULL)
-    {
-        _we_gui_task_unregister(obj->base.lcd, obj->sb_task_id);
-        obj->sb_task_id = -1;
-    }
+    /* 节点归控件所有，删除前必须摘链 */
+    we_anim_stop(obj->base.lcd, &obj->sb_anim);
     we_obj_delete((we_obj_t *)obj);
 }
 

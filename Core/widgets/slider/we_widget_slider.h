@@ -26,6 +26,9 @@ typedef enum
     WE_SLIDER_ORIENT_VER = 1
 } we_slider_orient_t;
 
+/* 数值改变回调（仅用户交互改变值时触发；obj 为 we_slider_obj_t*） */
+typedef void (*we_slider_changed_cb_t)(void *obj, uint8_t value);
+
 typedef struct
 {
     we_obj_t base;
@@ -40,7 +43,16 @@ typedef struct
     colour_t track_color;
     colour_t fill_color;
     colour_t thumb_color;
+    we_slider_changed_cb_t changed_cb; /* 可为 NULL（默认轮询 get_value） */
 } we_slider_obj_t;
+
+/**
+ * @brief 注册数值改变回调（替代轮询 get_value）。
+ * @param obj 滑条对象指针。
+ * @param cb 回调函数指针，NULL 表示取消。
+ * @return 无。
+ */
+void we_slider_set_changed_cb(we_slider_obj_t *obj, we_slider_changed_cb_t cb);
 
 /**
  * @brief 初始化滑条对象并挂载到 LCD 对象链表。

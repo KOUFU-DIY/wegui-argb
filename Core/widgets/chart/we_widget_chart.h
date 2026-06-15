@@ -88,6 +88,16 @@ typedef struct
     colour_t line_color;
     uint8_t stroke; /* 波形主体厚度（像素）；顶部/底部额外固定附加 1px 柔边 */
     uint8_t opacity;
+
+    /* init 时预计算的网格线相对偏移（gx = bx + grid_dx[i]）。
+     * 网格每个 PFB 带都会重绘，缓存后省掉每帧 ~(COLS+ROWS)×带数 次软件除法，
+     * 无硬件除法的 Cortex-M0 受益最大；代价为每实例 ~36B RAM。 */
+#if (WE_CHART_GRID_COLS > 1)
+    int16_t grid_dx[WE_CHART_GRID_COLS - 1];
+#endif
+#if (WE_CHART_GRID_ROWS > 1)
+    int16_t grid_dy[WE_CHART_GRID_ROWS - 1];
+#endif
 } we_chart_obj_t;
 
 /**
