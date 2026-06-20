@@ -11,17 +11,17 @@ enum
     WE_POPUP_BTN_CANCEL = 2
 };
 
-/* 无回弹缓出：
- * 起步更快，越接近目标越慢，符合“开始快，结束慢”的消息框滑入感觉。
+/* 淡入缓出：
+ * 起步更快，越接近目标越慢，符合“开始快，结束慢”的淡入观感。
  * 公式：easeOutCubic = 1 - (1 - t)^3，t 为 Q8 定点 [0,256]。
  */
 
 /**
- * @brief 计算弹窗滑入阶段的三次缓出插值值（Q8：0~256）。
+ * @brief 计算弹窗淡入阶段的三次缓出插值值（Q8：0~256）。
  * @param t 动画归一化进度，范围 0~256。
  * @return 对应缓动后的进度值（0~256）。
  */
-static uint16_t _msgbox_ease_slide(uint16_t t)
+static uint16_t _msgbox_ease_show(uint16_t t)
 {
     uint32_t inv;
     uint32_t inv2;
@@ -34,10 +34,10 @@ static uint16_t _msgbox_ease_slide(uint16_t t)
     return (uint16_t)(256U - ((inv2 * inv) >> 8));
 }
 
-/* 快速回退：一开始慢一点点，随后迅速拉走，适合消息框收起。 */
+/* 快速回退：一开始慢一点点，随后迅速拉走，适合消息框淡出。 */
 
 /**
- * @brief 计算弹窗收起阶段的二次缓入插值值（Q8：0~256）。
+ * @brief 计算弹窗淡出阶段的二次缓入插值值（Q8：0~256）。
  * @param t 动画归一化进度，范围 0~256。
  * @return 对应缓动后的进度值（0~256）。
  */
@@ -240,7 +240,7 @@ static const char *_popup_skip_break_chars(const char *str)
  * @brief 计算文本像素高度。
  * @param font 字体资源指针。
  * @param text UTF-8 文本字符串。
- * @return 返回对应结果值。
+ * @return 单行文本 bbox 高度（像素，y_bottom-y_top；空文本或非法 bbox 时为 0）。
  */
 static uint16_t _popup_text_height(const unsigned char *font, const char *text)
 {
@@ -257,11 +257,11 @@ static uint16_t _popup_text_height(const unsigned char *font, const char *text)
 }
 
 /**
- * @brief 按最大宽度计算文本换行边界。
+ * @brief 计算文本在 max_width 下自动折行后的总像素高度。
  * @param font 字体资源指针。
  * @param text UTF-8 文本字符串。
- * @param max_width 宽度值（像素）。
- * @return 返回对应结果值。
+ * @param max_width 折行最大宽度（像素）。
+ * @return 折行后文本块总高度（像素）。
  */
 static uint16_t _popup_text_block_height_wrapped(const unsigned char *font, const char *text, uint16_t max_width)
 {
@@ -299,14 +299,14 @@ static uint16_t _popup_text_block_height_wrapped(const unsigned char *font, cons
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内执行局部绘制。
+ * @brief 从 [x,y] 起按 max_width 自动折行，逐行裁入行缓冲后绘制 UTF-8 文本。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param font 字体资源指针。
  * @param text UTF-8 文本字符串。
- * @param x 目标区域左上角 X 坐标。
- * @param y 目标区域左上角 Y 坐标。
- * @param max_width 宽度值（像素）。
- * @param color 目标颜色值。
+ * @param x 起始绘制左上角 X 坐标。
+ * @param y 起始绘制左上角 Y 坐标。
+ * @param max_width 折行最大宽度（像素）。
+ * @param color 文本颜色值。
  * @param opacity 不透明度（0~255）。
  * @return 无。
  */
@@ -430,17 +430,16 @@ static void _popup_refresh_layout(we_popup_obj_t *obj)
      * 不做"只增不减"棘轮，否则长文本切短后面板高度回不去。 */
     obj->panel_h = desired_h;
 
-    obj->hidden_y = (int16_t)(-(int16_t)obj->panel_h - 8);
-    if (obj->target_y > (int16_t)(obj->base.lcd->height - obj->panel_h))
-        obj->target_y = (int16_t)(obj->base.lcd->height - obj->panel_h);
-    if (obj->target_y < 0)
-        obj->target_y = 0;
+    if (obj->panel_y > (int16_t)(obj->base.lcd->height - obj->panel_h))
+        obj->panel_y = (int16_t)(obj->base.lcd->height - obj->panel_h);
+    if (obj->panel_y < 0)
+        obj->panel_y = 0;
 }
 
 /**
- * @brief 内部辅助：popup_panel_x。
+ * @brief 计算面板水平居中后的左上角 X 坐标（(屏宽-panel_w)/2）。
  * @param obj 目标控件对象指针。
- * @return 返回对应结果值。
+ * @return 面板左上角 X 坐标（像素）。
  */
 static int16_t _popup_panel_x(const we_popup_obj_t *obj)
 {
@@ -464,7 +463,7 @@ static void _popup_invalidate_panel(const we_popup_obj_t *obj)
 }
 
 /**
- * @brief 内部辅助：popup_stop_anim。
+ * @brief 停止淡入/淡出动画：摘除中央动画链节点并清 animating、anim_hiding 标志。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -502,9 +501,9 @@ static void _popup_sync_hit_area(we_popup_obj_t *obj)
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 重定位面板停靠 Y，并重绘旧/新两处区域。
  * @param obj 目标控件对象指针。
- * @param new_y 新的 y 值。
+ * @param new_y 新的停靠 Y 坐标。
  * @return 无。
  */
 static void _popup_set_panel_y(we_popup_obj_t *obj, int16_t new_y)
@@ -520,7 +519,7 @@ static void _popup_set_panel_y(we_popup_obj_t *obj, int16_t new_y)
 }
 
 /**
- * @brief 内部辅助：popup_bring_to_front。
+ * @brief 将弹窗从对象链表摘下并重挂到链尾，使其最后绘制（Z 序置顶）。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -559,12 +558,12 @@ static void _popup_bring_to_front(we_popup_obj_t *obj)
 }
 
 /**
- * @brief 读取当前属性值或计算结果。
+ * @brief 计算确认按钮的矩形（动作区底部，单按钮居中／双按钮位于右侧）。
  * @param obj 目标控件对象指针。
- * @param x 目标区域左上角 X 坐标。
- * @param y 目标区域左上角 Y 坐标。
- * @param w 目标区域宽度（像素）。
- * @param h 目标区域高度（像素）。
+ * @param[out] x 确认按钮左上角 X 坐标。
+ * @param[out] y 确认按钮左上角 Y 坐标。
+ * @param[out] w 确认按钮宽度（像素）。
+ * @param[out] h 确认按钮高度（像素）。
  * @return 无。
  */
 static void _popup_get_confirm_rect(const we_popup_obj_t *obj,
@@ -604,12 +603,12 @@ static void _popup_get_confirm_rect(const we_popup_obj_t *obj,
 }
 
 /**
- * @brief 读取当前属性值或计算结果。
+ * @brief 计算取消按钮的矩形（双按钮布局时位于动作区左侧）。
  * @param obj 目标控件对象指针。
- * @param x 目标区域左上角 X 坐标。
- * @param y 目标区域左上角 Y 坐标。
- * @param w 目标区域宽度（像素）。
- * @param h 目标区域高度（像素）。
+ * @param[out] x 取消按钮左上角 X 坐标。
+ * @param[out] y 取消按钮左上角 Y 坐标。
+ * @param[out] w 取消按钮宽度（像素）。
+ * @param[out] h 取消按钮高度（像素）。
  * @return 无。
  */
 static void _popup_get_cancel_rect(const we_popup_obj_t *obj,
@@ -704,12 +703,12 @@ static void _popup_invalidate_buttons(we_popup_obj_t *obj)
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内执行局部绘制。
+ * @brief 绘制单个弹窗按钮：居中文本 + 按下/次级态配色 + 按下时显示下划线。
  * @param obj 目标控件对象指针。
- * @param x 目标区域左上角 X 坐标。
- * @param y 目标区域左上角 Y 坐标。
- * @param w 目标区域宽度（像素）。
- * @param h 目标区域高度（像素）。
+ * @param x 按钮左上角 X 坐标。
+ * @param y 按钮左上角 Y 坐标。
+ * @param w 按钮宽度（像素）。
+ * @param h 按钮高度（像素）。
  * @param text UTF-8 文本字符串。
  * @param pressed 当前按钮是否处于按下态。
  * @param secondary 是否按次级按钮配色绘制。
@@ -779,6 +778,7 @@ static void _popup_draw_cb(void *ptr)
 {
     we_popup_obj_t *obj = (we_popup_obj_t *)ptr;
     we_lcd_t *lcd;
+    uint8_t saved_opa;
     int16_t panel_x;
     int16_t title_x;
     int16_t title_y;
@@ -800,13 +800,19 @@ static void _popup_draw_cb(void *ptr)
         return;
 
     lcd = obj->base.lcd;
+
+    /* 淡入淡出：把当前不透明度压入级联乘子，整框统一混合 */
+    saved_opa = lcd->opa_scale;
+    lcd->opa_scale = we_opa_apply(lcd, obj->fade_opa);
+
     panel_x = _popup_panel_x(obj);
     inner_w = (int16_t)obj->panel_w - 36;
     content_x = (int16_t)(panel_x + 18);
 
-    /* 面板改成纯直角矩形，直接走矩形快路径。 */
-    we_fill_rect(lcd, panel_x, obj->panel_y, obj->panel_w, obj->panel_h,
-                 RGB888TODEV(46, 52, 64), 255);
+    /* 面板圆角填充：仅 4 个 r×r 角落做抗锯齿，主体/直边走快速矩形填充。
+     * 透明度由入口的 opa_scale 级联统一作用，主体与四角同一份，淡入淡出无亮度断层。 */
+    we_draw_round_rect_analytic_fill(lcd, panel_x, obj->panel_y, obj->panel_w, obj->panel_h,
+                                     WE_POPUP_RADIUS, RGB888TODEV(46, 52, 64), 255);
 
     if (obj->title != NULL && obj->title_font != NULL)
     {
@@ -853,6 +859,8 @@ static void _popup_draw_cb(void *ptr)
         _popup_draw_button(obj, x, y, w, h, obj->cancel_text,
                            (uint8_t)(obj->pressed_btn == WE_POPUP_BTN_CANCEL), 1U);
     }
+
+    lcd->opa_scale = saved_opa;
 }
 
 /**
@@ -914,9 +922,8 @@ static uint8_t _popup_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
 }
 
 /**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
+ * @brief 中央动画引擎回调，按时间片推进弹窗淡入/淡出动画。
+ * @param owner 弹窗对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
@@ -925,7 +932,6 @@ static void _popup_anim_step_cb(void *owner, uint16_t elapsed_ms)
     we_popup_obj_t *obj = (we_popup_obj_t *)owner;
     uint16_t t;
     uint16_t eased;
-    int16_t next_y;
 
     if (obj == NULL || obj->visible == 0U)
     {
@@ -944,29 +950,22 @@ static void _popup_anim_step_cb(void *owner, uint16_t elapsed_ms)
     t = (uint16_t)(((uint32_t)obj->anim_elapsed_ms * 256U) / obj->anim_duration_ms);
     if (t > 256U)
         t = 256U;
-#if WE_MSGBOX_USE_ANIM
-eased = obj->anim_hiding ? _msgbox_ease_hide(t) : _msgbox_ease_slide(t);
-    next_y = (int16_t)we_lerp(obj->anim_from_y, obj->anim_to_y, eased);
-    if (next_y == obj->panel_y && obj->panel_y != obj->anim_to_y)
-    {
-        next_y = (obj->anim_to_y > obj->panel_y) ? (int16_t)(obj->panel_y + 1) : (int16_t)(obj->panel_y - 1);
-    }
-#else
-    (void)t;
-    (void)eased;
-    next_y = obj->anim_to_y;
-    obj->anim_elapsed_ms = obj->anim_duration_ms;
-#endif
-    _popup_set_panel_y(obj, next_y);
+
+    /* 透明度淡入/淡出：show 0→255(缓出)，hide 255→0(缓入)。面板位置固定不动。 */
+    eased = obj->anim_hiding ? _msgbox_ease_hide(t) : _msgbox_ease_show(t);
+    obj->fade_opa = obj->anim_hiding ? (uint8_t)we_lerp(255, 0, eased)
+                                     : (uint8_t)we_lerp(0, 255, eased);
+    _popup_invalidate_panel(obj);
 
     if (obj->anim_elapsed_ms >= obj->anim_duration_ms)
     {
-    _popup_set_panel_y(obj, obj->anim_to_y);
+        obj->fade_opa = obj->anim_hiding ? 0U : 255U;
         if (obj->anim_hiding)
         {
             obj->visible = 0U;
             _popup_sync_hit_area(obj); /* 隐藏完成：命中区收零，停止吞输入 */
         }
+    _popup_invalidate_panel(obj);
     _popup_stop_anim(obj);
     }
 }
@@ -978,7 +977,7 @@ static const we_class_t _popup_class = {
 };
 
 /**
- * @brief 初始化对象状态并绑定所需回调。
+ * @brief 弹窗通用初始化：写入面板几何/文案/字体/回调/布局，刷新布局并挂入对象链表（初始隐藏、命中区收零）。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param w 目标区域宽度（像素）。
@@ -1024,7 +1023,7 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->panel_min_w = (uint16_t)WE_MIN((int32_t)w, (int32_t)(lcd->width - WE_POPUP_EDGE_MARGIN * 2));
     obj->panel_w = obj->panel_min_w;
     obj->panel_h = h;
-    obj->target_y = target_y;
+    obj->panel_y = target_y;
     obj->anim_elapsed_ms = 0U;
     obj->anim_duration_ms = WE_POPUP_ANIM_DURATION_MS;
     obj->anim.next = NULL;
@@ -1036,6 +1035,7 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->visible = 0U;
     obj->animating = 0U;
     obj->anim_hiding = 0U;
+    obj->fade_opa = 0U;
 
     obj->title = title;
     obj->message = message;
@@ -1048,15 +1048,12 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->cancel_cb = cancel_cb;
 
     _popup_refresh_layout(obj);
-    obj->panel_y = obj->hidden_y;
-    obj->anim_from_y = obj->hidden_y;
-    obj->anim_to_y = obj->target_y;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 }
 
 /**
- * @brief 初始化控件对象并挂载到 LCD 对象链表。
+ * @brief 初始化单确认按钮弹窗（仅确认布局），并挂载到 LCD 对象链表。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param w 目标区域宽度（像素）。
@@ -1086,7 +1083,7 @@ static void _popup_confirm_obj_init(we_popup_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 初始化控件对象并挂载到 LCD 对象链表。
+ * @brief 初始化确认+取消双按钮弹窗（确认+取消布局），并挂载到 LCD 对象链表。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param w 目标区域宽度（像素）。
@@ -1119,7 +1116,7 @@ static void _popup_confirm_cancel_obj_init(we_popup_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 初始化控件对象并挂载到 LCD 对象链表。
+ * @brief 初始化单确定按钮消息框（仅确定布局），并挂载到 LCD 对象链表。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param w 目标区域宽度（像素）。
@@ -1148,7 +1145,7 @@ void we_msgbox_ok_obj_init(we_msgbox_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 初始化控件对象并挂载到 LCD 对象链表。
+ * @brief 初始化确定+取消双按钮消息框（确定+取消布局），并挂载到 LCD 对象链表。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param w 目标区域宽度（像素）。
@@ -1196,14 +1193,12 @@ void we_popup_set_text(we_popup_obj_t *obj, const char *title, const char *messa
     obj->title = title;
     obj->message = message;
     _popup_refresh_layout(obj);
-    if (obj->visible == 0U)
-        obj->panel_y = obj->hidden_y;
     if (obj->visible)
     _popup_invalidate_panel(obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置弹窗按钮文案（可见时重绘旧/新按钮区；单按钮布局仅用 confirm_text）。
  * @param obj 目标控件对象指针。
  * @param confirm_text 确认按钮文本。
  * @param cancel_text 取消按钮文本。
@@ -1222,9 +1217,9 @@ void we_popup_set_buttons(we_popup_obj_t *obj, const char *confirm_text, const c
 }
 
 /**
- * @brief 读取当前属性值或计算结果。
+ * @brief 设置弹窗停靠的目标 Y（自动夹紧到屏内；可见且非动画时立即重定位重绘）。
  * @param obj 目标控件对象指针。
- * @param target_y 弹窗目标 Y 坐标。
+ * @param target_y 弹窗目标停靠 Y 坐标。
  * @return 无。
  */
 void we_popup_set_target_y(we_popup_obj_t *obj, int16_t target_y)
@@ -1235,13 +1230,14 @@ void we_popup_set_target_y(we_popup_obj_t *obj, int16_t target_y)
         target_y = 0;
     if (target_y > (int16_t)(obj->base.lcd->height - obj->panel_h))
         target_y = (int16_t)(obj->base.lcd->height - obj->panel_h);
-    obj->target_y = target_y;
     if (obj->visible != 0U && obj->animating == 0U)
-    _popup_set_panel_y(obj, obj->target_y);
+        _popup_set_panel_y(obj, target_y); /* 可见且未在动画：立即重定位并重绘旧/新区 */
+    else
+        obj->panel_y = target_y;
 }
 
 /**
- * @brief 执行 we_popup_show。
+ * @brief 显示弹窗：置顶、铺满命中区做模态拦截，按 WE_MSGBOX_USE_ANIM 决定淡入或直接全显。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -1258,20 +1254,15 @@ void we_popup_show(we_popup_obj_t *obj)
     obj->anim_elapsed_ms = 0U;
     obj->anim_hiding = 0U;
     obj->anim_duration_ms = WE_MSGBOX_ANIM_DURATION_MS;
-    obj->anim_from_y = obj->hidden_y;
-    obj->anim_to_y = obj->target_y;
     _popup_refresh_layout(obj);
-#if WE_MSGBOX_USE_ANIM
-    _popup_set_panel_y(obj, obj->hidden_y);
-#else
-    _popup_set_panel_y(obj, obj->target_y);
-#endif
 
 #if WE_MSGBOX_USE_ANIM
-    /* 挂入中央动画链表（不占 task 槽、不会失败，无需直达兜底） */
+    /* 透明度从 0 淡入；挂入中央动画链表（不占 task 槽、不会失败） */
+    obj->fade_opa = 0U;
     we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
     obj->animating = 1U;
 #else
+    obj->fade_opa = 255U; /* 不带动画：直接全显 */
     obj->animating = 0U;
 #endif
 
@@ -1279,7 +1270,7 @@ void we_popup_show(we_popup_obj_t *obj)
 }
 
 /**
- * @brief 执行 we_popup_hide。
+ * @brief 隐藏弹窗：按 WE_MSGBOX_USE_ANIM 触发淡出动画，或直接收零命中区并隐藏。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -1298,18 +1289,17 @@ void we_popup_hide(we_popup_obj_t *obj)
     obj->anim_duration_ms = (uint16_t)(WE_MSGBOX_ANIM_DURATION_MS / 2U);
     if (obj->anim_duration_ms < 90U)
         obj->anim_duration_ms = 90U;
-    obj->anim_from_y = obj->panel_y;
-    obj->anim_to_y = obj->hidden_y;
 
 #if WE_MSGBOX_USE_ANIM
-    /* 挂入中央动画链表（不占 task 槽、不会失败，无需直达兜底） */
+    /* 透明度 255→0 淡出；挂入中央动画链表（不占 task 槽、不会失败） */
     we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
     obj->animating = 1U;
 #else
-    _popup_set_panel_y(obj, obj->hidden_y);
+    obj->fade_opa = 0U;
     obj->visible = 0U;
     _popup_sync_hit_area(obj); /* 隐藏：命中区收零 */
     obj->animating = 0U;
     obj->anim_hiding = 0U;
+    _popup_invalidate_panel(obj);
 #endif
 }

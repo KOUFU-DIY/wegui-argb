@@ -57,7 +57,7 @@ static void _slideshow_update_page(void)
  * @param obj 传入：按钮对象指针
  * @param event 传入：事件类型
  * @param data 传入：输入设备数据
- * @return 0 表示事件未强制截断后续处理
+ * @return 1 表示事件已消费（截断后续处理）
  */
 static uint8_t _slideshow_prev_cb(void *obj, we_event_t event, we_indev_data_t *data)
 {
@@ -83,7 +83,7 @@ static uint8_t _slideshow_prev_cb(void *obj, we_event_t event, we_indev_data_t *
  * @param obj 传入：按钮对象指针
  * @param event 传入：事件类型
  * @param data 传入：输入设备数据
- * @return 0 表示事件未强制截断后续处理
+ * @return 1 表示事件已消费（截断后续处理）
  */
 static uint8_t _slideshow_next_cb(void *obj, we_event_t event, we_indev_data_t *data)
 {

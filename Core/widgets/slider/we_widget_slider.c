@@ -114,7 +114,7 @@ static uint8_t _slider_thumb_size(const we_slider_obj_t *obj)
 }
 
 /**
- * @brief 计算滑块中心可移动的横向距离。
+ * @brief 计算滑块中心沿轨道方向（横向或竖向）的可移动距离。
  * @param obj 滑条对象指针。
  * @param thumb_size 滑块尺寸（像素）。
  * @return 可移动距离（像素）。
@@ -137,7 +137,7 @@ static uint16_t _slider_travel_len(const we_slider_obj_t *obj, uint8_t thumb_siz
 }
 
 /**
- * @brief 将指定数值映射为横向轨道填充长度。
+ * @brief 将指定数值映射为沿轨道方向的填充长度（横/竖向通用）。
  * @param obj 滑条对象指针。
  * @param value 输入值。
  * @param thumb_size 滑块尺寸（像素）。
@@ -158,7 +158,7 @@ static uint16_t _slider_fill_len_for_value(const we_slider_obj_t *obj, uint8_t v
 }
 
 /**
- * @brief 将当前值映射为横向轨道填充长度。
+ * @brief 将当前值映射为沿轨道方向的填充长度（横/竖向通用）。
  * @param obj 滑条对象指针。
  * @param thumb_size 滑块尺寸（像素）。
  * @return 填充长度（像素）。

@@ -21,8 +21,9 @@ limitations under the License.
  * GUI 周期任务调度辅助
  *
  * 设计目标：
- * 1. 把容器动画这类周期逻辑从 we_gui_task_handler() 主体里拆出来；
- * 2. 后续如果继续增加光标闪烁、页面动画等逻辑，只需要注册任务回调；
+ * 1. 把 GUI 内部周期逻辑从 we_gui_task_handler() 主体里拆出来；
+ *    （注意：控件/容器动画走中央动画引擎 we_anim_t，链入 lcd->anim_head，不占 task 槽）
+ * 2. 后续如果继续增加光标闪烁等内部周期逻辑，只需要注册任务回调；
  * 3. 使用固定数量数组，避免动态内存和复杂链表，适合低成本 MCU。
  * -------------------------------------------------------------------------- */
 /**
@@ -1757,7 +1758,7 @@ int8_t _we_gui_task_register_with_data(we_lcd_t *p_lcd, we_gui_task_cb_t cb, voi
  * @note 实现步骤：
  *       1. 先做整块区域的屏幕边界裁剪；
  *       2. 统计本次真正下发的块数和像素数；
- *       3. 根据 GRAM_NUM 计算单次最多能刷多少行；
+ *       3. 根据 pfb_size（当前 PFB 像素容量，真双缓冲时为整块的一半）计算单次最多能刷多少行；
  *       4. 分块重绘 PFB；
  *       5. 调用底层端口把当前块送到 LCD。
  */
@@ -1806,7 +1807,7 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
     uint16_t x1 = x + w - 1;
     uint16_t y1 = y + h - 1;
 
-    /* 8. 根据当前宽度和 GRAM_NUM，算出单次最多能刷多少行。 */
+    /* 8. 根据当前宽度和 pfb_size（当前 PFB 像素容量，真双缓冲时为整块的一半），算出单次最多能刷多少行。 */
     uint16_t max_lines = p_lcd->pfb_size / w;
 
     if (max_lines == 0)
@@ -2801,7 +2802,7 @@ void we_input_init_with_port(we_lcd_t *p_lcd, we_input_read_cb_t read_cb)
 /**
  * @brief 为指定 LCD 实例注册外部存储读取接口
  * @param p_lcd 传入，待绑定存储接口的 GUI 屏幕上下文指针
- * @param read_cb 传入，存储读取回调，参数顺序为(数组指针, 存储地址, 读取数量)
+ * @param read_cb 传入，存储读取回调，参数顺序为(存储地址 addr, 数组指针 buf, 读取数量 len)
  * @return 无
  */
 #if (WE_CFG_ENABLE_STORAGE_PORT_BIND == 1)

@@ -444,7 +444,7 @@ we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
 }
 
 /**
- * @brief 失效指定文本区域（_invalidate_text_bbox 的简化封装）。
+ * @brief 失效指定文本区域：纯转调 _invalidate_text_bbox，仅为命名对齐 _invalidate_obj_bbox。
  * @param obj 文本控件实例。
  * @param text 用于估算尺寸的 UTF-8 文本。
  */

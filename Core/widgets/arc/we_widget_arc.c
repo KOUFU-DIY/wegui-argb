@@ -213,7 +213,7 @@ static void _arc_invalidate_bbox_exclude_hole(we_arc_obj_t *obj,
  * ========================================================================= */
 
 /**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
+ * @brief 圆弧绘制回调：基于距离平方场渲染轨道/进度弧及圆角端帽，写入 PFB。
  * @param ptr 回调透传对象指针。
  * @return 无。
  */

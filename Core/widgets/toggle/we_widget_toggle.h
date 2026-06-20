@@ -19,7 +19,8 @@
 /* --------------------------------------------------------------------------
  * 动画总步数（仅 WE_TOGGLE_USE_ANIM == 1 时有效）
  *
- * GUI 内部 task 每累计 WE_TOGGLE_ANIM_STEP_MS 毫秒推进 1 步，
+ * 中央动画引擎（we_anim_t 节点，每周期由 we_gui_task_handler 步进）
+ * 每累计 WE_TOGGLE_ANIM_STEP_MS 毫秒推进 1 步，
  * 共推进 WE_TOGGLE_ANIM_STEPS 步后动画结束。
  * 以默认 16ms 步进为例：
  *   8 步 ≈ 128ms（推荐，接近 iOS 手感）

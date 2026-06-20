@@ -74,7 +74,7 @@ we_obj_set_pos((we_obj_t *)obj, x, y);
 }
 
 /**
- * @brief 执行we_label_obj_delete的核心处理流程。
+ * @brief 从显示链表摘除该文本控件并清空其对象状态（转调 we_obj_delete）。
  * @param obj 控件对象指针
  * @return 无
  */

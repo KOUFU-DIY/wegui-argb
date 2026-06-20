@@ -33,7 +33,7 @@ typedef struct
     const char *text; /* 右侧文本 (可为 NULL) */
     const unsigned char *font;
     we_checkbox_event_cb_t user_event_cb;
-    we_checkbox_changed_cb_t changed_cb;   /* 可为 NULL（默认轮询 is_checked） */
+    we_checkbox_changed_cb_t changed_cb;   /* 可为 NULL；为 NULL 时不回调，需调用方自行轮询 we_checkbox_is_checked */
     const we_cb_style_t *styles;           /* 指向样式表 (默认指向内置 Flash 表) */
     uint16_t box_size; /* 方框边长 */
     uint16_t radius;   /* 方框圆角半径 */

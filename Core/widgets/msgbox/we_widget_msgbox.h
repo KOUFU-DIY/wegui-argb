@@ -54,17 +54,14 @@ typedef struct we_popup_obj_t
     const unsigned char *button_font;
     we_popup_action_cb_t confirm_cb;
     we_popup_action_cb_t cancel_cb;
-    int16_t panel_y;
-    int16_t anim_from_y;
-    int16_t anim_to_y;
-    int16_t target_y;
-    int16_t hidden_y;
+    int16_t panel_y; /* 面板停靠 Y（固定，淡入淡出不再移动） */
     uint16_t panel_min_w;
     uint16_t panel_w;
     uint16_t panel_h;
     uint16_t anim_elapsed_ms;
     uint16_t anim_duration_ms;
-    we_anim_t anim; /* 中央动画引擎节点（滑入/滑出动画，不占 GUI task 槽） */
+    uint8_t fade_opa; /* 淡入淡出当前不透明度 0~255 */
+    we_anim_t anim; /* 中央动画引擎节点（淡入/淡出动画，不占 GUI task 槽） */
     uint8_t layout;
     uint8_t pressed_btn; /* 0=none, 1=confirm, 2=cancel */
     uint8_t armed_btn;   /* 记录本次按下命中的按钮，供 CLICKED 阶段确认 */
@@ -154,13 +151,13 @@ void we_popup_set_buttons(we_popup_obj_t *obj, const char *confirm_text, const c
 void we_popup_set_target_y(we_popup_obj_t *obj, int16_t target_y);
 
 /**
- * @brief 显示弹窗（触发滑入动画或直接显示）。
+ * @brief 显示弹窗（触发淡入动画或直接显示）。
  * @param obj 弹窗对象指针。
  */
 void we_popup_show(we_popup_obj_t *obj);
 
 /**
- * @brief 隐藏弹窗（触发收起动画或直接隐藏）。
+ * @brief 隐藏弹窗（触发淡出动画或直接隐藏）。
  * @param obj 弹窗对象指针。
  */
 void we_popup_hide(we_popup_obj_t *obj);
@@ -179,7 +176,7 @@ static inline void we_msgbox_show(we_msgbox_obj_t *obj) { we_popup_show(obj); }
 static inline void we_msgbox_hide(we_msgbox_obj_t *obj) {     we_popup_hide(obj); }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 隐藏并删除弹窗：摘除动画链节点（we_popup_hide 内）并从对象链表移除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -192,7 +189,7 @@ static inline void we_popup_obj_delete(we_popup_obj_t *obj)
 }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 隐藏并删除消息框：摘除动画链节点（we_popup_hide 内）并从对象链表移除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */

@@ -19,16 +19,15 @@ static void _progress_draw_cb(void *ptr);
 static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
 
 /**
- * @brief 周期任务回调，按时间步长推进本控件动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
+ * @brief 中央动画引擎回调，按时间步长推进本控件动画。
+ * @param owner 控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
 static void _progress_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制整条轨道。
+ * @brief 在当前 PFB 裁剪区内绘制整条圆角轨道。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param color 目标颜色值。
@@ -264,7 +263,7 @@ static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, ui
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内执行局部绘制。
+ * @brief 在当前 PFB 裁剪区内绘制整条圆角轨道。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param color 目标颜色值。
@@ -463,7 +462,7 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 删除进度条对象，先从中央动画链摘除节点再从对象链表移除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -477,9 +476,9 @@ void we_progress_obj_delete(we_progress_obj_t *obj)
 }
 
 /**
- * @brief 更新属性并同步显示状态。
+ * @brief 设置目标进度值；与显示值差值>1 时启用缓动动画，<=1 时直接到位避免高频抖动。
  * @param obj 目标控件对象指针。
- * @param value 输入采样值。
+ * @param value 新进度值（0~255）。
  * @return 无。
  */
 void we_progress_set_value(we_progress_obj_t *obj, uint8_t value)
@@ -562,7 +561,7 @@ void we_progress_sub_value(we_progress_obj_t *obj, uint8_t delta)
 /**
  * @brief 读取目标进度值。
  * @param obj 目标控件对象指针。
- * @return 返回对应计算结果。
+ * @return 目标进度值（0~255）；obj 为 NULL 时返回 0。
  */
 uint8_t we_progress_get_value(const we_progress_obj_t *obj)
 {
@@ -572,7 +571,7 @@ uint8_t we_progress_get_value(const we_progress_obj_t *obj)
 /**
  * @brief 读取当前显示进度值。
  * @param obj 目标控件对象指针。
- * @return 返回对应计算结果。
+ * @return 当前显示进度值（动画中间值，0~255）；obj 为 NULL 时返回 0。
  */
 uint8_t we_progress_get_display_value(const we_progress_obj_t *obj)
 {
@@ -594,7 +593,7 @@ void we_progress_set_opacity(we_progress_obj_t *obj, uint8_t opacity)
 }
 
 /**
- * @brief 更新属性并同步显示状态。
+ * @brief 设置轨道圆角半径并按需重绘。
  * @param obj 目标控件对象指针。
  * @param radius 圆角半径（像素）。
  * @return 无。

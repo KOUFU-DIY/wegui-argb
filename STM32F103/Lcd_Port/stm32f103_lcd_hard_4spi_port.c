@@ -185,7 +185,7 @@ void lcd_send_1Dat(uint8_t dat)
     LCD_CS_Set();
 }
 
-/* 发送 num 个数据字节 */
+/* 发送 num 个数据字节 (轮询) */
 void lcd_send_nDat(uint8_t *p, uint16_t num)
 {
     uint16_t i = 0;

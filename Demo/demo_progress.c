@@ -131,13 +131,13 @@ void we_progress_simple_demo_init(we_lcd_t *lcd)
                          240,                       // w
                          26,                        // h
                          progress_demo_value,       // 进度[0:255]
-                         RGB888TODEV(40, 52, 70),   // 前景颜色
-                         RGB888TODEV(74, 166, 255), // 背景颜色
+                         RGB888TODEV(40, 52, 70),   // 背景轨道色 (track)
+                         RGB888TODEV(74, 166, 255), // 前景进度色 (fill)
                          255);
     /*
 we_progress_set_colors(&progress_bar,
-               RGB888TODEV(40, 52, 70),//前景颜色
-               RGB888TODEV(74, 166, 255));//背景颜色
+               RGB888TODEV(40, 52, 70),//背景轨道色 (track)
+               RGB888TODEV(74, 166, 255));//前景进度色 (fill)
     */
 
     we_btn_obj_init(&progress_btn_minus, lcd, 20, 146, btn_w, btn_h, "-16", we_font_consolas_18, _progress_minus_cb);

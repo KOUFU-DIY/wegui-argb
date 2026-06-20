@@ -11,19 +11,9 @@
 /* LCD 输出色深 */
 #define LCD_DEEP (DEEP_RGB565)
 
-/* 屏幕宽高
- * 模拟器与硬件目标在此处分流：
- *   - WE_SIMULATOR（CMake 全工程定义）：大画布，供全控件汇总 demo
- *     （demo_id=23，按 800×480 布局）等使用；
- *   - 硬件目标：基准 280×240。改大会同时放大 USER_GRAM_NUM，
- *     8KB RAM 的 F030 会直接链接溢出，故两侧务必分开维护。 */
-#if defined(WE_SIMULATOR)
-#define SCREEN_WIDTH (800)
-#define SCREEN_HEIGHT (480)
-#else
-#define SCREEN_WIDTH (280)
+/* 屏幕宽高 */
+#define SCREEN_WIDTH (240)
 #define SCREEN_HEIGHT (240)
-#endif
 
 /* 屏幕显存
  * 最小设置 1 行；
@@ -60,7 +50,7 @@
 
 /* ------------------------- GUI 周期任务配置 ------------------------- */
 /* GUI 内部任务槽数量上限
- * 说明：这组槽位只给 GUI 内部使用，例如控件动画任务。 */
+ * 说明：这组槽位只给 GUI 内部周期任务使用；控件动画走中央动画引擎(we_anim_t)，不占此槽。 */
 #define WE_CFG_GUI_TASK_MAX_NUM (4)
 
 /* --------------------------- GUI 定时器配置 --------------------------- */
@@ -185,12 +175,12 @@
 // #define WE_FLASH_FONT_SCRATCH_MAX ((((SCREEN_WIDTH) * 4U) + 7U) >> 3U)
 
 /* ------------------------- msgbox 控件 ------------------------- */
-/* 顶部滑入消息框动画总时长（毫秒） */
+/* 消息框淡入/淡出动画总时长（毫秒） */
 // #define WE_MSGBOX_ANIM_DURATION_MS (220U)
 
-/* 是否启用消息框滑入/滑出动画
+/* 是否启用消息框淡入/淡出动画
  * 0: 直接显示/隐藏
- * 1: 带动画 */
+ * 1: 带动画（透明度淡入淡出） */
 // #define WE_MSGBOX_USE_ANIM (1)
 
 /* 消息框距离屏幕边缘的安全留白 */

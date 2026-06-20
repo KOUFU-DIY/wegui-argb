@@ -56,7 +56,7 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
                           colour_t track_color, colour_t fill_color, uint8_t opacity);
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 删除进度条对象（先摘除中央动画节点，再从对象链表移除）。
  * @param obj 目标控件对象指针。
  * @return 无。
  */

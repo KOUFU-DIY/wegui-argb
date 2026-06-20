@@ -317,11 +317,10 @@ static void _dropdown_scroll_to(we_dropdown_obj_t *d, int32_t new_scroll)
 }
 
 /**
- * @brief 滚动条淡出周期任务：popup 打开且滚动条可见时，
- *        空闲超过 HOLD 后按 FADE 时长线性淡出到完全透明。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 控件对象指针。
- * @param elapsed_ms 本次调度经过的毫秒数。
+ * @brief 滚动条淡出动画步进（中央动画引擎驱动）：popup 打开且滚动条可见时，
+ *        空闲超过 HOLD 后按 FADE 时长线性淡出到最低常驻透明度。
+ * @param owner 控件对象指针。
+ * @param elapsed_ms 本次步进经过的毫秒数。
  * @return 无。
  */
 static void _dropdown_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
@@ -488,7 +487,7 @@ static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a)
               (int32_t)(track_h - thumb_h) * d->scroll_px / max_scroll);
 
     /* 仅绘制半透明胶囊滑块，不画轨道；圆角=半宽 → 两头自然收成半圆。
-     * 透明度取当前淡出值 sb_alpha（由淡出 task 推进）。 */
+     * 透明度取当前淡出值 sb_alpha（由滚动条淡出动画节点推进）。 */
     we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y, _DD_SB_WIDTH,
                                      (uint16_t)thumb_h, _DD_SB_WIDTH / 2U,
                                      _DD_COL_SCROLLBAR, d->sb_alpha);

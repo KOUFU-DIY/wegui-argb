@@ -43,7 +43,7 @@ static const we_btn_style_t _built_in_styles[WE_BTN_STATE_MAX] = {
 #endif
 
 /**
- * @brief 执行局部绘制流程并写入 PFB。
+ * @brief 绘制按钮皮肤：将圆角半径钳制到不超过半宽/半高后，用解析式抗锯齿圆角矩形填充背景（当前不绘制边框）。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param x 目标区域左上角 X 坐标。
  * @param y 目标区域左上角 Y 坐标。
@@ -155,7 +155,7 @@ static void _btn_draw_cb(void *ptr)
 
     we_lcd_t *lcd = obj->base.lcd;
 
-    // 2. [合并绘制] 使用新版抗锯齿圆角矩形引擎一次性画完背景、边框和抗锯齿
+    // 2. [合并绘制] 使用抗锯齿圆角矩形引擎一次画完背景与圆角抗锯齿（当前样式不绘制边框）
     we_btn_draw_skin(lcd, obj->base.x, obj->base.y, obj->base.w, obj->base.h,
                      obj->radius, style, obj->opacity);
 
@@ -307,7 +307,7 @@ void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colo
     obj->styles[state].border_w = border_w;
 we_obj_invalidate((we_obj_t *)obj);
 #else
-    // 内置模式下，该函数为空或报错
+    // 内置样式模式下样式表只读，本函数静默忽略所有参数（无运行时副作用）
     (void)obj;
     (void)state;
     (void)bg;

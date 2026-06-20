@@ -10,7 +10,7 @@
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissionas and
+ * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 
@@ -80,8 +80,6 @@ we_lcd_t g_lcd;
 
 int main(void)
 {
-    uint8_t demo_id;
-
     system_init();
 
     lcd_hw_init();
@@ -98,7 +96,7 @@ int main(void)
                 lcd_set_addr, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
 #endif
 
-    /* demo_id:
+    /* DEMO_ID（编译期宏切换，改这一行即可）:
      * 1  = label
      * 2  = btn
      * 3  = img
@@ -121,99 +119,76 @@ int main(void)
      * 20 = stepper
      * 21 = indicator
      */
-    demo_id = 19;
+#define DEMO_ID (19)
 
-    switch (demo_id)
-    {
-    case 1:
-        we_label_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_label_simple_demo_tick, 16U, 1U);
-        break;
-    case 2:
-        we_btn_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_btn_simple_demo_tick, 16U, 1U);
-        break;
-    case 3:
-        we_img_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_img_simple_demo_tick, 16U, 1U);
-        break;
-    case 4:
-        we_img_ex_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_img_ex_simple_demo_tick, 16U, 1U);
-        break;
-    case 5:
-        we_arc_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_arc_simple_demo_tick, 16U, 1U);
-        break;
-    case 6:
-        we_group_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_group_simple_demo_tick, 16U, 1U);
-        break;
-    case 7:
-        we_slideshow_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_slideshow_simple_demo_tick, 16U, 1U);
-        break;
-    case 8:
-        we_concentric_arc_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_concentric_arc_simple_demo_tick, 16U, 1U);
-        break;
-    case 9:
-        we_checkbox_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_checkbox_simple_demo_tick, 16U, 1U);
-        break;
-    case 10:
-        we_label_ex_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_label_ex_simple_demo_tick, 16U, 1U);
-        break;
-    case 11:
-        we_chart_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_chart_simple_demo_tick, 16U, 1U);
-        break;
-    case 12:
-        we_toggle_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_toggle_simple_demo_tick, 16U, 1U);
-        break;
-    case 13:
-        we_progress_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_progress_simple_demo_tick, 16U, 1U);
-        break;
-    case 14:
-        we_msgbox_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_msgbox_simple_demo_tick, 16U, 1U);
-        break;
-    case 15:
-        we_flash_img_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_flash_img_simple_demo_tick, 16U, 1U);
-        break;
-    case 16:
-        we_flash_font_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_flash_font_simple_demo_tick, 16U, 1U);
-        break;
-    case 17:
-        we_slider_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_slider_simple_demo_tick, 16U, 1U);
-        break;
-    case 18:
-        we_scroll_panel_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_scroll_panel_simple_demo_tick, 16U, 1U);
-        break;
-    case 19:
-        we_dropdown_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_dropdown_simple_demo_tick, 16U, 1U);
-        break;
-    case 20:
-        we_stepper_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_stepper_simple_demo_tick, 16U, 1U);
-        break;
-    case 21:
-        we_indicator_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_indicator_simple_demo_tick, 16U, 1U);
-        break;
-    default:
-        we_btn_simple_demo_init(&g_lcd);
-        we_gui_timer_create(&g_lcd, we_btn_simple_demo_tick, 16U, 1U);
-        break;
-    }
+    /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
+#if (DEMO_ID == 1)
+    we_label_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_label_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 2)
+    we_btn_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_btn_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 3)
+    we_img_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_img_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 4)
+    we_img_ex_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_img_ex_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 5)
+    we_arc_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_arc_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 6)
+    we_group_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_group_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 7)
+    we_slideshow_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_slideshow_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 8)
+    we_concentric_arc_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_concentric_arc_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 9)
+    we_checkbox_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_checkbox_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 10)
+    we_label_ex_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_label_ex_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 11)
+    we_chart_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_chart_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 12)
+    we_toggle_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_toggle_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 13)
+    we_progress_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_progress_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 14)
+    we_msgbox_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_msgbox_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 15)
+    we_flash_img_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_flash_img_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 16)
+    we_flash_font_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_flash_font_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 17)
+    we_slider_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_slider_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 18)
+    we_scroll_panel_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_scroll_panel_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 19)
+    we_dropdown_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_dropdown_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 20)
+    we_stepper_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_stepper_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 21)
+    we_indicator_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_indicator_simple_demo_tick, 16U, 1U);
+#else
+    we_btn_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, we_btn_simple_demo_tick, 16U, 1U);
+#endif
 
     g_sys_tick = 0;
     while (1)
