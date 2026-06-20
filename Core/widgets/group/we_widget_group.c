@@ -18,7 +18,7 @@ static we_group_child_slot_t *_group_find_slot(we_group_obj_t *obj, we_obj_t *ch
 }
 
 /**
- * @brief 内部辅助：group_detach_obj。
+ * @brief 把对象从其当前所属链表（父容器 children_head 或顶层 obj_list_head）摘除，并清空 next/parent，供改挂父子关系前使用。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -73,7 +73,7 @@ static void _group_detach_obj(we_obj_t *obj)
 }
 
 /**
- * @brief 内部辅助：group_update_child_abs。
+ * @brief 按 slot 局部坐标叠加容器绝对坐标，刷新该子控件的屏幕绝对位置。
  * @param obj 目标控件对象指针。
  * @param slot 子控件槽位记录指针。
  * @return 无。
@@ -261,7 +261,7 @@ static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 }
 
 /**
- * @brief 初始化控件对象并挂载到 LCD 对象链表。
+ * @brief 初始化组容器对象（清空子控件槽、挂载到 LCD 链表）。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param x 目标区域左上角 X 坐标。
@@ -304,7 +304,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 删除组容器：先逐个删除全部子控件并清空 slot，再删除容器自身。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -333,7 +333,7 @@ we_obj_delete((we_obj_t *)obj);
 }
 
 /**
- * @brief 执行 we_group_add_child。
+ * @brief 将子控件从原链表摘出并挂入本组的空闲 slot（建立父子关系、刷新绝对坐标）；自挂载/跨 lcd/重复挂载会被忽略。
  * @param obj 目标控件对象指针。
  * @param child 目标子控件对象指针。
  * @return 无。
@@ -372,7 +372,7 @@ _group_update_child_abs(obj, &obj->child_slots[i]);
 }
 
 /**
- * @brief 执行 we_group_remove_child。
+ * @brief 从组中移除子控件：去链并释放其 slot；若它正处于按压转发状态则同步清除引用。
  * @param obj 目标控件对象指针。
  * @param child 目标子控件对象指针。
  * @return 无。
@@ -394,11 +394,11 @@ _group_detach_obj(child);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置子控件在组内的局部坐标并刷新其屏幕绝对位置。
  * @param obj 目标控件对象指针。
  * @param child 目标子控件对象指针。
- * @param local_x X 方向坐标或偏移值。
- * @param local_y Y 方向坐标或偏移值。
+ * @param local_x 相对组左上角的局部 X 坐标（像素）。
+ * @param local_y 相对组左上角的局部 Y 坐标（像素）。
  * @return 无。
  */
 void we_group_set_child_pos(we_group_obj_t *obj, we_obj_t *child, int16_t local_x, int16_t local_y)
@@ -414,7 +414,7 @@ _group_update_child_abs(obj, slot);
 }
 
 /**
- * @brief 执行 we_group_relayout。
+ * @brief 按各 slot 局部坐标重新刷新全部子控件的屏幕绝对位置。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -433,9 +433,9 @@ _group_update_child_abs(obj, &obj->child_slots[i]);
 }
 
 /**
- * @brief 执行 we_group_shift_children。
+ * @brief 按给定位移整体平移全部子控件，并可选派发 WE_EVENT_SCROLLED。
  * @param obj 目标控件对象指针。
- * @param dx 滚动增量 X（像素）。
+ * @param dx X 方向平移增量（像素）。
  * @param dy Y 方向平移增量（像素）。
  * @param send_scrolled_event 是否向子控件派发 WE_EVENT_SCROLLED 事件。
  * @return 无。

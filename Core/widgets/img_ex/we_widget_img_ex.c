@@ -15,14 +15,14 @@
 #if (WE_IMG_EX_SAMPLE_MODE == 1)
 
 /**
- * @brief 执行 lerp_rgb565。
+ * @brief 对 2x2 邻域 4 个 RGB565 像素做双线性插值。
  * @param c00 左上采样点颜色（RGB565）。
  * @param c10 右上采样点颜色（RGB565）。
  * @param c01 左下采样点颜色（RGB565）。
  * @param c11 右下采样点颜色（RGB565）。
  * @param fx X 方向小数权重（Q12）。
  * @param fy Y 方向小数权重（Q12）。
- * @return 返回对应结果值。
+ * @return 混合后的 RGB565 像素。
  */
 static inline uint16_t lerp_rgb565(uint16_t c00, uint16_t c10, uint16_t c01, uint16_t c11, uint16_t fx, uint16_t fy)
 {
@@ -57,30 +57,23 @@ static inline uint16_t lerp_rgb565(uint16_t c00, uint16_t c10, uint16_t c01, uin
  * 统一精度（255 分母），消除原先 256 分母带来的微小偏色。 */
 
 /**
- * @brief 内部辅助：blend_fast。
+ * @brief 按 255 分母混合前景/背景色，委托 we_colour_blend 统一精度。
  * @param fg 前景颜色。
  * @param bg 背景颜色。
  * @param alpha 透明度参数。
- * @return 无。
+ * @return 混合后的颜色。
  */
 static __inline colour_t _blend_fast(colour_t fg, colour_t bg, uint8_t alpha)
 {
-/**
- * @brief 执行 we_colour_blend。
- * @param fg 前景颜色。
- * @param bg 背景颜色。
- * @param alpha 透明度参数。
- * @return 无。
- */
     return we_colour_blend(fg, bg, alpha);
 }
 
 #if (LCD_DEEP == DEEP_RGB888)
 
 /**
- * @brief 内部辅助：img_ex_color_from_rgb565。
+ * @brief 将 RGB565 像素扩展为 RGB888 colour_t（5/6/5 位左移补齐）。
  * @param pixel RGB565 原始像素值。
- * @return 无。
+ * @return 展开后的 colour_t。
  */
 static colour_t _img_ex_color_from_rgb565(uint16_t pixel)
 {
@@ -266,7 +259,7 @@ static void _img_ex_update_bbox(we_img_ex_obj_t *obj)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
+ * @brief img_ex 绘制回调：对包围盒内像素逆映射采样源图并旋转缩放写入 PFB。
  * @param obj_ptr 回调透传的 img_ex 对象指针。
  * @return 无。
  */
@@ -680,7 +673,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置变换中心 cx/cy 并重算包围盒。
  * @param obj 目标控件对象指针。
  * @param cx 控件变换中心的 X 坐标。
  * @param cy 控件变换中心的 Y 坐标。
@@ -707,7 +700,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置源图内部旋转轴心相对几何中心的偏移并重算包围盒。
  * @param obj 目标控件对象指针。
  * @param ofs_x 源图内部旋转中心 X 偏移（像素）。
  * @param ofs_y 源图内部旋转中心 Y 偏移（像素）。
@@ -738,7 +731,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置旋转角度与缩放比例并重算包围盒。
  * @param obj 目标控件对象指针。
  * @param angle 旋转角度（512 分度制）。
  * @param scale_256 缩放比例（256=1.0x）。

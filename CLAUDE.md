@@ -59,9 +59,9 @@ Build log: `STM32F030/MDK-ARM/Objects/Project.build_log.htm`
 There is **no standalone automated test suite or lint target** in this repository. Validation is done by building a target and running one demo as an integration smoke test.
 
 Closest equivalent to a single test:
-- **Simulator**: change `demo_id` in `Simulator/main_sim.c` (currently line 51), rebuild, run `wegui_sim`, and verify rendering/animation/input behavior.
-- **STM32F103**: change `demo_id` in `STM32F103/main.c` (currently line 124), rebuild/flash, and verify on the LCD.
-- **STM32F030**: change `demo_id` in `STM32F030/main.c` (currently line 69), rebuild/flash, and verify on the LCD.
+- **Simulator**: change `#define DEMO_ID` near the top of `main` in `Simulator/main_sim.c` (`0` = showcase), rebuild, run `wegui_sim`, and verify rendering/animation/input behavior.
+- **STM32F103**: change `#define DEMO_ID` near the top of `main` in `STM32F103/main.c`, rebuild/flash, and verify on the LCD.
+- **STM32F030**: change `#define DEMO_ID` near the top of `main` in `STM32F030/main.c`, rebuild/flash, and verify on the LCD.
 
 Hardware flashing is done outside the build command (CMSIS-DAP / DAPLink / pyOCD are usable depending on the board). If flashed content appears stale, verify the relevant `.build_log.htm` timestamp before reflashing.
 
@@ -200,11 +200,9 @@ void we_xxx_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 One demo should be a small, copyable example: static variables plus one init function plus one tick function. Demos are also the primary integration tests for widgets, timers, input, storage-backed assets, and rendering behavior.
 
-Demo selection differs slightly by target (`demo_id` switch in each entry's `main`):
-- `Simulator/main_sim.c`: there is no `case 9` (historical `key` slot); checkbox is 10, scroll_panel 19, dropdown 20, stepper 21, indicator 22.
-- `STM32F103/main.c` and `STM32F030/main.c`: checkbox is `demo_id` 9, scroll_panel 18, dropdown 19, stepper 20, indicator 21.
+Demo selection is a **compile-time `#define DEMO_ID`** + `#if/#elif` chain in each entry's `main` (no runtime `switch`); only the selected demo's `init`/`tick` is compiled in. Numbering is unified across all three targets — `1..21` are identical: `1` label, `2` btn, `3` img, `4` img_ex, `5` arc, `6` group, `7` slideshow, `8` concentric arc, `9` checkbox, `10` label_ex, `11` chart, `12` toggle, `13` progress, `14` msgbox, `15` flash img, `16` flash font, `17` slider, `18` scroll_panel, `19` dropdown, `20` stepper, `21` indicator. The simulator additionally defines `0 = showcase` (simulator-only; needs 800×480, guarded by a nested `#warning`). The `#else` fallback is `label` (simulator) / `btn` (STM32). Switch demos by editing the single `#define DEMO_ID` line near the top of `main`.
 
-When adding a demo, update the `demo_id` comment block + `switch` in all three entry files, declare its `init`/`tick` in `Demo/simple_widget_demos.h`, and add the `demo_xxx.c` to `DEMO_SOURCES` in `Simulator/CMakeLists.txt` (and to each Keil `.uvprojx`).
+When adding a demo, update the `DEMO_ID` comment block + `#if/#elif` chain in all three entry files, declare its `init`/`tick` in `Demo/simple_widget_demos.h`, and add the `demo_xxx.c` to `DEMO_SOURCES` in `Simulator/CMakeLists.txt` (and to each Keil `.uvprojx`).
 
 ## Code Style
 

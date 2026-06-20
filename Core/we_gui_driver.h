@@ -518,7 +518,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     /**
      * @brief 为指定 LCD 实例注册外部存储读取接口
      * @param p_lcd 传入：待绑定存储接口的 GUI 屏幕上下文指针
-     * @param read_cb 传入：存储读取回调，参数顺序为(数组指针, 存储地址, 读取数量)
+     * @param read_cb 传入：存储读取回调，参数顺序为(存储地址 addr, 数组指针 buf, 读取数量 len)，与 typedef 一致
      * @return 无
      * @note 传 NULL 表示当前 LCD 不启用外部存储读取能力。
      */
@@ -726,6 +726,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @param font_array 传入：字库数组指针
      * @param str 传入：UTF-8 字符串
      * @return 文本宽度，单位为像素
+     * @note 遇到换行符会停止累加，仅统计第一行宽度（与 we_font_text.h 保持一致）。
      */
     uint16_t we_get_text_width(const unsigned char *font_array, const char *str);
     /**

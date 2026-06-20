@@ -74,7 +74,7 @@ void we_arc_set_opacity(we_arc_obj_t *obj, uint8_t opacity);
 void we_arc_obj_set_pos(we_arc_obj_t *obj, int16_t x, int16_t y);
 
 /**
- * @brief 执行we_arc_obj_delete的核心处理流程。
+ * @brief 删除圆弧控件对象并从对象链表移除。
  * @param obj 控件对象指针
  * @return 无
  */

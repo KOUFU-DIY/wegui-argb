@@ -111,7 +111,7 @@ typedef struct
  * @param data_buf 采样环形缓冲区指针。
  * @param data_cap 缓冲区容量（采样点个数）。
  * @param line_color 线条颜色值。
- * @param stroke 文本字符串。
+ * @param stroke 波形线宽（像素，0 时回退为 2）。
  * @param opacity 不透明度（0~255）。
  * @return 无。
  */
@@ -150,7 +150,7 @@ void we_chart_set_color(we_chart_obj_t *obj, colour_t color);
 void we_chart_set_opacity(we_chart_obj_t *obj, uint8_t opacity);
 
 /**
- * @brief 执行we_chart_obj_delete的核心处理流程。
+ * @brief 删除波形图对象并从对象链表移除。
  * @param obj 控件对象指针
  * @return 无
  */

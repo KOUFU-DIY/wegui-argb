@@ -9,7 +9,7 @@
  * 4. 右上角显示实时帧率 (FPS)
  *
  * 用法：
- *   以 280x240 为设计基准，通过 demo_common 做整数缩放适配。
+ *   以 280x240 为参考布局，坐标为固定像素；仅 FPS 标签用 we_demo_fps_x 做右对齐。
  *   we_label_simple_demo_init(&mylcd);
  *   we_gui_timer_create(&mylcd, we_label_simple_demo_tick, 16U, 1U);
  */
@@ -40,7 +40,7 @@ static char     label_main_buf[24];      /* 主 Label 动态文本缓冲区 */
  */
 void we_label_simple_demo_init(we_lcd_t *lcd)
 {
-    /* 设计基准：280x240；布局按当前屏幕做整数缩放。 */
+    /* 参考布局 280x240；坐标为固定像素，按 240 宽屏排布；如需跨分辨率请套用 we_demo_scale_x/y。 */
     int16_t margin_x = 10;
     int16_t title_y  = 10;
     int16_t note_y   = 32;
@@ -112,7 +112,7 @@ void we_label_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     /* 副 Label 透明度在 80~230 之间以较慢频率来回变化 */
     opacity = (uint8_t)(80U + (((uint32_t)(we_sin((int16_t)((label_ticks_ms * 5U) / 100U) & 0x1FF)) + 32768U) * 150U >> 16));
 
-    /* 副 Label Y 坐标以 sin 波上下浮动约 ±8px（经屏幕缩放） */
+    /* 副 Label Y 坐标以 sin 波上下浮动约 ±8px */
     float_y = (int16_t)(base_y + ((we_sin((int16_t)((label_ticks_ms * 4U) / 100U) & 0x1FF)
                                    * 8) >> 15));
 

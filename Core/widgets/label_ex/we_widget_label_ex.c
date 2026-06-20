@@ -189,8 +189,8 @@ static __inline uint8_t _alpha_from_cache(const _glyph_cache_t *cache, uint16_t 
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 内部辅助：calc_label_ex_bbox。
- * @param text_w 文本字符串。
+ * @brief 计算旋转缩放后文本包围盒（相对变换中心的偏移）。
+ * @param text_w 文本像素宽度。
  * @param line_h 单行文本高度（像素）。
  * @param angle 旋转角度（512 分度制）。
  * @param scale_256 缩放比例（256=1.0x）。
@@ -253,7 +253,7 @@ int32_t sin_a = we_sin(angle);
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 内部辅助：label_ex_update_bbox。
+ * @brief 按 cx/cy/angle/scale/text_w 重算并写回控件包围盒。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -288,7 +288,7 @@ static void _label_ex_update_bbox(we_label_ex_obj_t *obj)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
+ * @brief label_ex 绘制回调：预扫描字形到栈缓存后逆映射采样并旋转缩放写入 PFB。
  * @param ptr 回调透传对象指针。
  * @return 无。
  */
@@ -494,7 +494,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置变换中心坐标并重算包围盒。
  * @param obj 目标控件对象指针。
  * @param cx 控件变换中心的 X 坐标。
  * @param cy 控件变换中心的 Y 坐标。
@@ -514,7 +514,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置旋转角度与缩放比例并重算包围盒。
  * @param obj 目标控件对象指针。
  * @param angle 旋转角度（512 分度制）。
  * @param scale_256 缩放比例（256=1.0x）。

@@ -106,15 +106,13 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 
 ## Demo 选择
 
-当前 simple demo 共 **21 个**。Simulator 与 STM32 入口使用同一套控件顺序，但 `demo_id` 编号略有差异：
+当前 simple demo 共 **21 个**，三个目标（Simulator / STM32F103 / STM32F030）编号已统一：`1..21` 完全一致；Simulator 额外用 `0 = showcase`（全控件汇总，仅模拟器，需 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
 
-- **Simulator**（`Simulator/main_sim.c`）：为保持历史兼容，编号 9（原 key demo）已退役且不占位，从 8 跳到 10。
-- **STM32**（`STM32F103/main.c` / `STM32F030/main.c`）：不保留退役占位，checkbox 起为 9，后续整体比 Simulator 小 1。
+下表为统一后的 `DEMO_ID`：
 
-下表为 **Simulator** 的 `demo_id`：
-
-| demo_id | 内容 |
+| DEMO_ID | 内容 |
 | --- | --- |
+| 0  | showcase（全控件汇总，仅模拟器，需 800×480） |
 | 1  | label |
 | 2  | btn |
 | 3  | img |
@@ -123,27 +121,24 @@ UV4.exe -r "STM32F103/MDK-ARM/Project.uvprojx" -t "WeGui_ARGB"
 | 6  | group |
 | 7  | slideshow |
 | 8  | concentric arc |
-| 10 | checkbox |
-| 11 | label_ex |
-| 12 | chart |
-| 13 | toggle |
-| 14 | progress |
-| 15 | msgbox |
-| 16 | flash img |
-| 17 | flash font |
-| 18 | slider |
-| 19 | scroll_panel |
-| 20 | dropdown |
-| 21 | stepper |
-| 22 | indicator |
+| 9  | checkbox |
+| 10 | label_ex |
+| 11 | chart |
+| 12 | toggle |
+| 13 | progress |
+| 14 | msgbox |
+| 15 | flash img |
+| 16 | flash font |
+| 17 | slider |
+| 18 | scroll_panel |
+| 19 | dropdown |
+| 20 | stepper |
+| 21 | indicator |
 
-> STM32 对应编号：checkbox=9、label_ex=10 …… scroll_panel=18、dropdown=19、stepper=20、indicator=21。
+> `0`（showcase）仅 Simulator 提供；STM32 无此项。未列编号回退到 `label`（Simulator）/ `btn`（STM32）。
 
-### Simulator
-在 `Simulator/main_sim.c` 中修改 `demo_id`。
-
-### STM32
-在 `STM32F103/main.c` 中切换你希望运行的 demo 初始化逻辑，按当前工程入口写法选择对应 demo。
+### 修改方法
+改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`Simulator/main_sim.c`、`STM32F103/main.c`、`STM32F030/main.c`。STM32 改完需重新编译 / 烧录。
 
 ## 构建与验证
 

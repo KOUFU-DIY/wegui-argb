@@ -18,10 +18,9 @@ static void _slideshow_draw_cb(void *ptr);
 static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
 
 /**
- * @brief 周期任务回调，按时间步长推进本控件动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
- * @param elapsed_ms 本次调度经过的毫秒数。
+ * @brief 中央动画引擎步进回调，按 elapsed_ms 推进吸附动画。
+ * @param owner 控件对象指针（we_anim_t.owner 透传）。
+ * @param elapsed_ms 本次步进经过的毫秒数。
  * @return 无。
  */
 static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms);
@@ -94,7 +93,7 @@ static int16_t _slideshow_find_snap_dir(int16_t current, int16_t page_w, uint16_
 }
 
 /**
- * @brief 清空控件内部数据并重置游标。
+ * @brief 复位吸附动画状态并把动画节点从中央动画链摘除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -108,7 +107,7 @@ static void _slideshow_clear_snap_state(we_slideshow_obj_t *obj)
 }
 
 /**
- * @brief 更新属性并同步内部状态。
+ * @brief 设定吸附目标 X，并按是否需要移动挂入/摘除吸附动画节点。
  * @param obj 目标控件对象指针。
  * @param target_x 吸附目标 X 坐标。
  * @return 无。
@@ -204,10 +203,10 @@ static int16_t _slideshow_anim_step_complex_axis(int16_t diff, int16_t *velocity
 #endif
 
 /**
- * @brief 计算分页吸附目标并更新动画参数。
+ * @brief 由对齐后的 scroll_x 反查所属页索引。
  * @param obj 目标控件对象指针。
- * @param snap_x X 方向坐标或偏移值。
- * @return 返回对应计算结果。
+ * @param snap_x 已吸附到整页的滚动偏移。
+ * @return 对应页索引，未匹配返回 0。
  */
 static uint16_t _slideshow_snap_to_page_index(const we_slideshow_obj_t *obj, int16_t snap_x)
 {
@@ -258,7 +257,7 @@ static void _slideshow_update_child_page_abs(we_slideshow_obj_t *obj, we_slidesh
 }
 
 /**
- * @brief 更新属性并同步内部状态。
+ * @brief 按 dx 平移滚动偏移（夹紧到页边界）并同步移动所有子控件。
  * @param obj 目标控件对象指针。
  * @param dx 滚动增量 X（像素）。
  * @return 无。
@@ -286,7 +285,7 @@ static void _slideshow_set_scroll(we_slideshow_obj_t *obj, int16_t dx)
 }
 
 /**
- * @brief 计算分页吸附目标并更新动画参数。
+ * @brief 计算最近分页吸附目标并启动吸附动画。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -375,10 +374,9 @@ static void _slideshow_anim_step(we_slideshow_obj_t *obj, uint16_t elapsed_ms)
 }
 
 /**
- * @brief 周期任务回调，按时间步长推进本控件动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
- * @param elapsed_ms 本次调度经过的毫秒数。
+ * @brief 中央动画引擎步进回调，按 elapsed_ms 推进吸附动画。
+ * @param owner 控件对象指针（we_anim_t.owner 透传）。
+ * @param elapsed_ms 本次步进经过的毫秒数。
  * @return 无。
  */
 static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms)
@@ -586,7 +584,7 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
 }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 释放控件运行时状态，并把动画节点从中央动画链摘除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -678,11 +676,11 @@ void we_slideshow_add_child(we_slideshow_obj_t *obj, uint16_t page_index, we_obj
 }
 
 /**
- * @brief 更新属性并同步内部状态。
+ * @brief 设置子控件在所属页面内的局部坐标并刷新绝对位置。
  * @param obj 目标控件对象指针。
- * @param child 待挂载的子控件对象指针。
- * @param local_x X 方向坐标或偏移值。
- * @param local_y Y 方向坐标或偏移值。
+ * @param child 待设置的子控件对象指针。
+ * @param local_x 页面内局部 X 坐标。
+ * @param local_y 页面内局部 Y 坐标。
  * @return 无。
  */
 void we_slideshow_set_child_pos(we_slideshow_obj_t *obj, we_obj_t *child, int16_t local_x, int16_t local_y)
@@ -762,7 +760,7 @@ void we_slideshow_prev(we_slideshow_obj_t *obj, uint8_t animated)
 }
 
 /**
- * @brief 更新属性并同步内部状态。
+ * @brief 开关滑动手势翻页功能。
  * @param obj 目标控件对象指针。
  * @param en 使能开关（0 关闭，非 0 开启）。
  * @return 无。

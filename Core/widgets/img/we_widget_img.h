@@ -23,7 +23,7 @@ we_obj_set_pos((we_obj_t *)img_obj, x, y);
 }
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 从显示链表摘除该图片控件并清空对象状态字段（转调 we_obj_delete）；不释放内存，对象由调用者持有。
  * @param img_obj 图像控件对象指针。
  * @return 无。
  */

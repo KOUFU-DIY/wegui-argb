@@ -43,7 +43,7 @@ typedef struct
     colour_t track_color;
     colour_t fill_color;
     colour_t thumb_color;
-    we_slider_changed_cb_t changed_cb; /* 可为 NULL（默认轮询 get_value） */
+    we_slider_changed_cb_t changed_cb; /* 可为 NULL；为空时调用方需自行轮询 get_value 获取数值 */
 } we_slider_obj_t;
 
 /**

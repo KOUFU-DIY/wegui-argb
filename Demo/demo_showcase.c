@@ -47,9 +47,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#if (SCREEN_WIDTH < 800) || (SCREEN_HEIGHT < 480)
-#warning "demo_showcase 按 800x480 布局编写，请调大 we_user_config.h 的 SCREEN_WIDTH/SCREEN_HEIGHT"
-#endif
+/* 分辨率不足(800x480)的告警已移到 Simulator/main_sim.c，
+ * 仅当 DEMO_ID 选中本 demo(0) 时才提示（main_sim.c 的 #if (DEMO_ID==0)
+ * 分支内 #warning），避免编译其他 demo 时误报。 */
 
 /* ---- 顶栏 ---- */
 static we_label_obj_t sc_title;

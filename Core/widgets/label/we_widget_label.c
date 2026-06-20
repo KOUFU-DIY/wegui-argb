@@ -29,7 +29,7 @@ uint16_t line_height = we_font_get_line_height(font);
     // 逐行测宽，寻找最长的一行
     while (*p)
     {
-        // 调用你的函数测量当前行宽
+        // 调用字库测宽函数 we_get_text_width 测量当前行（到 \n 前）的像素宽
 uint16_t current_line_w = we_get_text_width(font, p);
         if (current_line_w > max_w)
         {
@@ -80,7 +80,7 @@ we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
 }
 
 /**
- * @brief 按指定文本尺寸使对应区域失效。
+ * @brief _label_invalidate_text_bbox 的薄封装别名：按 text 计算尺寸后标脏。
  * @param obj 文本控件对象指针。
  * @param text 用于计算失效区域尺寸的文本。
  */

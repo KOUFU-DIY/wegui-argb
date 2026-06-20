@@ -40,7 +40,7 @@ static __inline int32_t _chart_value_to_sy(int16_t value, int16_t by, int16_t bh
  * @brief 计算当前可见列数。
  * @param obj 目标控件对象指针。
  * @param bw 绘制区域宽度（像素）。
- * @return 返回对应计算结果。
+ * @return 可见列数 = min(有效样本数, 绘制宽度)。
  */
 static __inline uint16_t _chart_visible_count(const we_chart_obj_t *obj, int16_t bw)
 {
@@ -51,9 +51,9 @@ static __inline uint16_t _chart_visible_count(const we_chart_obj_t *obj, int16_t
 /**
  * @brief 计算可见窗口在环形缓冲中的起始索引。
  * @param obj 目标控件对象指针。
- * @param visible_count 数量值。
+ * @param visible_count 可见列数。
  * @param bw 绘制区域宽度（像素）。
- * @return 返回对应计算结果。
+ * @return 可见窗口第一列对应的环形缓冲索引。
  */
 static __inline uint16_t _chart_visible_start_idx(const we_chart_obj_t *obj, uint16_t visible_count, int16_t bw)
 {
@@ -67,9 +67,9 @@ static __inline uint16_t _chart_visible_start_idx(const we_chart_obj_t *obj, uin
 /**
  * @brief 将可见列偏移转换为环形缓冲索引。
  * @param obj 目标控件对象指针。
- * @param idx0 索引值。
- * @param col_idx 索引值。
- * @return 返回对应计算结果。
+ * @param idx0 可见窗口在环形缓冲中的起始索引。
+ * @param col_idx 相对可见窗口的列偏移。
+ * @return (idx0 + col_idx) % data_cap。
  */
 static __inline uint16_t _chart_value_at_visible(const we_chart_obj_t *obj, uint16_t idx0, uint16_t col_idx)
 {
@@ -77,8 +77,8 @@ static __inline uint16_t _chart_value_at_visible(const we_chart_obj_t *obj, uint
 }
 
 /**
- * @brief 读取辅助计算结果。
- * @return 返回对应计算结果。
+ * @brief 返回柔边层数（WE_CHART_AA_MAX；关闭柔边时为 0）。
+ * @return 柔边层数。
  */
 static __inline uint8_t _chart_get_aa_height(void)
 {
@@ -164,13 +164,12 @@ static __inline uint8_t _chart_get_aa_alpha(uint8_t aa_h, uint8_t edge_idx, uint
 }
 
 /**
- * @brief 读取辅助计算结果。
- * @param col_idx 索引值。
- * @param idx0 索引值。
+ * @brief 取环形缓冲第 ri 个采样并映射为屏幕 Y 坐标。
  * @param obj 目标控件对象指针。
+ * @param ri 环形缓冲索引。
  * @param by 绘制区域起始 Y 坐标。
  * @param bh 绘制区域高度（像素）。
- * @return 返回对应计算结果。
+ * @return 屏幕 Y 坐标。
  */
 static __inline int32_t _get_sy_at(const we_chart_obj_t *obj, uint16_t ri,
                                    int16_t by, int16_t bh)
@@ -337,12 +336,13 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 在当前 PFB 裁剪区内绘制一条竖向网格线（带裁剪与淡入混色）。
  * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x 目标区域左上角 X 坐标。
- * @param y0 起始 Y 坐标。
- * @param y1 结束 Y 坐标。
- * @param color 目标颜色值。
+ * @param x 网格线所在的 X 坐标。
+ * @param y0 网格线起始 Y 坐标。
+ * @param y1 网格线结束 Y 坐标。
+ * @param color 网格线颜色值。
+ * @param alpha 混色 alpha（>=250 时直接覆盖，否则随整体透明度混色）。
  * @return 无。
  */
 static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t y1, colour_t color, uint8_t alpha)
@@ -382,12 +382,13 @@ static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 在当前 PFB 裁剪区内绘制一条横向网格线（带裁剪与淡入混色）。
  * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x0 起始 X 坐标。
- * @param x1 结束 X 坐标。
- * @param y 目标区域左上角 Y 坐标。
- * @param color 目标颜色值。
+ * @param x0 网格线起始 X 坐标。
+ * @param x1 网格线结束 X 坐标。
+ * @param y 网格线所在的 Y 坐标。
+ * @param color 网格线颜色值。
+ * @param alpha 混色 alpha（>=250 时直接覆盖，否则随整体透明度混色）。
  * @return 无。
  */
 static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_t y, colour_t color, uint8_t alpha)
@@ -426,12 +427,14 @@ static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 按预计算偏移绘制全部行/列网格线。
  * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param obj 目标控件对象指针（提供预计算的网格分割点偏移）。
  * @param bx 绘制区域起始 X 坐标。
  * @param by 绘制区域起始 Y 坐标。
  * @param bw 绘制区域宽度（像素）。
  * @param bh 绘制区域高度（像素）。
+ * @param alpha 网格线混色 alpha（随整体透明度淡入淡出）。
  * @return 无。
  */
 static void _chart_draw_grid(we_lcd_t *lcd, const we_chart_obj_t *obj,
@@ -467,9 +470,9 @@ static void _chart_draw_grid(we_lcd_t *lcd, const we_chart_obj_t *obj,
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 在当前列内绘制波形主体（实心覆盖区间，按 a_solid 混色）。
  * @param obj 目标控件对象指针。
- * @param cb 回调函数指针。
+ * @param cb 当前列在 PFB 中的基地址（colour_t*）。
  * @param pfb_w PFB 行跨度（像素）。
  * @param pfb_y0 PFB 起始 Y 坐标。
  * @param clip_y0 本次绘制裁剪起始 Y。
@@ -508,9 +511,9 @@ static void _chart_draw_wave_body(we_chart_obj_t *obj,
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 在波形主体上下各绘制柔边（按层级递减 alpha 混色）。
  * @param obj 目标控件对象指针。
- * @param cb 回调函数指针。
+ * @param cb 当前列在 PFB 中的基地址（colour_t*）。
  * @param pfb_w PFB 行跨度（像素）。
  * @param pfb_y0 PFB 起始 Y 坐标。
  * @param clip_y0 本次绘制裁剪起始 Y。
@@ -558,9 +561,9 @@ static void _chart_draw_wave_feather(we_chart_obj_t *obj,
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制局部内容。
+ * @brief 绘制单列波形：先画主体再画上下柔边。
  * @param obj 目标控件对象指针。
- * @param cb 回调函数指针。
+ * @param cb 当前列在 PFB 中的基地址（colour_t*）。
  * @param pfb_w PFB 行跨度（像素）。
  * @param pfb_y0 PFB 起始 Y 坐标。
  * @param clip_y0 本次绘制裁剪起始 Y。

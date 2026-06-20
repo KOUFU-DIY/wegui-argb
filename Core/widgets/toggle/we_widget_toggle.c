@@ -16,17 +16,6 @@ static void _toggle_draw_cb(void *ptr);
  * @return 返回状态标志（1 有效，0 无效）。
  */
 static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
-#if WE_TOGGLE_USE_ANIM
-
-/**
- * @brief 周期回调中按时间片推进动画状态。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针。
- * @param elapsed_ms 本次调度经过的毫秒数。
- * @return 无。
- */
-#endif
-
 static const we_class_t _toggle_class = {
     .draw_cb  = _toggle_draw_cb,
     .event_cb = _toggle_event_cb,
@@ -128,7 +117,7 @@ static void _toggle_anim_step_cb(void *owner, uint16_t elapsed_ms)
  *          └──────────────────────────┘
  *
  * 轨道为全胶囊形（radius = h/2），滑块为圆形（radius = thumb_d/2）。
- * 动画推进由 GUI 内部共享 task 统一驱动，
+ * 动画推进由中央动画引擎（we_anim_t，链入 lcd->anim_head，不占 GUI task 槽）驱动，
  * draw_cb 仅根据当前 anim_step 绘制，不修改任何状态、不标脏。
  * -------------------------------------------------------------------------- */
 
@@ -219,7 +208,7 @@ colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
     }
 
     /* draw_cb 仅负责按当前 anim_step 绘制，不推进状态、不标脏。
-     * 动画推进由 GUI 内部共享 task 完成，
+     * 动画推进由中央动画引擎（we_anim_t / lcd->anim_head）完成，
      * 因此本帧脏矩形会在 flush 之前登记，不会被同帧 clear 掉。 */
 }
 
@@ -315,7 +304,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置开关状态，立即跳变到目标位置并取消在途过渡动画。
  * @param obj 目标控件对象指针。
  * @param checked 目标勾选状态（0 未选中，非 0 选中）。
  * @return 无。
@@ -396,9 +385,9 @@ void we_toggle_obj_delete(we_toggle_obj_t *obj)
 }
 
 /**
- * @brief 执行 we_toggle_is_checked。
+ * @brief 查询当前开关状态。
  * @param obj 目标控件对象指针。
- * @return 1 表示命中，0 表示未命中。
+ * @return 1=开，0=关或 obj 为 NULL。
  */
 uint8_t we_toggle_is_checked(const we_toggle_obj_t *obj)
 {

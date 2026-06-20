@@ -59,13 +59,6 @@ typedef struct we_flash_font_obj_s
 
 /* --------------------------------------------------------------------------
  * Face 初始化：静态缓冲版（零 malloc）
- *
- * @param face            待初始化的字体描述符
- * @param lcd             已绑定 storage_read_cb 的 LCD 上下文
- * @param handle          由 font2c external 元信息 + 外挂地址组成的运行时句柄
- * @param glyph_buf       用户提供的单字形点阵 scratch 缓冲
- * @param glyph_buf_size  glyph_buf 字节数；至少要能容纳 1 行字模数据，运行时按 buffer 大小分块读画
- * @return 1 成功，0 失败（元信息非法 / blob 头错误 / 缓冲不足）
  * -------------------------------------------------------------------------- */
 
 /**
@@ -74,8 +67,8 @@ typedef struct we_flash_font_obj_s
  * @param lcd GUI 运行时 LCD；要求已绑定 storage_read_cb 用于从外部存储读字形数据。
  * @param handle font2c 导出的运行时句柄，提供字体元信息与 blob 地址。
  * @param glyph_buf 用户提供的字形流式读取缓冲区。
- * @param glyph_buf_size glyph_buf 的容量（字节），需至少容纳最大字形的一行位图数据。
- * @return 1 表示初始化成功，0 表示参数/格式校验失败。
+ * @param glyph_buf_size glyph_buf 的容量（字节），需至少容纳最大字形的一行位图数据，运行时按该缓冲大小分块读取并绘制。
+ * @return 1 表示初始化成功，0 表示参数/格式校验失败（元信息非法 / blob 头错误 / 缓冲不足）。
  */
 uint8_t we_flash_font_face_init(we_flash_font_face_t *face,
                                 we_lcd_t *lcd,

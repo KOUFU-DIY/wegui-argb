@@ -1,11 +1,12 @@
 /**
  * @file  demo_msgbox.c
- * @brief 顶部滑入消息框演示
+ * @brief 消息框（msgbox）淡入/淡出演示
  *
  * 演示内容：
  * 1. 自动轮换单按钮和双按钮消息框
- * 2. 状态行显示当前自动流程阶段
- * 3. 右上角 FPS
+ * 2. 显示/隐藏使用透明度淡入/淡出过渡，面板固定停靠不移动
+ * 3. 状态行显示当前自动流程阶段
+ * 4. 右上角 FPS
  */
 
 #include "simple_widget_demos.h"
@@ -108,7 +109,7 @@ void we_msgbox_simple_demo_init(we_lcd_t *lcd)
                       "FPS", we_font_consolas_18,
                       RGB888TODEV(120, 230, 205), 255);
     we_label_obj_init(&popup_hint, lcd, 10, 32,
-                      "auto trigger | top-in", we_font_consolas_18,
+                      "auto trigger | fade", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
 
     strncpy(popup_status_buf, "WAIT: auto trigger msgbox_ok", sizeof(popup_status_buf) - 1U);

@@ -270,7 +270,7 @@ void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
 #endif
 }
 
-/* RGB888 刷屏: DMA 8 位推流 (原始字节流直发) */
+/* RGB888 刷屏: 8 位轮询推流 (原始字节流直发，等 DMA 空闲后逐字节发) */
 void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
 {
     if (gram == NULL)

@@ -621,13 +621,15 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 - `img_RGB186`, `img_RGB345`, `img_RGB128`, `img_RGB129`
 - `img_BG`
 
-### Existing Demos (demo_id for simulator)
+### Existing Demos (DEMO_ID)
 
-Simulator numbering skips retired id 9 (former `key` demo). STM32 entries omit the
-gap, so STM32 ids from checkbox onward are one less than the simulator ids below.
+Numbering is unified across all three targets — `1..21` are identical. The simulator
+additionally defines `0 = showcase` (simulator-only, needs 800×480). Select a demo by
+editing the `#define DEMO_ID` line near the top of `main`.
 
 | ID | Demo |
 |----|------|
+| 0 | showcase (simulator-only, 800×480) |
 | 1 | label |
 | 2 | btn |
 | 3 | img |
@@ -636,19 +638,19 @@ gap, so STM32 ids from checkbox onward are one less than the simulator ids below
 | 6 | group |
 | 7 | slideshow |
 | 8 | concentric arc |
-| 10 | checkbox |
-| 11 | label_ex |
-| 12 | chart |
-| 13 | toggle |
-| 14 | progress |
-| 15 | msgbox |
-| 16 | flash img |
-| 17 | flash font |
-| 18 | slider |
-| 19 | scroll_panel |
-| 20 | dropdown |
-| 21 | stepper |
-| 22 | indicator |
+| 9 | checkbox |
+| 10 | label_ex |
+| 11 | chart |
+| 12 | toggle |
+| 13 | progress |
+| 14 | msgbox |
+| 15 | flash img |
+| 16 | flash font |
+| 17 | slider |
+| 18 | scroll_panel |
+| 19 | dropdown |
+| 20 | stepper |
+| 21 | indicator |
 
 ---
 

@@ -112,7 +112,7 @@ void lcd_send_1Cmd(uint8_t dat)
     LCD_CS_Set();
 }
 
-/* 发送命令帧：p[0] 为命令，p[1..] 为跟随数据 */
+/* 发送命令帧：TFT 分支按 p[0]=命令、p[1..]=数据(DC 切换)发送；OLED/GRAY8 分支整帧均作命令(DC=0)连续发送 */
 void lcd_send_nCmd(uint8_t *p, uint16_t num)
 {
 	//-----------------OLED类型屏幕-------------------

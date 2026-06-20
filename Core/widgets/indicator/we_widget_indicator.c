@@ -19,9 +19,8 @@ static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
                                    we_indev_data_t *data);
 
 /**
- * @brief 每对象周期任务，按时间片推进亮灭过渡动画。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param user_data 任务回调用户数据指针（指向控件对象）。
+ * @brief 中央动画引擎回调，按时间片推进亮灭过渡动画。
+ * @param owner 控件对象指针（we_anim_t.owner 透传）。
  * @param elapsed_ms 本次调度经过的毫秒数。
  * @return 无。
  */
@@ -468,7 +467,7 @@ void we_indicator_set_opacity(we_indicator_obj_t *obj, uint8_t opacity)
 }
 
 /**
- * @brief 删除指示灯控件并从对象链表/任务系统移除。
+ * @brief 删除指示灯控件：摘除中央动画链节点并从对象链表移除。
  * @param obj 指示灯控件对象指针。
  * @return 无。
  */

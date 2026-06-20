@@ -96,7 +96,7 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
                            colour_t bg_color, uint8_t opacity);
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 释放控件运行时状态，并把动画节点从中央动画链摘除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */

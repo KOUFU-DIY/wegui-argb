@@ -63,7 +63,7 @@ static void _cb_invalidate_box(we_checkbox_obj_t *obj)
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param bx 绘制区域起始 X 坐标。
  * @param by 绘制区域起始 Y 坐标。
- * @param size 数据长度（字节）。
+ * @param size 方框边长（像素），对勾按其百分比定位。
  * @param color 目标颜色值。
  * @param opacity 不透明度（0~255）。
  * @return 无。
@@ -196,7 +196,7 @@ static uint8_t _checkbox_event_cb(void *ptr, we_event_t event, we_indev_data_t *
 /* ---- 公开 API ---- */
 
 /**
- * @brief 内部辅助：cb_recalc_size。
+ * @brief 依据方框尺寸与文本宽度/行高重算控件包围盒 base.w/base.h。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -271,7 +271,7 @@ we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置对象属性并同步刷新状态。
+ * @brief 设置勾选状态并刷新方框区域（值未变时直接返回）。
  * @param obj 目标控件对象指针。
  * @param checked 目标勾选状态（0 未选中，非 0 选中）。
  * @return 无。
@@ -319,9 +319,9 @@ void we_checkbox_set_changed_cb(we_checkbox_obj_t *obj, we_checkbox_changed_cb_t
 }
 
 /**
- * @brief 执行 we_checkbox_is_checked。
+ * @brief 查询当前是否勾选。
  * @param obj 目标控件对象指针。
- * @return 1 表示命中，0 表示未命中。
+ * @return 1=已勾选，0=未勾选或 obj 为 NULL。
  */
 uint8_t we_checkbox_is_checked(const we_checkbox_obj_t *obj)
 {
