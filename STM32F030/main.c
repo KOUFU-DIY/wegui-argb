@@ -64,7 +64,7 @@ int main(void)
      * 20 = stepper
      * 21 = indicator
      */
-#define DEMO_ID (14)
+#define DEMO_ID (8)
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
 #if (DEMO_ID == 1)
