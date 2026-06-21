@@ -6,7 +6,7 @@
 
 /* ----------------------------- 版本 ----------------------------- */
 /* 框架版本号（字符串），与 README / 对外发布保持一致 */
-#define WE_GUI_VERSION "V0.2"
+#define WE_GUI_VERSION "V0.2.1"
 
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
