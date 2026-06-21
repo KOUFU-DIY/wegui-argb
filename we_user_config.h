@@ -4,6 +4,10 @@
 /* GUI 统一用户配置入口。
  * Core 层和各控件层都优先从这里读取可调宏，避免后续直接改控件头文件。 */
 
+/* ----------------------------- 版本 ----------------------------- */
+/* 框架版本号（字符串），与 README / 对外发布保持一致 */
+#define WE_GUI_VERSION "V0.2"
+
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
 
@@ -12,7 +16,7 @@
 #define LCD_DEEP (DEEP_RGB565)
 
 /* 屏幕宽高 */
-#define SCREEN_WIDTH (240)
+#define SCREEN_WIDTH (280)
 #define SCREEN_HEIGHT (240)
 
 /* 屏幕显存
@@ -36,7 +40,7 @@
 /* 脏矩形调试开关
  * 0: 关闭
  * 1: 打开，脏区会用红框标记 */
-#define WE_CFG_DEBUG_DIRTY_RECT (0)
+#define WE_CFG_DEBUG_DIRTY_RECT (1)
 
 /* 控件压力性能测试开关
  * 0: 关闭
