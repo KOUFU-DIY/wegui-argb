@@ -1,8 +1,8 @@
-# WeGui-ARGB · V0.2
+# WeGui-ARGB · V0.2.1
 
 轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供 SDL2 PC 模拟器。
 
-> 当前版本 **V0.2**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
+> 当前版本 **V0.2.1**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
 
 ## 特性
 
