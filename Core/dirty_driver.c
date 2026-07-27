@@ -303,6 +303,27 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
     int16_t x1 = (x + w - 1 > sw - 1) ? sw - 1 : x + w - 1;
     int16_t y1 = (y + h - 1 > sh - 1) ? sh - 1 : y + h - 1;
 
+    /* --- 刷新区域像素对齐扩张（WE_LCD_FLUSH_ALIGN_X/Y，默认 1 时整段不编译） ---
+     * 为什么在这里（渲染前）扩张，而不是推屏时在端口里对齐窗口：
+     * we_push_pfb 对每个脏矩形只调一次 set_addr 圈定整块窗口，随后按 PFB 行
+     * 容量分块重绘并流式推送——像素流必须与窗口逐像素严格对应。若拖到 flush
+     * 阶段才扩窗口，扩出的边缘列/行没有任何人渲染过，端口凑不出这些像素。
+     * 在脏矩形入库时扩张，扩出的边缘就随本矩形整块走 _we_engine_refresh 正常
+     * 重绘，窗口与像素流天然一致。
+     * 位置约束：必须在屏幕钳制之后（SCREEN_WIDTH/HEIGHT 已被 we_gui_config.h
+     * 校验为对齐值的整数倍，钳到屏幕边缘的坐标向外取整后不会再越界），
+     * 且在合并逻辑之前（对齐矩形之间的 union / trim 运算封闭保持对齐，
+     * 管理器内所有矩形因此恒为对齐矩形）。
+     * 含端点表示法下：x0/y0 向下取整到对齐倍数，x1/y1 向上取整到对齐倍数-1。 */
+#if (WE_LCD_FLUSH_ALIGN_X > 1)
+    x0 = (int16_t)(x0 & ~(WE_LCD_FLUSH_ALIGN_X - 1));
+    x1 = (int16_t)(x1 | (WE_LCD_FLUSH_ALIGN_X - 1));
+#endif
+#if (WE_LCD_FLUSH_ALIGN_Y > 1)
+    y0 = (int16_t)(y0 & ~(WE_LCD_FLUSH_ALIGN_Y - 1));
+    y1 = (int16_t)(y1 | (WE_LCD_FLUSH_ALIGN_Y - 1));
+#endif
+
     we_rect_t new_r = {x0, y0, x1, y1};
 #endif
 
@@ -342,6 +363,9 @@ void we_dirty_invalidate(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, i
  * @param eh 传入：排除区域高度
  * @return 无
  * @note 该函数只在新增 dirty 时拆分 bbox - hole；不会从已有 dirty list 中删除区域。
+ *       拆出的每个子矩形都经 we_dirty_invalidate 提交，刷新对齐扩张
+ *       （WE_LCD_FLUSH_ALIGN_X/Y）在那里统一收口；对齐扩张可能让子矩形
+ *       重新覆盖空洞边缘，属预期的少量过绘，不影响正确性。
  */
 void we_dirty_invalidate_exclude(we_dirty_mgr_t *mgr, int16_t x, int16_t y, int16_t w, int16_t h,
                                  int16_t ex, int16_t ey, int16_t ew, int16_t eh)

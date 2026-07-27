@@ -6,7 +6,7 @@
 
 /* ----------------------------- 版本 ----------------------------- */
 /* 框架版本号（字符串），与 README / 对外发布保持一致 */
-#define WE_GUI_VERSION "V0.2.1"
+#define WE_GUI_VERSION "V0.2.2"
 
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
@@ -40,7 +40,7 @@
 /* 脏矩形调试开关
  * 0: 关闭
  * 1: 打开，脏区会用红框标记 */
-#define WE_CFG_DEBUG_DIRTY_RECT (1)
+#define WE_CFG_DEBUG_DIRTY_RECT (0)
 
 /* 控件压力性能测试开关
  * 0: 关闭
@@ -51,11 +51,6 @@
 /* 1: 保留索引 QOI 解码
  * 0: 裁掉索引 QOI 相关绘图函数和图片控件分发路径 */
 #define WE_CFG_ENABLE_INDEXED_QOI (1)
-
-/* ------------------------- GUI 周期任务配置 ------------------------- */
-/* GUI 内部任务槽数量上限
- * 说明：这组槽位只给 GUI 内部周期任务使用；控件动画走中央动画引擎(we_anim_t)，不占此槽。 */
-#define WE_CFG_GUI_TASK_MAX_NUM (4)
 
 /* --------------------------- GUI 定时器配置 --------------------------- */
 /* 面向用户开放的 GUI 定时器数量上限 */
@@ -70,6 +65,37 @@
 /* 滑动手势识别阈值（像素）
  * 位移超过此值才判定为 swipe，而不是普通点击。 */
 #define WE_CFG_SWIPE_THRESHOLD (30)
+
+/* ----------------------- 聚焦与按键导航 ----------------------- */
+/* 全局聚焦 + 按键导航总开关
+ * 0: 关闭，键注入/焦点管理/矩形光标全部编译剔除，纯触摸工程零成本
+ * 1: 打开，端口经 we_gui_key_press/release（双沿）或 we_gui_key_inject
+ *    （tap）注入 上/下/左/右/前/后/OK/返回 语义键控制焦点：方向键按
+ *    包围盒中心空间四向就近移动、前后键线性环序，OK 进入容器或触发
+ *    控件（按住期间保持按压态，松开触发），BACK 退出容器，顶层再按
+ *    清除焦点 */
+#define WE_CFG_ENABLE_KEY_INPUT (1)
+
+/* 聚焦裁剪子开关（默认全开；面向极低配产品的按需瘦身）
+ * WE_CFG_FOCUS_EDIT   0=剔除编辑态：值类控件（slider/stepper/roller/list）
+ *                     的按键支持整体关闭，只留按钮/开关类点击语义
+ * WE_CFG_FOCUS_NESTED 0=剔除容器下钻/上退：焦点环只含顶层可聚焦控件
+ * 另有逐控件开关 WE_BTN_USE_KEY / WE_CHECKBOX_USE_KEY / WE_TOGGLE_USE_KEY /
+ * WE_INDICATOR_USE_KEY / WE_SLIDER_USE_KEY / WE_STEPPER_USE_KEY /
+ * WE_ROLLER_USE_KEY / WE_LIST_USE_KEY / WE_SCROLL_PANEL_USE_KEY /
+ * WE_DROPDOWN_USE_KEY（默认 1，置 0 单独裁掉该控件的按键回调与
+ * 可聚焦性，定义处见各控件头文件） */
+// #define WE_CFG_FOCUS_EDIT (0)
+// #define WE_CFG_FOCUS_NESTED (0)
+
+/* 焦点光标外观与手感（不定义时使用默认值） */
+// #define WE_CFG_FOCUS_CURSOR_THICKNESS (2) /* 光标框线宽（像素） */
+// #define WE_CFG_FOCUS_CURSOR_GAP (2)       /* 光标框与控件包围盒的间隙（像素） */
+// #define WE_CFG_FOCUS_CURSOR_R (92)        /* 光标颜色 RGB888 */
+// #define WE_CFG_FOCUS_CURSOR_G (181)
+// #define WE_CFG_FOCUS_CURSOR_B (255)
+// #define WE_CFG_FOCUS_FLASH_MS (90U)       /* OK 最短按压窗口（毫秒，≤255） */
+// #define WE_CFG_KEY_QUEUE_LEN (4)          /* 语义键环形队列深度（2 的幂，容量=深度-1） */
 
 /* ------------------------ 外部储存接口 ------------------------ */
 /* 外部储存接口开关
@@ -92,12 +118,6 @@
  * 0: 所有按钮统一使用内置样式，更省 RAM
  * 1: 每个按钮保存一套独立样式，更灵活 */
 // #define WE_BTN_USE_CUSTOM_STYLE (0)
-
-/* 按钮圆角边框绘制模式
- * 0: 精细模式，观感更好
- * 1: 紧凑模式，代码更小
- * 当前默认边框厚度已取消，该开关主要保留兼容用途。 */
-// #define WE_BTN_DRAW_MODE (0)
 
 /* ------------------------- chart 控件 ------------------------- */
 /* 背景网格列数
@@ -227,6 +247,15 @@
 // #define WE_SLIDESHOW_CHILD_MAX (24)
 
 /* ---------------------- scroll_panel 控件 ---------------------- */
+/* 面板最多挂载的子控件数量 */
+// #define WE_SCROLL_PANEL_CHILD_MAX (24)
+
+/* 右缘滚动条宽度（像素） */
+// #define WE_SCROLL_PANEL_SCROLLBAR_W (4U)
+
+/* 判定为拖拽滚动的位移阈值（像素） */
+// #define WE_SCROLL_PANEL_DRAG_THRESHOLD (8)
+
 /* 是否启用滚动惯性
  * 0: 松手后立即停止
  * 1: 按释放瞬间速度继续滑行 */
@@ -267,11 +296,6 @@
 /* 进度条默认圆角半径；0 表示直角 */
 // #define WE_PROGRESS_RADIUS (8)
 
-/* 是否复用 btn 圆角皮肤绘制
- * 1: 复用 btn 的圆角边缘算法，过渡更平滑
- * 0: 使用通用 round rect 绘制 */
-// #define WE_PROGRESS_USE_BTN_SKIN (1)
-
 /* ------------------------- toggle 控件 ------------------------- */
 /* 是否启用拨动开关动画
  * 0: 直接跳变
@@ -306,5 +330,252 @@
  * 0: 不变暗
  * 255: 变成全黑 */
 // #define WE_TOGGLE_PRESS_DARKEN (40)
+
+/* ------------------------- slider 控件 ------------------------- */
+/* 轨道厚度（像素） */
+// #define WE_SLIDER_TRACK_THICKNESS (8U)
+
+/* 滑块直径（像素） */
+// #define WE_SLIDER_THUMB_SIZE (22U)
+
+/* 是否编译竖直方向滑条支持
+ * 0: 仅水平，省代码
+ * 1: 水平 + 竖直 */
+// #define WE_SLIDER_ENABLE_VERTICAL (1)
+
+/* ------------------------- stepper 控件 ------------------------- */
+/* 按住连续步进：首次重复前的延迟（STAY 次数，约 16ms/次 → 25≈400ms） */
+// #define WE_STEPPER_HOLD_DELAY (25U)
+
+/* 按住连续步进：达到延迟后每隔多少次 STAY 再步进一次（7≈112ms） */
+// #define WE_STEPPER_HOLD_INTERVAL (7U)
+
+/* 支持的最大小数位数（决定内部查表与缓冲大小） */
+// #define WE_STEPPER_MAX_DECIMALS (4U)
+
+/* ----------------------- indicator 控件 ----------------------- */
+/* 是否编译亮灭过渡动画（运行时仍可单独关闭某盏灯） */
+// #define WE_INDICATOR_USE_ANIM (1)
+
+/* 默认动画时长（毫秒），可 we_indicator_set_anim 运行时修改 */
+// #define WE_INDICATOR_ANIM_MS (250U)
+
+/* 光晕相对核心圆的额外半径占比（256 制） */
+// #define WE_INDICATOR_GLOW_RATIO (80U)
+
+/* 光晕峰值透明度（0~255） */
+// #define WE_INDICATOR_GLOW_ALPHA (120U)
+
+/* 点亮颜色 RGB */
+// #define WE_INDICATOR_ON_R (52)
+// #define WE_INDICATOR_ON_G (199)
+// #define WE_INDICATOR_ON_B (89)
+
+/* 熄灭颜色 RGB */
+// #define WE_INDICATOR_OFF_R (60)
+// #define WE_INDICATOR_OFF_G (60)
+// #define WE_INDICATOR_OFF_B (66)
+
+/* ------------------------ dropdown 控件 ------------------------ */
+/* 展开列表默认最多可见行数 */
+// #define WE_DROPDOWN_DEF_MAX_VISIBLE (4)
+
+/* 滚动条空闲淡出：全显保持时长（毫秒） */
+// #define WE_DROPDOWN_SB_HOLD_MS (600U)
+
+/* 滚动条空闲淡出：渐隐时长（毫秒） */
+// #define WE_DROPDOWN_SB_FADE_MS (400U)
+
+/* 滚动条常驻最低透明度（0~255） */
+// #define WE_DROPDOWN_SB_IDLE_ALPHA (40U)
+
+/* 拖拽允许的最大越界像素（橡皮筋过冲） */
+// #define WE_DROPDOWN_OVERSCROLL_LIMIT (24)
+
+/* 回弹拉力除数（越小回弹越强） */
+// #define WE_DROPDOWN_REBOUND_PULL_DIV (3)
+
+/* 回弹阶段单帧最大位移 */
+// #define WE_DROPDOWN_REBOUND_MAX_STEP (24)
+
+/* -------------------------- line 控件 -------------------------- */
+/* 是否编译线段动画（0 时 we_line_anim_* 退化为立即生效 stub） */
+// #define WE_LINE_USE_ANIM (1)
+
+/* 默认动画时长（毫秒） */
+// #define WE_LINE_ANIM_MS (300U)
+
+/* 默认线宽（像素） */
+// #define WE_LINE_DEF_WIDTH (3U)
+
+/* 默认线色 RGB */
+// #define WE_LINE_DEF_R (88)
+// #define WE_LINE_DEF_G (166)
+// #define WE_LINE_DEF_B (240)
+
+/* -------------------------- box 控件 -------------------------- */
+/* 是否编译填充色/透明度动画（默认关；0 时 we_box_anim_* 为立即生效 stub） */
+// #define WE_BOX_USE_ANIM (0)
+
+/* 默认动画时长（毫秒，仅 USE_ANIM=1 时有效） */
+// #define WE_BOX_ANIM_MS (300U)
+
+/* 默认圆角半径（像素） */
+// #define WE_BOX_DEF_RADIUS (8U)
+
+/* 默认填充色 RGB */
+// #define WE_BOX_DEF_R (38)
+// #define WE_BOX_DEF_G (46)
+// #define WE_BOX_DEF_B (60)
+
+/* ------------------------- gauge 控件 ------------------------- */
+/* 默认起始角 / 扫过角（512 步制，WE_DEG 换算） */
+// #define WE_GAUGE_DEF_START (WE_DEG(135))
+// #define WE_GAUGE_DEF_SWEEP (WE_DEG(270))
+
+/* 默认刻度数量与几何（长度/线宽均为像素） */
+// #define WE_GAUGE_DEF_TICK_CNT (11U)
+// #define WE_GAUGE_DEF_TICK_LEN (9U)
+// #define WE_GAUGE_TICK_W (2U)
+
+/* 刻度数量上限（决定端点缓存数组大小） */
+// #define WE_GAUGE_TICK_MAX (16U)
+
+/* 判定为小表盘的直径阈值（小表盘自动精简刻度） */
+// #define WE_GAUGE_SMALL_SIZE (40)
+
+/* 指针线宽 / 中心帽直径（像素） */
+// #define WE_GAUGE_DEF_PTR_W (4U)
+// #define WE_GAUGE_DEF_CAP_W (10U)
+
+/* 指针长度占半径比（Q8：256 = 到达刻度环） */
+// #define WE_GAUGE_PTR_LEN_Q8 (184)
+
+/* 刻度颜色 RGB */
+// #define WE_GAUGE_TICK_R (148)
+// #define WE_GAUGE_TICK_G (162)
+// #define WE_GAUGE_TICK_B (184)
+
+/* 指针颜色 RGB */
+// #define WE_GAUGE_PTR_R (255)
+// #define WE_GAUGE_PTR_G (96)
+// #define WE_GAUGE_PTR_B (84)
+
+/* -------------------------- list 控件 -------------------------- */
+/* 行内上下留白（行高 = 字体行高 + 2*该值） */
+// #define WE_LIST_ROW_PAD (7U)
+
+/* 行文字左缩进（像素） */
+// #define WE_LIST_TEXT_PAD (10)
+
+/* 面板默认圆角半径 */
+// #define WE_LIST_DEF_RADIUS (10U)
+
+/* 判定为拖拽滚动的位移阈值（像素） */
+// #define WE_LIST_DRAG_THRESHOLD (6)
+
+/* 惯性摩擦分子/分母（每帧速度衰减到 NUM/DEN） */
+// #define WE_LIST_INERTIA_NUM (7)
+// #define WE_LIST_INERTIA_DEN (8)
+
+/* 快速轻扫（无 STAY）测速时间片（毫秒） */
+// #define WE_LIST_SWIPE_SLICE_MS (128)
+
+/* 拖拽允许的最大越界像素（橡皮筋过冲） */
+// #define WE_LIST_OVERSCROLL_LIMIT (24)
+
+/* 回弹拉力除数 / 单帧最大位移 */
+// #define WE_LIST_REBOUND_PULL_DIV (3)
+// #define WE_LIST_REBOUND_MAX_STEP (24)
+
+/* 行底分隔线透明度（0~255） */
+// #define WE_LIST_SEP_OPA (46U)
+
+/* 按压高亮条左右内缩与圆角 */
+// #define WE_LIST_PRESS_INSET (2)
+// #define WE_LIST_PRESS_RADIUS (6U)
+
+/* 滚动条宽度 / 右缘间距（像素） */
+// #define WE_LIST_SB_WIDTH (4)
+// #define WE_LIST_SB_MARGIN (3)
+
+/* 滚动条峰值透明度 / 全显保持时长 / 渐隐时长 / 常驻最低透明度 */
+// #define WE_LIST_SB_OPA (255U)
+// #define WE_LIST_SB_HOLD_MS (600U)
+// #define WE_LIST_SB_FADE_MS (400U)
+// #define WE_LIST_SB_IDLE_ALPHA (80U)
+
+/* ------------------------- roller 控件 ------------------------- */
+/* 默认可见行数（奇数；偶数会自动 +1） */
+// #define WE_ROLLER_DEF_VISIBLE_ROWS (5U)
+
+/* 行内上下留白（行高 = 字体行高 + 2*该值） */
+// #define WE_ROLLER_ROW_PAD (6U)
+
+/* 面板圆角 / 中心高亮条圆角与左右内缩 */
+// #define WE_ROLLER_PANEL_RADIUS (10U)
+// #define WE_ROLLER_BAR_RADIUS (8U)
+// #define WE_ROLLER_BAR_INSET (4)
+
+/* 判定为拖拽的位移阈值（像素） */
+// #define WE_ROLLER_DRAG_THRESHOLD (3)
+
+/* 吸附动画：拉力除数 / 阻尼分子分母 / 单帧最大位移 */
+// #define WE_ROLLER_SNAP_PULL_DIV (3)
+// #define WE_ROLLER_SNAP_DAMP_NUM (3)
+// #define WE_ROLLER_SNAP_DAMP_DEN (4)
+// #define WE_ROLLER_SNAP_MAX_STEP (24)
+
+/* 惯性甩动：触发速度阈值（px/周期）与落点外推系数（NUM/DEN） */
+// #define WE_ROLLER_FLING_MIN_V (4)
+// #define WE_ROLLER_FLING_PROJ_NUM (6)
+// #define WE_ROLLER_FLING_PROJ_DEN (1)
+
+/* 行宽缓存槽数（2 的幂，≥ 可见行数 + 2） */
+// #define WE_ROLLER_WCACHE_SIZE (16U)
+
+/* 字体 y-bbox 常量扫描的最多选项数 */
+// #define WE_ROLLER_BBOX_SCAN_MAX (32U)
+
+/* 滚动标脏列带的左右余量（像素） */
+// #define WE_ROLLER_DIRTY_PAD (4)
+
+/* ------------------------ marquee 控件 ------------------------ */
+/* 默认滚动速度（像素/秒），可 we_marquee_set_speed 运行时修改 */
+// #define WE_MARQUEE_DEF_SPEED (30U)
+
+/* 默认接缝停顿时长（毫秒） */
+// #define WE_MARQUEE_DEF_PAUSE (800U)
+
+/* 无缝循环两段文本之间的间隔（像素） */
+// #define WE_MARQUEE_GAP (40)
+
+/* 上下留白（控件高 = 字体行高 + 2*该值） */
+// #define WE_MARQUEE_PAD_Y (2)
+
+/* 速度上限（像素/秒） */
+// #define WE_MARQUEE_SPEED_MAX (2000U)
+
+/* ------------------------- toast 控件 ------------------------- */
+/* 左右边距（控件宽 = 屏宽 - 2*该值） */
+// #define WE_TOAST_MARGIN_X (10)
+
+/* 停靠位置：滑入后的顶部 Y */
+// #define WE_TOAST_DOCK_Y (8)
+
+/* 文字上下留白（控件高 = 字体行高 + 2*该值） */
+// #define WE_TOAST_PAD_Y (8)
+
+/* 文字左右内缩（超宽截断计算用） */
+// #define WE_TOAST_TEXT_PAD (4)
+
+/* 滑入/滑出动画时长（毫秒） */
+// #define WE_TOAST_ANIM_MS (200U)
+
+/* 横幅圆角半径 */
+// #define WE_TOAST_RADIUS (8U)
+
+/* 默认停留时长（毫秒，show 传 0 时使用） */
+// #define WE_TOAST_DEF_DURATION (1500U)
 
 #endif

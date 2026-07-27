@@ -340,7 +340,7 @@
               <MiscControls>--no-multibyte-chars</MiscControls>
               <Define>USE_STDPERIPH_DRIVER,STM32F030,WE_PLATFORM_STM32F030,USE_DEFAULT_TIMEOUT_CALLBACK</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..;..\;..\Libraries\CMSIS\Device\ST\STM32F0xx\Include;..\Libraries\STM32F0xx_StdPeriph_Driver\inc;..\Libraries\CMSIS\Include;..\Lcd_Port;..\..\Core;..\..\Core\widgets;..\..\Demo;..\..\tool\font2c\output;..\..\tool\bin2c\output</IncludePath>
+              <IncludePath>..\..;..\;..\Libraries\CMSIS\Device\ST\STM32F0xx\Include;..\Libraries\STM32F0xx_StdPeriph_Driver\inc;..\Libraries\CMSIS\Include;..\Lcd_Port;..\..\Core;..\..\Core\widgets;..\..\Demo;..\..\Demo\preview;..\..\tool\res\out\font;..\..\tool\res\out</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -982,9 +982,9 @@
               <FilePath>..\..\Core\dirty_driver.c</FilePath>
             </File>
             <File>
-              <FileName>image_res.c</FileName>
+              <FileName>res_images.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\image_res.c</FilePath>
+              <FilePath>..\..\tool\res\out\res_images.c</FilePath>
             </File>
             <File>
               <FileName>we_font_text.c</FileName>
@@ -1070,6 +1070,41 @@
               <FileName>we_widget_indicator.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets\indicator\we_widget_indicator.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\line\we_widget_line.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_box.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\box\we_widget_box.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_gauge.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\gauge\we_widget_gauge.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_list.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\list\we_widget_list.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_roller.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\roller\we_widget_roller.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_marquee.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\marquee\we_widget_marquee.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_toast.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\toast\we_widget_toast.c</FilePath>
             </File>
             <File>
               <FileName>we_widget_slider.c</FileName>
@@ -1207,6 +1242,41 @@
               <FilePath>..\..\Demo\demo_indicator.c</FilePath>
             </File>
             <File>
+              <FileName>demo_line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_line.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_box.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_box.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_gauge.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_gauge.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_list.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_list.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_roller.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_roller.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_marquee.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_marquee.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_toast.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_toast.c</FilePath>
+            </File>
+            <File>
               <FileName>demo_slider.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_slider.c</FilePath>
@@ -1221,40 +1291,55 @@
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_toggle.c</FilePath>
             </File>
+            <File>
+              <FileName>demo_focus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_focus.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_focus2.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_focus2.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
           <GroupName>we_tool_bin</GroupName>
           <Files>
             <File>
-              <FileName>arial_16_4bbp.h</FileName>
+              <FileName>demo_ascii_16.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\font2c\output\arial_16_4bbp.h</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_ascii_16.h</FilePath>
             </File>
             <File>
-              <FileName>arial_16_4bbp.c</FileName>
+              <FileName>demo_ascii_16.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\font2c\output\arial_16_4bbp.c</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_ascii_16.c</FilePath>
             </File>
             <File>
-              <FileName>msyh_24_2bbp_ascii_menu_mix.h</FileName>
+              <FileName>demo_ime_16.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\tool\res\out\font\demo_ime_16.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_cjk_24.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\font2c\output\msyh_24_2bbp_ascii_menu_mix.h</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_cjk_24.h</FilePath>
             </File>
             <File>
-              <FileName>msyh_24_2bbp_ascii_menu_mix.c</FileName>
+              <FileName>demo_cjk_24.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\font2c\output\msyh_24_2bbp_ascii_menu_mix.c</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_cjk_24.c</FilePath>
             </File>
             <File>
               <FileName>merged_bin.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\bin2c\output\merged_bin.h</FilePath>
+              <FilePath>..\..\tool\res\out\merged_bin.h</FilePath>
             </File>
             <File>
               <FileName>merged_bin.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\bin2c\output\merged_bin.c</FilePath>
+              <FilePath>..\..\tool\res\out\merged_bin.c</FilePath>
               <FileOption>
                 <CommonProperty>
                   <UseCPPCompiler>2</UseCPPCompiler>
@@ -1308,14 +1393,299 @@
               </FileOption>
             </File>
             <File>
-              <FileName>msyh_16_4bbp_ascii_menu_mix.h</FileName>
+              <FileName>demo_cjk_16.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\font2c\output\msyh_16_4bbp_ascii_menu_mix.h</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_cjk_16.h</FilePath>
             </File>
             <File>
-              <FileName>msyh_16_4bbp_ascii_menu_mix.c</FileName>
+              <FileName>demo_cjk_16.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\font2c\output\msyh_16_4bbp_ascii_menu_mix.c</FilePath>
+              <FilePath>..\..\tool\res\out\font\demo_cjk_16.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>we_widget_preview</GroupName>
+          <Files>
+            <File>
+              <FileName>we_widget_animimg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\animimg\we_widget_animimg.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_btnmatrix.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\btnmatrix\we_widget_btnmatrix.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_calendar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\calendar\we_widget_calendar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_canvas.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\canvas\we_widget_canvas.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_chart_bar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\chart_bar\we_widget_chart_bar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_colorwheel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\colorwheel\we_widget_colorwheel.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_hold_btn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\hold_btn\we_widget_hold_btn.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_pinyin_table.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin_table.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_pinyin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_ime_pinyin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_widget_ime_pinyin.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_imgbtn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\imgbtn\we_widget_imgbtn.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_joystick.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\joystick\we_widget_joystick.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_keyboard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\keyboard\we_widget_keyboard.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_knob.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\knob\we_widget_knob.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_logview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\logview\we_widget_logview.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_mask_group.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\mask_group\we_widget_mask_group.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_menu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\menu\we_widget_menu.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_mlabel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\mlabel\we_widget_mlabel.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_qr_encoder.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\qrcode\we_qr_encoder.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_qrcode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\qrcode\we_widget_qrcode.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_radio.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\radio\we_widget_radio.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_scale.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\scale\we_widget_scale.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_sevenseg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\sevenseg\we_widget_sevenseg.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_spectrum.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\spectrum\we_widget_spectrum.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_spinner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\spinner\we_widget_spinner.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_statusbar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\statusbar\we_widget_statusbar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_table.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\table\we_widget_table.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_tabview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\tabview\we_widget_tabview.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_textarea.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\textarea\we_widget_textarea.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>demo_preview</GroupName>
+          <Files>
+            <File>
+              <FileName>demo_animimg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_animimg.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_btnmatrix.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_btnmatrix.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_calendar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_calendar.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_canvas.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_canvas.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_chart_bar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_chart_bar.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_colorwheel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_colorwheel.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_hold_btn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_hold_btn.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_ime_pinyin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_ime_pinyin.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_imgbtn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_imgbtn.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_joystick.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_joystick.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_keyboard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_keyboard.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_knob.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_knob.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_logview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_logview.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_mask_group.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_mask_group.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_menu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_menu.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_mlabel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_mlabel.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_qrcode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_qrcode.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_radio.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_radio.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_scale.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_scale.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_sevenseg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_sevenseg.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_spectrum.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_spectrum.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_spinner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_spinner.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_statusbar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_statusbar.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_table.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_table.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_tabview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_tabview.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_textarea.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_textarea.c</FilePath>
             </File>
           </Files>
         </Group>

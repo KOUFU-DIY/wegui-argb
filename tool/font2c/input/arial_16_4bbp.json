@@ -8,11 +8,7 @@
   "render": {
     "bpp": 4
   },
-  "charset": {
-    "ranges": [
-      ["U+0020", "U+007E"]
-    ]
-  },
+  "charset": {},
   "deploy": {
     "mode": "internal"
   }

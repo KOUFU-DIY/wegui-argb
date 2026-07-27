@@ -15,10 +15,9 @@ include_directories(
     "../Core"
     "../Core/widgets"
     "../Demo"
-    "../Demo/img_ex_perf"
-    "../Demo/ex_flash_res"
-    "../tool/bin2c/output"
-    "../tool/font2c/output"
+    "../Demo/preview"
+    "../tool/res/out"
+    "../tool/res/out/font"
     "."
 )
 
@@ -58,19 +57,34 @@ set(DEMO_SOURCES
     "../Demo/demo_dropdown.c"
     "../Demo/demo_stepper.c"
     "../Demo/demo_indicator.c"
+    "../Demo/demo_line.c"
+    "../Demo/demo_box.c"
+    "../Demo/demo_gauge.c"
+    "../Demo/demo_list.c"
+    "../Demo/demo_roller.c"
+    "../Demo/demo_marquee.c"
+    "../Demo/demo_toast.c"
+    "../Demo/demo_focus.c"
+    "../Demo/demo_focus2.c"
     "../Demo/demo_showcase.c"
-    "../tool/font2c/output/arial_16_4bbp.c"
-    "../tool/font2c/output/msyh_16_4bbp_ascii_menu_mix.c"
-    "../tool/font2c/output/msyh_24_2bbp_ascii_menu_mix.c"
-    "../tool/bin2c/output/merged_bin.c"
+    "../tool/res/out/font/demo_ascii_16.c"
+    "../tool/res/out/font/demo_cjk_16.c"
+    "../tool/res/out/font/demo_cjk_24.c"
+    "../tool/res/out/font/demo_ime_16.c"
+    "../tool/res/out/res_images.c"
+    "../tool/res/out/merged_bin.c"
 )
-file(GLOB DEMO_EXTRA_SOURCES CONFIGURE_DEPENDS "../Demo/img_ex_perf/*.c")
-list(APPEND DEMO_SOURCES ${DEMO_EXTRA_SOURCES})
 file(GLOB SIMULATOR_SOURCES CONFIGURE_DEPENDS "*.c")
+
+# preview 孵化区：实验控件与 demo（仅模拟器编译，不进 Keil 工程，随时可下架）
+file(GLOB PREVIEW_CORE_SOURCES CONFIGURE_DEPENDS "../Core/widgets_preview/*/*.c")
+file(GLOB PREVIEW_DEMO_SOURCES CONFIGURE_DEPENDS "../Demo/preview/*.c")
 
 add_executable(wegui_sim
     ${CORE_SOURCES}
     ${DEMO_SOURCES}
+    ${PREVIEW_CORE_SOURCES}
+    ${PREVIEW_DEMO_SOURCES}
     ${SIMULATOR_SOURCES}
 )
 

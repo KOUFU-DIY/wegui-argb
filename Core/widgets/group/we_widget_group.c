@@ -1,5 +1,11 @@
 #include "we_widget_group.h"
 #include "we_render.h"
+/* 槽位占用位图：used 标志抽为容器级 uint32 位图后槽体 12B->8B 零填充，
+ * WE_GROUP_CHILD_MAX(<=32) 个槽共省 4*N+4 字节 RAM。 */
+#define _GRP_SLOT_USED(o, i) ((((o)->slot_used_mask >> (i)) & 1U) != 0U)
+#define _GRP_SLOT_SET(o, i) ((o)->slot_used_mask |= ((uint32_t)1U << (i)))
+#define _GRP_SLOT_CLR(o, i) ((o)->slot_used_mask &= ~((uint32_t)1U << (i)))
+
 
 static we_group_child_slot_t *_group_find_slot(we_group_obj_t *obj, we_obj_t *child)
 {
@@ -10,7 +16,7 @@ static we_group_child_slot_t *_group_find_slot(we_group_obj_t *obj, we_obj_t *ch
 
     for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
     {
-        if (obj->child_slots[i].used && obj->child_slots[i].child == child)
+        if (_GRP_SLOT_USED(obj, i) && obj->child_slots[i].child == child)
             return &obj->child_slots[i];
     }
 
@@ -80,7 +86,8 @@ static void _group_detach_obj(we_obj_t *obj)
  */
 static void _group_update_child_abs(we_group_obj_t *obj, we_group_child_slot_t *slot)
 {
-    if (obj == NULL || slot == NULL || !slot->used || slot->child == NULL)
+    if (obj == NULL || slot == NULL ||
+        !_GRP_SLOT_USED(obj, (uint16_t)(slot - obj->child_slots)) || slot->child == NULL)
         return;
 
     we_obj_set_pos(slot->child,
@@ -248,10 +255,38 @@ static uint8_t _group_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
  * @note 没有它时，外层容器（如 slideshow 翻页）经 we_obj_set_pos 移动
  *       group 只会挪外框，子控件会留在原地。子控件经 we_obj_set_pos
  *       跟随，嵌套 group / 带 set_pos_cb 的控件（img_ex 等）自动级联。
+ *
+ *       标脏策略（精细模式）：背景是纯色直角填充（radius 恒为 0），小步
+ *       平移时新旧框重叠区里背景混色结果逐像素不变（半透明亦然：底层内容
+ *       未动），因此只标新旧框各自扣掉重叠区的曝光 L 条带；子控件的旧/新
+ *       足迹由 relayout 里逐子 we_obj_set_pos 自行标脏（越出父容器新框的
+ *       部分恰落在旧框曝光条带内，逐层归纳无遗漏）。跳越无重叠或完全透明
+ *       时回退整框旧+新标脏。若未来 group 背景引入圆角/渐变/贴图，重叠区
+ *       不再平移不变，本优化必须退化为整框标脏。
  */
 static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 {
     we_group_obj_t *obj = (we_group_obj_t *)ptr;
+    int16_t old_x = obj->base.x;
+    int16_t old_y = obj->base.y;
+    int16_t w = obj->base.w;
+    int16_t h = obj->base.h;
+    int16_t ov_x = WE_MAX(old_x, new_x);
+    int16_t ov_y = WE_MAX(old_y, new_y);
+    int16_t ov_w = (int16_t)(WE_MIN(old_x, new_x) + w - ov_x);
+    int16_t ov_h = (int16_t)(WE_MIN(old_y, new_y) + h - ov_y);
+
+    if (obj->opacity != 0U && ov_w > 0 && ov_h > 0)
+    {
+        we_obj_invalidate_area_exclude((we_obj_t *)obj, old_x, old_y, w, h,
+                                       ov_x, ov_y, ov_w, ov_h);
+        obj->base.x = new_x;
+        obj->base.y = new_y;
+        we_group_relayout(obj); /* 按 slot 局部坐标刷新全部子控件绝对位置 */
+        we_obj_invalidate_area_exclude((we_obj_t *)obj, new_x, new_y, w, h,
+                                       ov_x, ov_y, ov_w, ov_h);
+        return;
+    }
 
     we_obj_invalidate((we_obj_t *)obj);
     obj->base.x = new_x;
@@ -275,8 +310,16 @@ static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int16_t w, int16_t h,
                        colour_t bg_color, uint8_t opacity)
 {
-    static const we_class_t _group_class = { .draw_cb = _group_draw_cb, .event_cb = _group_event_cb, .set_pos_cb = _group_set_pos_cb};
-    uint16_t i;
+    static const we_class_t _group_class = {
+        .draw_cb = _group_draw_cb,
+        .event_cb = _group_event_cb,
+        .set_pos_cb = _group_set_pos_cb,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+        /* 复合容器标记：焦点管理器据此支持 OK 进入 / BACK 退出，
+         * 且仅当子树内存在可聚焦控件时本容器才会成为焦点停靠点 */
+        .class_flags = WE_CLASS_FLAG_CHILD_OWNER,
+#endif
+    };
 
     if (obj == NULL || lcd == NULL)
         return;
@@ -294,8 +337,7 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
     obj->opacity = opacity;
     obj->last_pressed_child = NULL;
 
-    for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
+    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
@@ -312,7 +354,6 @@ void we_group_obj_delete(we_group_obj_t *obj)
 {
     we_obj_t *child;
     we_obj_t *next;
-    uint16_t i;
 
     if (obj == NULL || obj->base.lcd == NULL)
         return;
@@ -326,8 +367,7 @@ we_obj_delete(child);
     }
 
     obj->children_head = NULL;
-    for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
+    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
 we_obj_delete((we_obj_t *)obj);
 }
@@ -353,7 +393,7 @@ void we_group_add_child(we_group_obj_t *obj, we_obj_t *child)
 
     for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
     {
-        if (!obj->child_slots[i].used)
+        if (!_GRP_SLOT_USED(obj, i))
         {
 _group_detach_obj(child);
             child->next = NULL;
@@ -364,7 +404,7 @@ _group_detach_obj(child);
             obj->child_slots[i].child = child;
             obj->child_slots[i].local_x = 0;
             obj->child_slots[i].local_y = 0;
-            obj->child_slots[i].used = 1U;
+            _GRP_SLOT_SET(obj, i);
 _group_update_child_abs(obj, &obj->child_slots[i]);
             return;
         }
@@ -385,7 +425,7 @@ we_group_child_slot_t *slot = _group_find_slot(obj, child);
         return;
 
 _group_detach_obj(child);
-    slot->used = 0U;
+    _GRP_SLOT_CLR(obj, (uint16_t)(slot - obj->child_slots));
     slot->child = NULL;
 
     /* 被移除的子控件若正处于按压转发状态，同步丢弃引用 */
@@ -427,7 +467,7 @@ void we_group_relayout(we_group_obj_t *obj)
 
     for (i = 0; i < WE_GROUP_CHILD_MAX; i++)
     {
-        if (obj->child_slots[i].used)
+        if (_GRP_SLOT_USED(obj, i))
 _group_update_child_abs(obj, &obj->child_slots[i]);
     }
 }

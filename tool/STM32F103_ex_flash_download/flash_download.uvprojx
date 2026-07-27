@@ -387,7 +387,7 @@
             <File>
               <FileName>merged_bin.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\bin2c\output\merged_bin.c</FilePath>
+              <FilePath>..\res\out\merged_bin.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -11,7 +11,7 @@
 #include "simple_widget_demos.h"
 
 #include "demo_common.h"
-#include "image_res.h"
+#include "res_images.h"
 #include "widgets/img/we_widget_img.h"
 #include <stdio.h>
 #include <string.h>
@@ -61,9 +61,9 @@ void we_img_simple_demo_init(we_lcd_t *lcd)
                       "IMG OP 255", we_font_consolas_18,
                       RGB888TODEV(255, 154, 102), 255);
 
-    we_img_obj_init(&img_main, lcd, 18, 82, img_rgb565_indexqoi_96x54, 255);
-    we_img_obj_init(&img_overlay, lcd, 30, 108, img_argb8565_indexqoi_208x42, 200);
-    we_img_obj_init(&img_float, lcd, 168, 70, img_argb8565_indexqoi_80x80, 200);
+    we_img_obj_init(&img_main, lcd, 16, 100, demo_qoi, 255);
+    we_img_obj_init(&img_overlay, lcd, 64, 112, demo_overlay, 200);
+    we_img_obj_init(&img_float, lcd, 180, 74, demo_alpha, 200);
 }
 
 /**
@@ -85,10 +85,10 @@ void we_img_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
 
     opacity = (uint8_t)(90U + (((uint32_t)(we_sin((int16_t)((img_ticks_ms * 6U) / 100U) & 0x1FF))
                                 + 32768U) * 130U >> 16));
-    float_y = (int16_t)(70 + ((we_sin((int16_t)((img_ticks_ms * 7U) / 100U) & 0x1FF) * 10) >> 15));
+    float_y = (int16_t)(74 + ((we_sin((int16_t)((img_ticks_ms * 7U) / 100U) & 0x1FF) * 10) >> 15));
 
     we_img_obj_set_opacity(&img_overlay, opacity);
-    we_img_obj_set_pos(&img_float, 168, float_y);
+    we_img_obj_set_pos(&img_float, 180, float_y);
 
     snprintf(img_stat_buf, sizeof(img_stat_buf), "IMG OP %03u", (unsigned)opacity);
     we_label_set_text(&img_stat, img_stat_buf);

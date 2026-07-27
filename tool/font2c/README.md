@@ -1,5 +1,9 @@
 # font2c
 
+[![CI](https://github.com/KOUFU-DIY/we_font2c/actions/workflows/ci.yml/badge.svg)](https://github.com/KOUFU-DIY/we_font2c/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KOUFU-DIY/we_font2c)](https://github.com/KOUFU-DIY/we_font2c/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `font2c` is a standalone bitmap font extraction tool for embedded projects.
 It converts `ttf` / `otf` / `ttc` fonts into:
 
@@ -13,6 +17,16 @@ This document only describes:
 
 JSON details are in `input/README.md`.
 Build details are in `builder/README.md`.
+Release notes are in `CHANGELOG.md`.
+Contribution notes are in `CONTRIBUTING.md`.
+
+## Repository Notes
+
+- `fonts/` is intentionally empty in the repository. Add your own fonts locally and confirm the font license before redistribution.
+- `output/` and `font2c.exe` are local build artifacts and are ignored by Git by default.
+- This repository is licensed under the MIT License. See [LICENSE](LICENSE).
+- Continuous integration is enabled for Windows and macOS builds.
+- Pushing a `v*` tag triggers an automated release build with Windows and macOS binaries.
 
 ## Quick Start
 
@@ -45,9 +59,53 @@ Supported commands:
 ```txt
 font2c.exe build <config.json> [-o <output_dir>]
 font2c.exe build-all <input_dir> [-o <output_dir>]
+font2c.exe scan --src <dir> [--src <dir> ...] [scan options]
 font2c.exe --help
 font2c.exe --version
 ```
+
+## Charset Scan
+
+`scan` collects the non-ASCII characters actually used by your firmware
+sources and keeps a config's `charset.chars` in sync with them:
+
+```txt
+font2c.exe scan --src <dir> [--src <dir> ...] [--ext c,h] [--extra <file>]
+                [--json <cfg.json>] [--prune] [--out charset.txt] [--dry-run]
+```
+
+Options:
+
+- `--src <dir>`: source directory, scanned recursively, repeatable
+- `--ext <list>`: comma-separated source extensions, default `c,h`
+- `--extra <file>`: UTF-8 text file whose chars are added to the scan result, repeatable
+- `--json <cfg.json>`: merge the scan result into that config's `charset.chars`
+- `--prune`: with `--json`, also drop chars that were not seen in the scan
+- `--out <file>`: write the scan result to a UTF-8 text file
+- `--dry-run`: report only, write nothing
+
+Scan rules:
+
+- source files are read as UTF-8; a BOM is tolerated, invalid byte sequences
+  are skipped with a warning
+- `//` and `/* */` comments are excluded; characters are collected only from
+  double-quoted string literals (escapes such as `\\` and `\"` are understood,
+  `\uXXXX` / `\UXXXXXXXX` escapes are decoded)
+- only codepoints `>= U+0080` are collected; ASCII is expected to be covered
+  by a `charset.ranges` entry such as `U+0020`–`U+007E`
+- the result is deduplicated and sorted by codepoint
+
+`--json` update rules:
+
+- prints the diff against the current `charset.chars`: `+N new, M unseen`
+- by default unseen chars are kept; `--prune` removes them
+- ASCII chars already present in `charset.chars` are never added, reported,
+  or pruned; `charset.ranges` is never modified
+- only `charset.chars` changes; all other fields keep their values and order
+  (the file is rewritten with the canonical 2-space layout)
+- if nothing changes, the file is not rewritten
+- text composed at runtime (for example via `sprintf`) cannot be scanned;
+  list those chars in an `--extra` file
 
 ## Font Lookup
 

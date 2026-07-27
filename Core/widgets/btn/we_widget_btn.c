@@ -198,6 +198,44 @@ we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
     return 1; // 交互控件恒返回 1，容器（slideshow 等）据此锁定并转发后续事件
 }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_BTN_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：OK 按下沿进入按压态，松开沿回弹并派发 CLICKED。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 按住 OK 期间保持 PRESSED（与触摸按住一致）；tap 式注入由管理器的
+ *       最短按压窗口保证视觉可见。按键合成的 CLICKED 事件 data 为 NULL，
+ *       用户回调不得解引用坐标。
+ */
+static uint8_t _btn_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_btn_obj_t *btn = (we_btn_obj_t *)ptr;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        /* 禁用或全透明时拒绝聚焦，遍历自动跳过本实例 */
+        return (btn->state != WE_BTN_STATE_DISABLED && btn->opacity != 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK: /* 按下沿：进入按压态，等待松开沿 */
+        we_btn_set_state(btn, WE_BTN_STATE_PRESSED);
+        return 1U;
+    case WE_KEY_EVT_OK_RELEASE: /* 松开沿：回弹 + 触发点击 */
+        we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
+        if (btn->user_event_cb != NULL)
+            (void)btn->user_event_cb(ptr, WE_EVENT_CLICKED, NULL);
+        return 1U;
+    case WE_KEY_EVT_FLASH_END: /* 取消（焦点切走等）：仅回弹不点击 */
+        we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
+        return 1U;
+    default:
+        return 0U; /* 方向/前后键交焦点管理器默认导航 */
+    }
+}
+#endif
+
 /**
  * @brief 初始化控件对象并挂载到 LCD 对象链表。
  * @param obj 目标控件对象指针。
@@ -224,7 +262,14 @@ void we_btn_obj_init(we_btn_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int
     obj->base.w = w;
     obj->base.h = h;
 
-    static const we_class_t _btn_class = {.draw_cb = _btn_draw_cb, .event_cb = _btn_event_cb, .set_pos_cb = NULL};
+    static const we_class_t _btn_class = {
+        .draw_cb = _btn_draw_cb,
+        .event_cb = _btn_event_cb,
+        .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_BTN_USE_KEY == 1)
+        .key_cb = _btn_key_cb,
+#endif
+    };
     obj->base.class_p = &_btn_class;
 
     // 2. 初始化属性

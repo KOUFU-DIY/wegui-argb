@@ -1,0 +1,21 @@
+{
+  "root": "..",
+  "output": "output",
+  "tools_dir": "tools",
+  "defaults": {
+    "format": "rgb565",
+    "endianness": "big",
+    "bg_color": "000000"
+  },
+  "codegen": {
+    "enabled": true,
+    "mode": "combined",
+    "base_name": "img_resources"
+  },
+  "folders": {
+    "input2qoi": { "format": "argb8888" },
+    "input2indexqoi": { "format": "argb8888", "index_interval": 512 },
+    "input2raw": { "formats": "rgb565,argb8888" },
+    "my_icons": { "tool": "qoi", "format": "argb8888", "output": "output/icons" }
+  }
+}

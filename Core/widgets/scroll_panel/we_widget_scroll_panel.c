@@ -1,5 +1,11 @@
 #include "we_widget_scroll_panel.h"
 #include "we_render.h"
+/* 槽位占用位图：used 标志抽为容器级 uint32 位图后槽体 12B->8B 零填充，
+ * WE_SCROLL_PANEL_CHILD_MAX(<=32) 个槽共省 4*N+4 字节 RAM。 */
+#define _SPN_SLOT_USED(o, i) ((((o)->slot_used_mask >> (i)) & 1U) != 0U)
+#define _SPN_SLOT_SET(o, i) ((o)->slot_used_mask |= ((uint32_t)1U << (i)))
+#define _SPN_SLOT_CLR(o, i) ((o)->slot_used_mask &= ~((uint32_t)1U << (i)))
+
 
 static int16_t _scroll_panel_max_scroll_y(const we_scroll_panel_obj_t *obj);
 
@@ -160,7 +166,7 @@ static we_scroll_panel_child_slot_t *_scroll_panel_find_slot(we_scroll_panel_obj
 
     for (i = 0U; i < WE_SCROLL_PANEL_CHILD_MAX; i++)
     {
-        if (obj->child_slots[i].used && obj->child_slots[i].child == child)
+        if (_SPN_SLOT_USED(obj, i) && obj->child_slots[i].child == child)
             return &obj->child_slots[i];
     }
 
@@ -288,7 +294,8 @@ static uint8_t _scroll_panel_get_scrollbar_thumb_rect(const we_scroll_panel_obj_
 
 static void _scroll_panel_update_child_abs(we_scroll_panel_obj_t *obj, we_scroll_panel_child_slot_t *slot)
 {
-    if (obj == NULL || slot == NULL || !slot->used || slot->child == NULL)
+    if (obj == NULL || slot == NULL ||
+        !_SPN_SLOT_USED(obj, (uint16_t)(slot - obj->child_slots)) || slot->child == NULL)
         return;
 
     we_obj_set_pos(slot->child,
@@ -578,13 +585,100 @@ static void _scroll_panel_draw_cb(void *ptr)
     _scroll_panel_draw_core((we_scroll_panel_obj_t *)ptr, 1U, 1U);
 }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_NESTED == 1) && (WE_SCROLL_PANEL_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：容器停靠查询 + 焦点滚动跟随。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 面板自身不消费任何普通键：OK 交焦点管理器下钻进子控件，
+ *       方向/前后键交默认导航。子树内有对象获得焦点时收到
+ *       WE_KEY_EVT_CHILD_FOCUS，把焦点对象连同光标环外扩一起硬滚进
+ *       内容视口（复用触摸滚动的夹紧与 relayout 标脏路径）。
+ */
+static uint8_t _scroll_panel_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_scroll_panel_obj_t *obj = (we_scroll_panel_obj_t *)ptr;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+    {
+        /* 仅当子树内存在可聚焦控件时才接受停靠（空面板不设死停靠点） */
+        we_obj_t *child;
+
+        if (obj->opacity == 0U)
+            return 0U;
+        for (child = obj->children_head; child != NULL; child = child->next)
+        {
+            if (we_focus_candidate(child))
+                return 1U;
+        }
+        return 0U;
+    }
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_EVT_CHILD_FOCUS:
+    {
+        we_obj_t *foc = we_focus_get(obj->base.lcd);
+        int16_t margin = (int16_t)(WE_CFG_FOCUS_CURSOR_GAP + WE_CFG_FOCUS_CURSOR_THICKNESS);
+        int16_t view_y0 = obj->inner_y;
+        int16_t view_y1 = (int16_t)(obj->inner_y + obj->inner_h - 1);
+        int16_t top;
+        int16_t bottom;
+        int16_t d;
+        int16_t target;
+
+        if (foc == NULL)
+            return 1U;
+        top = (int16_t)(foc->y - margin);
+        bottom = (int16_t)(foc->y + foc->h - 1 + margin);
+
+        d = 0;
+        if (bottom > view_y1)
+            d = (int16_t)(bottom - view_y1); /* 下方越界：内容上移 */
+        if ((int16_t)(top - d) < view_y0)
+            d = (int16_t)(top - view_y0); /* 上方越界/超高子控件：顶部对齐优先 */
+        if (d != 0)
+        {
+            target = _scroll_panel_clamp_to_bounds(obj, (int16_t)(obj->scroll_y + d));
+            if (target != obj->scroll_y)
+            {
+                _scroll_panel_stop_anim(obj); /* 打断惯性/回弹，硬定位 */
+                _scroll_panel_apply_scroll_raw(obj, target);
+                /* 焦点环可压在 1px 边框带上，relayout 的内容区标脏
+                 * 覆盖不到，补标焦点新落点连环外扩的小框。 */
+                we_obj_invalidate_area(foc, (int16_t)(foc->x - margin),
+                                       (int16_t)(foc->y - margin),
+                                       (int16_t)(foc->w + 2 * margin),
+                                       (int16_t)(foc->h + 2 * margin));
+            }
+        }
+        return 1U;
+    }
+    default:
+        return 0U; /* OK 交管理器下钻，方向/前后键交默认导航 */
+    }
+}
+#endif
+
 void we_scroll_panel_obj_init(we_scroll_panel_obj_t *obj, we_lcd_t *lcd,
                               int16_t x, int16_t y, int16_t w, int16_t h,
                               colour_t bg_color, colour_t border_color,
                               uint16_t radius, uint8_t opacity)
 {
-    static const we_class_t _scroll_panel_class = { .draw_cb = _scroll_panel_draw_cb, .event_cb = _scroll_panel_event_cb, .set_pos_cb = NULL};
-    uint16_t i;
+    static const we_class_t _scroll_panel_class = {
+        .draw_cb = _scroll_panel_draw_cb,
+        .event_cb = _scroll_panel_event_cb,
+        .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+#if (WE_CFG_FOCUS_NESTED == 1) && (WE_SCROLL_PANEL_USE_KEY == 1)
+        .key_cb = _scroll_panel_key_cb,
+#endif
+        /* 复合容器标记：焦点 OK 下钻进入子控件 / BACK 退回面板本体 */
+        .class_flags = WE_CLASS_FLAG_CHILD_OWNER,
+#endif
+    };
 
     if (obj == NULL || lcd == NULL)
         return;
@@ -621,8 +715,7 @@ void we_scroll_panel_obj_init(we_scroll_panel_obj_t *obj, we_lcd_t *lcd,
     obj->animating = 0U;
     _scroll_panel_update_inner_rect(obj);
 
-    for (i = 0U; i < WE_SCROLL_PANEL_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
+    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
@@ -634,7 +727,6 @@ void we_scroll_panel_obj_delete(we_scroll_panel_obj_t *obj)
 {
     we_obj_t *child;
     we_obj_t *next;
-    uint16_t i;
 
     if (obj == NULL || obj->base.lcd == NULL)
         return;
@@ -650,8 +742,7 @@ void we_scroll_panel_obj_delete(we_scroll_panel_obj_t *obj)
     }
 
     obj->children_head = NULL;
-    for (i = 0U; i < WE_SCROLL_PANEL_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
+    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
     we_obj_delete((we_obj_t *)obj);
 }
@@ -671,7 +762,7 @@ void we_scroll_panel_add_child(we_scroll_panel_obj_t *obj, we_obj_t *child)
 
     for (i = 0U; i < WE_SCROLL_PANEL_CHILD_MAX; i++)
     {
-        if (!obj->child_slots[i].used)
+        if (!_SPN_SLOT_USED(obj, i))
         {
             _scroll_panel_detach_obj(child);
             child->next = NULL;
@@ -682,7 +773,7 @@ void we_scroll_panel_add_child(we_scroll_panel_obj_t *obj, we_obj_t *child)
             obj->child_slots[i].child = child;
             obj->child_slots[i].local_x = 0;
             obj->child_slots[i].local_y = 0;
-            obj->child_slots[i].used = 1U;
+            _SPN_SLOT_SET(obj, i);
             _scroll_panel_update_child_abs(obj, &obj->child_slots[i]);
             return;
         }
@@ -701,7 +792,7 @@ void we_scroll_panel_remove_child(we_scroll_panel_obj_t *obj, we_obj_t *child)
         return;
 
     _scroll_panel_detach_obj(child);
-    slot->used = 0U;
+    _SPN_SLOT_CLR(obj, (uint16_t)(slot - obj->child_slots));
     slot->child = NULL;
     slot->local_x = 0;
     slot->local_y = 0;
@@ -732,7 +823,7 @@ void we_scroll_panel_relayout(we_scroll_panel_obj_t *obj)
 
     for (i = 0U; i < WE_SCROLL_PANEL_CHILD_MAX; i++)
     {
-        if (obj->child_slots[i].used)
+        if (_SPN_SLOT_USED(obj, i))
             _scroll_panel_update_child_abs(obj, &obj->child_slots[i]);
     }
 

@@ -271,6 +271,55 @@ static int32_t _dropdown_max_scroll(we_dropdown_obj_t *d)
     return (m > 0) ? m : 0;
 }
 
+/**
+ * @brief 只标脏 popup 右缘滚动条条带（滑块 + 边距），淡出/唤醒专用。
+ * @param d 下拉控件指针。
+ * @return 无。
+ * @note 滚动条 alpha 变化不触碰行内容，整层标脏纯属浪费；条带宽
+ *       = _DD_SB_WIDTH + _DD_SB_MARGIN，高取弹层全高（覆盖轨道退化情形）。
+ */
+static void _dropdown_invalidate_sb_strip(we_dropdown_obj_t *d)
+{
+    we_area_t *a = &d->base.lcd->popup_layer.area;
+    int16_t strip_w = (int16_t)(_DD_SB_WIDTH + _DD_SB_MARGIN);
+
+    we_dirty_invalidate(&d->base.lcd->dirty_mgr,
+                        (int16_t)(a->x1 - strip_w + 1), a->y0,
+                        strip_w, (int16_t)(a->y1 - a->y0 + 1));
+}
+
+/**
+ * @brief 只标脏 popup 中某选项的行条带（与弹层区域求交）。
+ * @param d 下拉控件指针。
+ * @param idx 选项索引（<0、越界或已滚出可视区时空操作）。
+ * @return 无。
+ * @note hover 高亮变化只影响单行，按行条带标脏替代整层标脏；
+ *       首/末行与面板圆角重叠的像素同在条带内，重绘时正确合成。
+ */
+static void _dropdown_invalidate_row(we_dropdown_obj_t *d, int16_t idx)
+{
+    we_area_t *a = &d->base.lcd->popup_layer.area;
+    int32_t row_y0;
+    int32_t row_y1;
+
+    if (idx < 0 || idx >= (int16_t)d->option_cnt)
+        return;
+
+    row_y0 = (int32_t)a->y0 + (int32_t)idx * (int32_t)d->item_h - d->scroll_px;
+    row_y1 = row_y0 + (int32_t)d->item_h - 1;
+    if (row_y0 < (int32_t)a->y0)
+        row_y0 = a->y0;
+    if (row_y1 > (int32_t)a->y1)
+        row_y1 = a->y1;
+    if (row_y0 > row_y1)
+        return; /* 行已滚出可视区 */
+
+    we_dirty_invalidate(&d->base.lcd->dirty_mgr,
+                        a->x0, (int16_t)row_y0,
+                        (int16_t)(a->x1 - a->x0 + 1),
+                        (int16_t)(row_y1 - row_y0 + 1));
+}
+
 static void _dropdown_sb_fade_step_cb(void *owner, uint16_t elapsed_ms);
 
 /**
@@ -287,7 +336,7 @@ static void _dropdown_sb_wake(we_dropdown_obj_t *d)
     if (d->sb_alpha != _DD_SB_THUMB_OPA)
     {
         d->sb_alpha = _DD_SB_THUMB_OPA;
-        we_popup_layer_invalidate(d->base.lcd);
+        _dropdown_invalidate_sb_strip(d); /* 只标滚动条条带 */
     }
     /* 重新挂入淡出动画（收敛/收起后节点会自行摘链，这里再次唤醒） */
     we_anim_start(d->base.lcd, &d->sb_anim, _dropdown_sb_fade_step_cb, d);
@@ -313,6 +362,109 @@ static void _dropdown_scroll_to(we_dropdown_obj_t *d, int32_t new_scroll)
         d->scroll_px = new_scroll;
         _dropdown_sb_wake(d); /* 滚动即唤醒滚动条 */
         we_popup_layer_invalidate(d->base.lcd);
+    }
+}
+
+/**
+ * @brief 将 scroll_px 软夹紧到 [-过冲上限, max+过冲上限] 并按需标脏
+ *        （拖拽跟手 / 回弹动画用，允许橡皮筋越界；list 同款口径）。
+ * @param d 下拉控件指针。
+ * @param new_scroll 目标滚动像素。
+ * @return 无。
+ */
+static void _dropdown_scroll_to_over(we_dropdown_obj_t *d, int32_t new_scroll)
+{
+    int32_t max_scroll = _dropdown_max_scroll(d);
+
+    if (new_scroll < -WE_DROPDOWN_OVERSCROLL_LIMIT)
+        new_scroll = -WE_DROPDOWN_OVERSCROLL_LIMIT;
+    if (new_scroll > max_scroll + WE_DROPDOWN_OVERSCROLL_LIMIT)
+        new_scroll = max_scroll + WE_DROPDOWN_OVERSCROLL_LIMIT;
+
+    if (new_scroll != d->scroll_px)
+    {
+        d->scroll_px = new_scroll;
+        _dropdown_sb_wake(d); /* 滚动即唤醒滚动条 */
+        we_popup_layer_invalidate(d->base.lcd);
+    }
+}
+
+/**
+ * @brief 停止越界回弹动画（摘链停表）。
+ * @param d 下拉控件指针。
+ * @return 无。
+ */
+static void _dropdown_stop_rebound(we_dropdown_obj_t *d)
+{
+    d->rebounding = 0U;
+    we_anim_stop(d->base.lcd, &d->rb_anim);
+}
+
+/**
+ * @brief 越界回弹动画步进：每步拉回"过冲/WE_DROPDOWN_REBOUND_PULL_DIV"
+ *        （1..MAX_STEP px），整数缓动天然先快后慢，回到边界即摘链。
+ * @param owner 控件对象指针（we_anim_t.owner 透传）。
+ * @param elapsed_ms 本次步进经过的毫秒数。
+ * @return 无。
+ */
+static void _dropdown_rebound_step_cb(void *owner, uint16_t elapsed_ms)
+{
+    we_dropdown_obj_t *d = (we_dropdown_obj_t *)owner;
+    int32_t max_scroll;
+    int32_t pos;
+    int32_t pull;
+
+    if (d == NULL || elapsed_ms == 0U)
+        return;
+    if (!d->opened || !d->rebounding)
+    {
+        _dropdown_stop_rebound(d); /* 已收起/被打断：摘链停表 */
+        return;
+    }
+
+    max_scroll = _dropdown_max_scroll(d);
+    pos = d->scroll_px;
+
+    if (pos < 0)
+    {
+        pull = (-pos) / WE_DROPDOWN_REBOUND_PULL_DIV;
+        if (pull < 1)
+            pull = 1;
+        if (pull > WE_DROPDOWN_REBOUND_MAX_STEP)
+            pull = WE_DROPDOWN_REBOUND_MAX_STEP;
+        pos += pull;
+        if (pos > 0)
+            pos = 0;
+    }
+    else if (pos > max_scroll)
+    {
+        pull = (pos - max_scroll) / WE_DROPDOWN_REBOUND_PULL_DIV;
+        if (pull < 1)
+            pull = 1;
+        if (pull > WE_DROPDOWN_REBOUND_MAX_STEP)
+            pull = WE_DROPDOWN_REBOUND_MAX_STEP;
+        pos -= pull;
+        if (pos < max_scroll)
+            pos = max_scroll;
+    }
+
+    _dropdown_scroll_to_over(d, pos);
+
+    if (d->scroll_px >= 0 && d->scroll_px <= max_scroll)
+        _dropdown_stop_rebound(d); /* 已回到边界内，收敛摘链 */
+}
+
+/**
+ * @brief 松手/取消后按需启动回弹（当前滚动越界才启动）。
+ * @param d 下拉控件指针。
+ * @return 无。
+ */
+static void _dropdown_start_rebound_if_needed(we_dropdown_obj_t *d)
+{
+    if (d->scroll_px < 0 || d->scroll_px > _dropdown_max_scroll(d))
+    {
+        d->rebounding = 1U;
+        we_anim_start(d->base.lcd, &d->rb_anim, _dropdown_rebound_step_cb, d);
     }
 }
 
@@ -364,7 +516,7 @@ static void _dropdown_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
     else
         d->sb_alpha = WE_DROPDOWN_SB_IDLE_ALPHA; /* 收敛到常驻最低值 */
 
-    we_popup_layer_invalidate(d->base.lcd);
+    _dropdown_invalidate_sb_strip(d); /* 淡出每帧只标滚动条条带 */
 }
 
 /**
@@ -483,8 +635,17 @@ static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a)
         thumb_h = track_h;
 
     /* 滑块位置 = 在 [0, track_h - thumb_h] 内按滚动像素进度插值。 */
-    thumb_y = (int16_t)(track_y0 +
-              (int32_t)(track_h - thumb_h) * d->scroll_px / max_scroll);
+    {
+        /* 过冲期间按夹紧后的滚动值计算，滑块不越出轨道（list 同款） */
+        int32_t sb_scroll = d->scroll_px;
+
+        if (sb_scroll < 0)
+            sb_scroll = 0;
+        if (sb_scroll > max_scroll)
+            sb_scroll = max_scroll;
+        thumb_y = (int16_t)(track_y0 +
+                  (int32_t)(track_h - thumb_h) * sb_scroll / max_scroll);
+    }
 
     /* 仅绘制半透明胶囊滑块，不画轨道；圆角=半宽 → 两头自然收成半圆。
      * 透明度取当前淡出值 sb_alpha（由滚动条淡出动画节点推进）。 */
@@ -657,6 +818,7 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
 
     if (event == WE_EVENT_PRESSED)
     {
+        _dropdown_stop_rebound(d); /* 按住即停回弹（越界定格，松手再回弹） */
         d->drag_start_y = data->y;
         d->drag_start_scroll = d->scroll_px;
         d->dragging = 0U;
@@ -665,8 +827,11 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
             hit = _dropdown_popup_hit(d, data->x, data->y);
             if (hit != d->hover_idx)
             {
+                int16_t old_hover = d->hover_idx;
+
                 d->hover_idx = hit;
-                we_popup_layer_invalidate(d->base.lcd);
+                _dropdown_invalidate_row(d, old_hover); /* 只标新旧两个行条带 */
+                _dropdown_invalidate_row(d, hit);
             }
         }
         return 1U;
@@ -682,11 +847,14 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
         {
             if (d->hover_idx != -1)
             {
+                int16_t old_hover = d->hover_idx;
+
                 d->hover_idx = -1; /* 拖拽中取消按下高亮 */
-                we_popup_layer_invalidate(d->base.lcd);
+                _dropdown_invalidate_row(d, old_hover); /* 只标该行条带 */
             }
-            /* 无级滚动：手指下移 dy>0 → 内容下移 → scroll_px 减小，直接跟手。 */
-            _dropdown_scroll_to(d, d->drag_start_scroll - (int32_t)dy);
+            /* 无级滚动：手指下移 dy>0 → 内容下移 → scroll_px 减小，直接跟手；
+             * 软夹紧允许橡皮筋越界过冲（松手后回弹）。 */
+            _dropdown_scroll_to_over(d, d->drag_start_scroll - (int32_t)dy);
         }
         return 1U;
     }
@@ -699,8 +867,11 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
 
         if (was_drag)
         {
-            /* 拖拽滚动结束：保持展开，不选择、不关闭，仅清掉按下高亮。 */
-            we_popup_layer_invalidate(d->base.lcd);
+            /* 拖拽滚动结束：保持展开，不选择、不关闭，仅清掉按下高亮
+             * （拖拽起步时高亮通常已清，这里按行条带兜底）；
+             * 越界过冲则启动回弹动画。 */
+            _dropdown_invalidate_row(d, sel);
+            _dropdown_start_rebound_if_needed(d);
             return 1U;
         }
         if (!inside)
@@ -718,13 +889,156 @@ static uint8_t _dropdown_popup_event(void *owner, we_event_t event, we_indev_dat
         }
         else
         {
-            we_popup_layer_invalidate(d->base.lcd); /* 禁用项：取消高亮重绘 */
+            _dropdown_invalidate_row(d, sel);     /* 禁用项：只标该行清除高亮 */
+            _dropdown_start_rebound_if_needed(d); /* 定格在过冲区的轻点松开 */
         }
         return 1U;
     }
 
     return 1U;
 }
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_DROPDOWN_USE_KEY == 1)
+/**
+ * @brief 键控移动展开列表的高亮行：新旧行条带标脏 + 滚动跟随。
+ * @param d 控件对象指针。
+ * @param idx 目标行下标（越界或未变化时空操作）。
+ * @return 无。
+ */
+static void _dropdown_key_hover_to(we_dropdown_obj_t *d, int16_t idx)
+{
+    int16_t old = d->hover_idx;
+    int32_t row_top;
+    int32_t view_h;
+
+    if (idx < 0 || idx >= (int16_t)d->option_cnt || idx == old)
+        return;
+    d->hover_idx = idx;
+    if (old >= 0)
+        _dropdown_invalidate_row(d, old);
+    _dropdown_invalidate_row(d, idx);
+
+    /* 高亮行滚动跟随：目标行不完整可见时硬滚到完整露出 */
+    _dropdown_stop_rebound(d);
+    row_top = (int32_t)idx * (int32_t)d->item_h;
+    view_h = (int32_t)_dropdown_popup_h(d);
+    if (row_top < d->scroll_px)
+        _dropdown_scroll_to(d, row_top);
+    else if (row_top + (int32_t)d->item_h > d->scroll_px + view_h)
+        _dropdown_scroll_to(d, row_top + (int32_t)d->item_h - view_h);
+}
+
+/**
+ * @brief 弹层键通道回调：展开列表的键控导航。
+ * @param owner 透传的控件对象指针。
+ * @param key 语义键值（仅按下沿）。
+ * @return 恒为 1（模态弹层吞掉全部按键）。
+ * @note 上/下（或前/后、左/右)移动高亮并跳过禁用项，首键从当前选中项
+ *       落位不位移；OK 选中高亮行（复用触摸的 set_selected + changed_cb
+ *       + close 路径）；BACK 直接收起不选择。
+ */
+static uint8_t _dropdown_popup_key_cb(void *owner, uint8_t key)
+{
+    we_dropdown_obj_t *d = (we_dropdown_obj_t *)owner;
+    int16_t idx;
+    int16_t step;
+
+    switch (key)
+    {
+    case WE_KEY_UP:
+    case WE_KEY_LEFT:
+    case WE_KEY_PREV:
+        step = -1;
+        break;
+    case WE_KEY_DOWN:
+    case WE_KEY_RIGHT:
+    case WE_KEY_NEXT:
+        step = 1;
+        break;
+    case WE_KEY_OK:
+        idx = d->hover_idx;
+        if (idx >= 0 && idx < (int16_t)d->option_cnt && !d->options[idx].disabled)
+        {
+            we_dropdown_set_selected(d, idx);
+            if (d->changed_cb != NULL)
+                d->changed_cb(d, idx, d->options[idx].value);
+        }
+        we_dropdown_close(d);
+        return 1U;
+    case WE_KEY_BACK:
+        we_dropdown_close(d);
+        return 1U;
+    default:
+        return 1U;
+    }
+
+    idx = d->hover_idx;
+    if (idx < 0)
+    {
+        /* 首键落位：从当前选中项（无选中则首项）亮起，不位移 */
+        idx = (d->selected_idx >= 0 && d->selected_idx < (int16_t)d->option_cnt)
+                  ? d->selected_idx
+                  : 0;
+        if (!d->options[idx].disabled)
+        {
+            _dropdown_key_hover_to(d, idx);
+            return 1U;
+        }
+    }
+    do
+    {
+        idx = (int16_t)(idx + step);
+    } while (idx >= 0 && idx < (int16_t)d->option_cnt && d->options[idx].disabled);
+    if (idx >= 0 && idx < (int16_t)d->option_cnt)
+        _dropdown_key_hover_to(d, idx); /* 到边界无可用项则原地不动 */
+    return 1U;
+}
+
+/**
+ * @brief 按键/焦点回调（闭合态主框）：OK 按下沿按压、松开沿展开。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 展开后的按键全部走弹层键通道（_dropdown_popup_key_cb），
+ *       不再经过本回调。
+ */
+static uint8_t _dropdown_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_dropdown_obj_t *d = (we_dropdown_obj_t *)ptr;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        return (d->enabled != 0U && d->options != NULL && d->option_cnt > 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK: /* 按下沿：主框进入按压态 */
+        if (d->pressed == 0U)
+        {
+            d->pressed = 1U;
+            we_obj_invalidate((we_obj_t *)d);
+        }
+        return 1U;
+    case WE_KEY_EVT_OK_RELEASE: /* 松开沿：回弹并展开列表 */
+        if (d->pressed != 0U)
+        {
+            d->pressed = 0U;
+            we_obj_invalidate((we_obj_t *)d);
+        }
+        we_dropdown_open(d);
+        return 1U;
+    case WE_KEY_EVT_FLASH_END: /* 取消：仅回弹不展开 */
+        if (d->pressed != 0U)
+        {
+            d->pressed = 0U;
+            we_obj_invalidate((we_obj_t *)d);
+        }
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+#endif /* WE_CFG_ENABLE_KEY_INPUT && WE_DROPDOWN_USE_KEY */
 
 /**
  * @brief 展开下拉列表，占用唯一 popup slot。
@@ -746,6 +1060,10 @@ void we_dropdown_open(we_dropdown_obj_t *obj)
     _dropdown_calc_popup_area(obj, &area);
     we_popup_layer_open(obj->base.lcd, WE_POPUP_TYPE_DROPDOWN, obj, &area,
                         _dropdown_popup_draw, _dropdown_popup_event, NULL);
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_DROPDOWN_USE_KEY == 1)
+    /* 挂接弹层键通道：触摸展开的列表同样可用按键导航 */
+    we_popup_layer_set_key_cb(obj->base.lcd, obj, _dropdown_popup_key_cb);
+#endif
 
     /* 滚动到能看到当前选中项的位置：让选中项尽量靠近可视区底部，
      * 再由 _dropdown_scroll_to 夹紧到 [0, max_scroll]。popup 已打开，
@@ -785,6 +1103,7 @@ void we_dropdown_close(we_dropdown_obj_t *obj)
     obj->sb_alpha = 0U;   /* 复位淡出状态，下次展开重新计时 */
     obj->sb_idle_ms = 0U;
     we_anim_stop(obj->base.lcd, &obj->sb_anim); /* 摘除淡出动画 */
+    _dropdown_stop_rebound(obj);                /* 摘除回弹动画 */
     we_popup_layer_close(obj->base.lcd, obj);
     we_obj_invalidate((we_obj_t *)obj); /* 重绘主框箭头方向 */
 }
@@ -842,6 +1161,9 @@ static const we_class_t _dropdown_class = {
     .draw_cb = _dropdown_draw_cb,
     .event_cb = _dropdown_event_cb,
     .set_pos_cb = _dropdown_set_pos_cb,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_DROPDOWN_USE_KEY == 1)
+    .key_cb = _dropdown_key_cb,
+#endif
 };
 
 /**
@@ -893,6 +1215,10 @@ void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
     obj->sb_anim.next = NULL;
     obj->sb_anim.step_cb = NULL;
     obj->sb_anim.owner = NULL;
+    obj->rebounding = 0U;
+    obj->rb_anim.next = NULL;
+    obj->rb_anim.step_cb = NULL;
+    obj->rb_anim.owner = NULL;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     /* 滚动条淡出由中央动画引擎驱动（见 _dropdown_sb_wake），不占 task 槽。 */
@@ -1015,6 +1341,7 @@ void we_dropdown_obj_delete(we_dropdown_obj_t *obj)
     obj->opened = 0U;
     /* 节点归控件所有，删除前必须摘链 */
     we_anim_stop(obj->base.lcd, &obj->sb_anim);
+    we_anim_stop(obj->base.lcd, &obj->rb_anim);
     we_obj_delete((we_obj_t *)obj);
 }
 

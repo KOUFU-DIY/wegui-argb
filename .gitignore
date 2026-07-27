@@ -1,5 +1,6 @@
 # Build outputs
 Simulator/build*/
+tool/res/build/
 STM32F030/MDK-ARM/Objects/
 STM32F030/MDK-ARM/Listings/
 STM32F030/MDK-ARM/STM32F030/
@@ -25,6 +26,9 @@ tool/STM32F103_ex_flash_download/Listings/
 # Logs
 *.build_log*
 build_log.txt
+
+# Shelved tools (kept locally, excluded from upload)
+tool/gui/
 
 # Local Claude settings
 .claude/

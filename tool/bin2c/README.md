@@ -43,6 +43,8 @@ merged_bin.h
 ```text
 --input DIR
     输入 bin 文件目录，默认: input_bin
+    可以重复传入多次来指定多个目录，
+    合并时按传入的目录顺序分块，每个目录内部再按文件名排序
 
 --output-path DIR
 --output-dir DIR
@@ -91,6 +93,14 @@ bin2c.exe --output-name res_pack --output-path D:\temp\out
 bin2c.exe --array-name g_res_data
 ```
 
+多个输入目录（按传入顺序分块合并）：
+
+```cmd
+bin2c.exe --input font_bin --input img_bin
+```
+
+上例中 `font_bin` 里的文件排在前面，`img_bin` 里的文件排在后面，各自目录内部按文件名排序。
+
 ## 生成文件说明
 
 ### 1. `.bin`
@@ -123,7 +133,7 @@ const unsigned char g_merged_bin_data[...] =
 并生成以下内容：
 
 - 资源 ID 枚举
-- 资源大小枚举
+- 资源大小宏定义
 - 资源地址宏
 - 地址表 `unsigned long` 数组
 
@@ -137,11 +147,8 @@ typedef enum
     bin_COUNT = 2
 } bin_id_t;
 
-typedef enum
-{
-    IMG_A_SIZE = 100,
-    IMG_B_SIZE = 200,
-} bin_size_t;
+#define IMG_A_SIZE ((unsigned long)100)
+#define IMG_B_SIZE ((unsigned long)200)
 
 static const unsigned long bin_addr_table[bin_COUNT] =
 {
@@ -185,6 +192,8 @@ sh builder/build_mac.sh
 
 ## 说明
 
-- 输入文件会按文件名排序后再合并
+- 单个输入目录时，文件按文件名排序后合并
+- 多个输入目录时，按 `--input` 传入的目录顺序分块，每个目录内部再按文件名排序
+- 不同目录中出现同名文件时，两个文件都会被合并，后出现的符号自动加 `_2`、`_3` 等后缀（例如 `LOGO` 和 `LOGO_2`）
 - 输出地址顺序和 ID 顺序保持一致
-- 如果 `input_bin` 中没有 `.bin` 文件，程序会提示后退出
+- 如果输入目录中没有 `.bin` 文件，程序会提示后退出

@@ -332,6 +332,70 @@ int sim_handle_events(we_lcd_t *lcd)
             return 0;
         }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+        /* 语义键映射 → 焦点导航：
+         * 方向键 = 上/下/左/右（保留系统连发 = 按住连续移动/调值）
+         * Tab / Shift+Tab = 后一个/前一个    Esc / 退格 = BACK
+         * Enter / 小键盘 Enter / 空格 = OK：按下/松开双沿上报，
+         * 控件按住期间保持按压态，松开才触发点击（滤掉系统连发）。 */
+        if (e.type == SDL_KEYDOWN && !is_mouse_down)
+        {
+            uint8_t nav_key = WE_KEY_NONE;
+
+            switch (e.key.keysym.sym)
+            {
+            case SDLK_UP:
+                nav_key = WE_KEY_UP;
+                break;
+            case SDLK_DOWN:
+                nav_key = WE_KEY_DOWN;
+                break;
+            case SDLK_LEFT:
+                nav_key = WE_KEY_LEFT;
+                break;
+            case SDLK_RIGHT:
+                nav_key = WE_KEY_RIGHT;
+                break;
+            case SDLK_TAB:
+                nav_key = ((e.key.keysym.mod & KMOD_SHIFT) != 0) ? WE_KEY_PREV : WE_KEY_NEXT;
+                break;
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+            case SDLK_SPACE:
+                if (e.key.repeat == 0)
+                    we_gui_key_press(lcd, WE_KEY_OK); /* 松开沿在 SDL_KEYUP 上报 */
+                continue;
+            case SDLK_ESCAPE:
+            case SDLK_BACKSPACE:
+                nav_key = WE_KEY_BACK;
+                break;
+            default:
+                break;
+            }
+
+            if (nav_key != WE_KEY_NONE)
+            {
+                we_gui_key_press(lcd, nav_key);
+                continue;
+            }
+        }
+
+        /* OK 键松开沿：按住多久按压态就保持多久 */
+        if (e.type == SDL_KEYUP)
+        {
+            switch (e.key.keysym.sym)
+            {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+            case SDLK_SPACE:
+                we_gui_key_release(lcd, WE_KEY_OK);
+                continue;
+            default:
+                break;
+            }
+        }
+#endif
+
         /* WASD 键盘 → 模拟滑动手势 */
         if (e.type == SDL_KEYDOWN && e.key.repeat == 0 && !is_mouse_down)
         {

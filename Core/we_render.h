@@ -202,6 +202,23 @@ uint8_t we_mask_quarter_circle_alpha(int16_t x, int16_t y, uint16_t radius,
                                      uint8_t quadrant, int16_t px, int16_t py);
 
 /**
+ * @brief 计算同心内外两个四分之一圆在单个像素上的 alpha mask（单次子采样）
+ * @param x 传入：外圆外接正方形左上角 X 坐标
+ * @param y 传入：外圆外接正方形左上角 Y 坐标
+ * @param r_out 传入：外圆半径
+ * @param r_in 传入：内圆半径（<= r_out，0 表示无内圆）
+ * @param quadrant 传入：象限标识（WE_MASK_QUADRANT_LT/RT/LB/RB）
+ * @param px 传入：目标像素 X 坐标
+ * @param py 传入：目标像素 Y 坐标
+ * @param p_fill_alpha 传出：内圆覆盖 alpha（0~255）
+ * @return 返回外圆覆盖 alpha（0~255）；环带覆盖 = 返回值 - *p_fill_alpha
+ * @note 带边框圆角专用：内外覆盖共享一遍 4x4 子采样，比调两次 quarter-circle 省一半
+ */
+uint8_t we_mask_quarter_ring_alpha(int16_t x, int16_t y, uint16_t r_out, uint16_t r_in,
+                                   uint8_t quadrant, int16_t px, int16_t py,
+                                   uint8_t *p_fill_alpha);
+
+/**
  * @brief 计算轴对齐圆角矩形在单个像素上的 alpha mask
  * @param x 传入：外接矩形左上角 X 坐标
  * @param y 传入：外接矩形左上角 Y 坐标

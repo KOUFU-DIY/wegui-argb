@@ -3,6 +3,14 @@
 
 #include "we_gui_driver.h"
 
+/* demo 层统一字体：资源头只在 demo 层包含（Core 无任何资源感知，
+ * 控件字体一律经 init 显式传入）；历史别名 we_font_consolas_18
+ * 供全部 demo 书写，指向 demo_ascii_16 字库。 */
+#include "demo_ascii_16.h"
+#ifndef we_font_consolas_18
+#define we_font_consolas_18 ((const unsigned char *)&demo_ascii_16)
+#endif
+
 /* 所有 simple demo 统一按固定 280x240 样式组织：
  * 1. 先调用对应 init(...) 创建控件并完成固定布局；
  * 2. 再用 we_gui_timer_create(lcd, 对应 tick, 16U, 1U) 注册周期定时器；
@@ -91,6 +99,44 @@ void we_stepper_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 /* indicator demo（状态指示灯 + 颜色/辉光过渡）。 */
 void we_indicator_simple_demo_init(we_lcd_t *lcd);
 void we_indicator_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* line demo（线段：端点/平移/颜色动画 + 圆头 cap）。 */
+void we_line_simple_demo_init(we_lcd_t *lcd);
+void we_line_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* box demo（矩形面板：四角独立圆角/切角 + 边框 + 颜色/透明度动画）。 */
+void we_box_simple_demo_init(we_lcd_t *lcd);
+void we_box_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* gauge demo（仪表盘：指针差分标脏 + Q16 量程斜率 + 平滑扫动动画）。 */
+void we_gauge_simple_demo_init(we_lcd_t *lcd);
+void we_gauge_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* list demo（数据驱动列表：快扫惯性 + 过冲回弹 + 滚动条空闲渐隐）。 */
+void we_list_simple_demo_init(we_lcd_t *lcd);
+void we_list_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* roller demo（滚轮选值器：惯性甩动滑过多行减速吸附 + 点击直达）。 */
+void we_roller_simple_demo_init(we_lcd_t *lcd);
+void we_roller_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* marquee demo（跑马灯标签：长文本无缝循环滚动 + 不可见字形快进跳过）。 */
+void we_marquee_simple_demo_init(we_lcd_t *lcd);
+void we_marquee_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* toast demo（轻提示横幅：非模态滑入自动消失 + union 标脏 + 超宽省略号）。 */
+void we_toast_simple_demo_init(we_lcd_t *lcd);
+void we_toast_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* focus demo（全局聚焦 + 按键导航：方向/Tab 移焦，OK 进入容器/触发控件，BACK 退出）。
+ * WE_CFG_ENABLE_KEY_INPUT == 0 时降级为提示桩。 */
+void we_focus_simple_demo_init(we_lcd_t *lcd);
+void we_focus_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* focus2 demo（聚焦编辑态：OK 进编辑光标变橙，方向键调 slider/stepper/roller/list）。
+ * WE_CFG_ENABLE_KEY_INPUT == 0 时降级为提示桩。 */
+void we_focus2_simple_demo_init(we_lcd_t *lcd);
+void we_focus2_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 /* 汇总 demo（仅模拟器：4 页 slideshow 串联主要控件与子系统）。 */
 void we_showcase_simple_demo_init(we_lcd_t *lcd);

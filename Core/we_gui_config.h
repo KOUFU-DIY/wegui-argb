@@ -34,6 +34,44 @@
 #define WE_PORT_FLUSH_ASYNC (GRAM_DMA_BUFF_EN)
 #endif
 
+/* 刷新区域像素对齐粒度（QSPI 彩屏 / SSD1306 页式 OLED 等硬件需求）。
+ * 部分屏幕对刷新窗口坐标有硬件粒度要求：
+ *   - QSPI 接口彩屏常要求 set_addr 的 x/y 起止坐标为 2 或 4 的倍数；
+ *   - SSD1306 等页式单色 OLED 以 8 行为一页，y 向必须按 8 对齐。
+ * 语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把矩形
+ * 扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上取整到
+ * 对齐倍数-1。扩出的边缘随本矩形整块走正常渲染路径重绘，因此推屏时
+ * set_addr 收到的窗口天然对齐，且像素流与窗口严格一致。
+ * 取值必须为 2 的幂；平台端口不定义时默认 1（不对齐），
+ * 现有平台零行为、零开销变化。 */
+#ifndef WE_LCD_FLUSH_ALIGN_X
+#define WE_LCD_FLUSH_ALIGN_X (1)
+#endif
+
+#ifndef WE_LCD_FLUSH_ALIGN_Y
+#define WE_LCD_FLUSH_ALIGN_Y (1)
+#endif
+
+#if (WE_LCD_FLUSH_ALIGN_X < 1) || ((WE_LCD_FLUSH_ALIGN_X & (WE_LCD_FLUSH_ALIGN_X - 1)) != 0)
+#error "WE_LCD_FLUSH_ALIGN_X must be a power of two (1/2/4/8...): dirty_driver.c expands rects with x0 &= ~(A-1) / x1 |= (A-1), which is only valid for power-of-two A."
+#endif
+
+#if (WE_LCD_FLUSH_ALIGN_Y < 1) || ((WE_LCD_FLUSH_ALIGN_Y & (WE_LCD_FLUSH_ALIGN_Y - 1)) != 0)
+#error "WE_LCD_FLUSH_ALIGN_Y must be a power of two (1/2/4/8...): dirty_driver.c expands rects with y0 &= ~(A-1) / y1 |= (A-1), which is only valid for power-of-two A."
+#endif
+
+#if ((SCREEN_WIDTH % WE_LCD_FLUSH_ALIGN_X) != 0)
+#error "SCREEN_WIDTH must be a multiple of WE_LCD_FLUSH_ALIGN_X: otherwise a rect touching the right screen edge cannot be both clamped on-screen and X-aligned when expanded."
+#endif
+
+#if ((SCREEN_HEIGHT % WE_LCD_FLUSH_ALIGN_Y) != 0)
+#error "SCREEN_HEIGHT must be a multiple of WE_LCD_FLUSH_ALIGN_Y: otherwise a rect touching the bottom screen edge cannot be both clamped on-screen and Y-aligned when expanded."
+#endif
+
+#if (((USER_GRAM_NUM / SCREEN_WIDTH) % WE_LCD_FLUSH_ALIGN_Y) != 0)
+#error "PFB row count (USER_GRAM_NUM / SCREEN_WIDTH) must be a multiple of WE_LCD_FLUSH_ALIGN_Y: we_push_pfb splits each dirty rect into PFB-row chunks after one set_addr, and chunk boundaries inherit the Y alignment only if the PFB row capacity is itself a multiple of it (page-packing flush ports rely on whole pages per chunk)."
+#endif
+
 #ifndef WE_CFG_DIRTY_STRATEGY
 #error "WE_CFG_DIRTY_STRATEGY must be defined by platform port config."
 #endif
@@ -48,10 +86,6 @@
 
 #ifndef WE_CFG_ENABLE_INDEXED_QOI
 #error "WE_CFG_ENABLE_INDEXED_QOI must be defined by platform port config."
-#endif
-
-#ifndef WE_CFG_GUI_TASK_MAX_NUM
-#error "WE_CFG_GUI_TASK_MAX_NUM must be defined by platform port config."
 #endif
 
 #ifndef WE_CFG_GUI_TIMER_MAX_NUM
@@ -91,5 +125,92 @@
 #ifndef WE_CFG_DEBUG_PERF_STRESS
 #define WE_CFG_DEBUG_PERF_STRESS 0
 #endif
+
+/* 全局聚焦 + 按键导航总开关。
+ * 1：启用 we_gui_key_inject 键值注入、焦点管理器、分层作用域导航
+ *    （OK 进入容器 / BACK 退出容器）与驱动级矩形焦点光标；
+ * 0：全部编译剔除——we_lcd_t 不含任何焦点字段、we_class_t 不含 key_cb、
+ *    各控件按键回调整体不参与编译，纯触摸工程零 ROM/RAM 成本。
+ * 平台端口不定义时默认关闭。 */
+#ifndef WE_CFG_ENABLE_KEY_INPUT
+#define WE_CFG_ENABLE_KEY_INPUT 0
+#endif
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+
+/* 编辑态子开关（默认开）。
+ * 1：OK 可进入编辑态，方向键在值类控件（slider/stepper/roller/list）上调值；
+ * 0：整个编辑态编译剔除——驱动侧编辑分支/编辑色/we_focus_edit_* 退化为空
+ *    操作 stub，值类控件的按键回调整体不参与编译（不可聚焦）。
+ *    只有按钮/开关类控件的极简按键面板可再省数百字节 ROM。 */
+#ifndef WE_CFG_FOCUS_EDIT
+#define WE_CFG_FOCUS_EDIT 1
+#endif
+
+/* 层级导航子开关（默认开）。
+ * 1：焦点可经 OK 下钻进入复合容器（group 等）、BACK 逐层上退；
+ * 0：候选判定不再递归容器子树、下钻代码剔除，焦点环只含顶层可聚焦
+ *    控件，BACK 直接清除焦点。扁平界面产品可再省约两百字节 ROM。
+ *    （触摸跟随/we_focus_set 仍可把焦点直接放到容器内的控件上。） */
+#ifndef WE_CFG_FOCUS_NESTED
+#define WE_CFG_FOCUS_NESTED 1
+#endif
+
+/* 语义键环形队列深度（须为 2 的幂；SPSC 单生产者单消费者语义，
+ * 实际容量 = 深度-1，队满时丢弃新注入的键值）。
+ * 按下/松开双沿各占一个槽位，tap 式注入一次占两格，故默认给到 8。 */
+#ifndef WE_CFG_KEY_QUEUE_LEN
+#define WE_CFG_KEY_QUEUE_LEN 8
+#endif
+
+#if (WE_CFG_KEY_QUEUE_LEN < 2) || ((WE_CFG_KEY_QUEUE_LEN & (WE_CFG_KEY_QUEUE_LEN - 1)) != 0)
+#error "WE_CFG_KEY_QUEUE_LEN must be a power of two (2/4/8/...): the ring indices wrap with & (LEN-1), which avoids pulling in __aeabi_uidivmod on Cortex-M0."
+#endif
+
+/* 焦点光标框线宽（像素）。 */
+#ifndef WE_CFG_FOCUS_CURSOR_THICKNESS
+#define WE_CFG_FOCUS_CURSOR_THICKNESS 2
+#endif
+
+/* 焦点光标框与控件包围盒之间的间隙（像素）。 */
+#ifndef WE_CFG_FOCUS_CURSOR_GAP
+#define WE_CFG_FOCUS_CURSOR_GAP 2
+#endif
+
+/* 焦点光标颜色（RGB888，内部按目标色深转换）。 */
+#ifndef WE_CFG_FOCUS_CURSOR_R
+#define WE_CFG_FOCUS_CURSOR_R 92
+#endif
+#ifndef WE_CFG_FOCUS_CURSOR_G
+#define WE_CFG_FOCUS_CURSOR_G 181
+#endif
+#ifndef WE_CFG_FOCUS_CURSOR_B
+#define WE_CFG_FOCUS_CURSOR_B 255
+#endif
+
+/* OK 最短按压窗口（毫秒，≤255）：tap 式注入（一按一松同周期到达）时，
+ * 松开沿会挂起到窗口结束再交付，保证按压视觉至少可见这么久；
+ * 端口双沿上报且真实按住超过窗口时不引入任何额外延迟。 */
+#ifndef WE_CFG_FOCUS_FLASH_MS
+#define WE_CFG_FOCUS_FLASH_MS 90U
+#endif
+
+#if (WE_CFG_FOCUS_FLASH_MS) > 255
+#error "WE_CFG_FOCUS_FLASH_MS must fit in uint8 (<= 255): we_lcd_t stores the countdown in one byte."
+#endif
+
+/* 编辑态焦点光标颜色（RGB888）：值类控件 OK 进入编辑后光标换此色，
+ * 与导航色区分"当前方向键在调值而不是移焦点"。 */
+#ifndef WE_CFG_FOCUS_EDIT_R
+#define WE_CFG_FOCUS_EDIT_R 255
+#endif
+#ifndef WE_CFG_FOCUS_EDIT_G
+#define WE_CFG_FOCUS_EDIT_G 150
+#endif
+#ifndef WE_CFG_FOCUS_EDIT_B
+#define WE_CFG_FOCUS_EDIT_B 60
+#endif
+
+#endif /* WE_CFG_ENABLE_KEY_INPUT */
 
 #endif

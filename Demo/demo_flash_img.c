@@ -59,9 +59,9 @@ void we_flash_img_simple_demo_init(we_lcd_t *lcd)
                       "FLASH OP 255", we_font_consolas_18,
                       RGB888TODEV(255, 154, 102), 255);
 
-    ok |= we_flash_img_obj_init(&fl_img1, lcd, 56, 90, bin_addr_table[IMG_DEMO_RGB565_ID], 255U);
-    ok |= we_flash_img_obj_init(&fl_img2, lcd, 128, 48, bin_addr_table[IMG_DEMO_RGB565_INDEXQOI2_ID], 255U);
-    ok |= we_flash_img_obj_init(&fl_img3, lcd, 10, 130, bin_addr_table[IMG_DEMO_ARGB8565_INDEXQOI_ID], 255U);
+    ok |= we_flash_img_obj_init(&fl_img1, lcd, 56, 90, bin_addr_table[DEMO_RAW_ID], 255U);
+    ok |= we_flash_img_obj_init(&fl_img2, lcd, 128, 48, bin_addr_table[DEMO_CAT_ID], 255U);
+    ok |= we_flash_img_obj_init(&fl_img3, lcd, 10, 130, bin_addr_table[DEMO_ALPHA_ID], 255U);
 
     if (!ok)
     {

@@ -12,7 +12,7 @@
 #include "simple_widget_demos.h"
 
 #include "demo_common.h"
-#include "image_res.h"
+#include "res_images.h"
 #include "widgets/img_ex/we_widget_img_ex.h"
 #include <stdio.h>
 #include <string.h>
@@ -60,7 +60,7 @@ void we_img_ex_simple_demo_init(we_lcd_t *lcd)
                       "ANG 0  SCALE 256", we_font_consolas_18,
                       RGB888TODEV(245, 214, 120), 255);
 
-    we_img_ex_obj_init(&img_ex_obj, lcd, 160, 148, img_rgb565_64x80, 255);
+    we_img_ex_obj_init(&img_ex_obj, lcd, 160, 148, demo_sprite, 255);
     we_img_ex_obj_set_pivot_offset(&img_ex_obj, -44, 0);
 }
 

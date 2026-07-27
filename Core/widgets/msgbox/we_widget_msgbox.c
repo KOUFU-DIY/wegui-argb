@@ -371,7 +371,7 @@ static void _popup_refresh_layout(we_popup_obj_t *obj)
     if (obj == NULL || obj->base.lcd == NULL)
         return;
 
-    max_panel_w = (uint16_t)(obj->base.lcd->width - WE_POPUP_EDGE_MARGIN * 2);
+    max_panel_w = (uint16_t)(obj->base.lcd->width - WE_MSGBOX_EDGE_MARGIN * 2);
     title_w = _popup_text_longest_line_width(obj->title_font, obj->title);
     msg_w = _popup_text_longest_line_width(obj->message_font, obj->message);
     confirm_w = _popup_text_longest_line_width(obj->button_font, obj->confirm_text);
@@ -812,7 +812,7 @@ static void _popup_draw_cb(void *ptr)
     /* 面板圆角填充：仅 4 个 r×r 角落做抗锯齿，主体/直边走快速矩形填充。
      * 透明度由入口的 opa_scale 级联统一作用，主体与四角同一份，淡入淡出无亮度断层。 */
     we_draw_round_rect_analytic_fill(lcd, panel_x, obj->panel_y, obj->panel_w, obj->panel_h,
-                                     WE_POPUP_RADIUS, RGB888TODEV(46, 52, 64), 255);
+                                     WE_MSGBOX_RADIUS, RGB888TODEV(46, 52, 64), 255);
 
     if (obj->title != NULL && obj->title_font != NULL)
     {
@@ -940,7 +940,7 @@ static void _popup_anim_step_cb(void *owner, uint16_t elapsed_ms)
     }
 
     if (obj->anim_duration_ms == 0U)
-        obj->anim_duration_ms = WE_POPUP_ANIM_DURATION_MS;
+        obj->anim_duration_ms = WE_MSGBOX_ANIM_DURATION_MS;
 
     if (obj->anim_elapsed_ms + elapsed_ms >= obj->anim_duration_ms)
         obj->anim_elapsed_ms = obj->anim_duration_ms;
@@ -1020,12 +1020,12 @@ static void _popup_init_common(we_popup_obj_t *obj, we_lcd_t *lcd,
     obj->base.class_p = &_popup_class;
     obj->base.next = NULL;
 
-    obj->panel_min_w = (uint16_t)WE_MIN((int32_t)w, (int32_t)(lcd->width - WE_POPUP_EDGE_MARGIN * 2));
+    obj->panel_min_w = (uint16_t)WE_MIN((int32_t)w, (int32_t)(lcd->width - WE_MSGBOX_EDGE_MARGIN * 2));
     obj->panel_w = obj->panel_min_w;
     obj->panel_h = h;
     obj->panel_y = target_y;
     obj->anim_elapsed_ms = 0U;
-    obj->anim_duration_ms = WE_POPUP_ANIM_DURATION_MS;
+    obj->anim_duration_ms = WE_MSGBOX_ANIM_DURATION_MS;
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;
     obj->anim.owner = NULL;

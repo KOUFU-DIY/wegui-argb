@@ -402,10 +402,53 @@ static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *d
     return 1U; /* 始终消费 */
 }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：OK 进/退编辑态，编辑态方向键复用 _stepper_apply 步进。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 步进边界/回绕/标脏/回调全部复用触摸路径的 _stepper_apply；
+ *       端口按住连发注入即等效触摸长按连调。
+ */
+static uint8_t _stepper_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_stepper_obj_t *obj = (we_stepper_obj_t *)ptr;
+    we_lcd_t *lcd = obj->base.lcd;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        return (obj->enabled != 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK:
+        if (we_focus_edit_active(lcd))
+            we_focus_edit_exit(lcd);
+        else
+            we_focus_edit_enter(lcd);
+        return 1U;
+    case WE_KEY_LEFT:
+    case WE_KEY_DOWN:
+    case WE_KEY_RIGHT:
+    case WE_KEY_UP:
+        if (!we_focus_edit_active(lcd))
+            return 0U;
+        (void)_stepper_apply(obj, (key_evt == WE_KEY_LEFT || key_evt == WE_KEY_DOWN) ? -1 : 1);
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+#endif
+
 static const we_class_t _stepper_class = {
     .draw_cb = _stepper_draw_cb,
     .event_cb = _stepper_event_cb,
     .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
+    .key_cb = _stepper_key_cb,
+#endif
 };
 
 /**

@@ -3,6 +3,12 @@
 
 #include "we_gui_driver.h"
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 置 0 单独裁剪复选框的按键回调与可聚焦性，其余控件不受影响。 */
+#ifndef WE_CHECKBOX_USE_KEY
+#define WE_CHECKBOX_USE_KEY 1
+#endif
+
 /* 4 种视觉状态 */
 typedef enum
 {

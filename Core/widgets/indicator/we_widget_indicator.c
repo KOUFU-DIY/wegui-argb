@@ -26,10 +26,44 @@ static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
  */
 static void _indicator_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：OK = 翻转亮灭（镜像触摸 CLICKED 语义）。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 可聚焦性以 clickable 标记为准：只读灯不可聚焦（遍历自动跳过）。
+ *       有用户回调时业务交用户回调（data 为 NULL），否则默认翻转。
+ */
+static uint8_t _indicator_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_indicator_obj_t *obj = (we_indicator_obj_t *)ptr;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        return (obj->clickable != 0U && obj->opacity != 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK:
+        if (obj->user_event_cb != NULL)
+            (void)obj->user_event_cb(ptr, WE_EVENT_CLICKED, NULL);
+        else
+            we_indicator_toggle(obj);
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+#endif
+
 static const we_class_t _indicator_class = {
     .draw_cb = _indicator_draw_cb,
     .event_cb = _indicator_event_cb,
-    .set_pos_cb = NULL
+    .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
+    .key_cb = _indicator_key_cb,
+#endif
 };
 
 static const colour_t _c_black = RGB888_CONST(0, 0, 0);

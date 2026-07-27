@@ -16,7 +16,7 @@
 │   label │ btn │ img │ img_ex │ arc │ group │ ...      │
 ├──────────────────────────────────────────────────────┤
 │          GUI Kernel (Core/we_gui_driver.h)            │
-│   tick │ timer │ task │ dirty-rect │ PFB render       │
+│   tick │ timer │ anim │ dirty-rect │ PFB render       │
 ├──────────────────────────────────────────────────────┤
 │         Platform Port Config (per-target header)      │
 │   LCD size │ color depth │ flush callback │ GPIO      │
@@ -130,7 +130,7 @@ Slots are limited by `WE_CFG_GUI_TIMER_MAX_NUM` (default 8).
 
 ### 3.1 中央动画引擎 (we_anim_t)
 
-控件动画统一由中央动画引擎驱动，**不占用任何 GUI task 槽**、数量无上限、不会注册失败。
+控件动画统一由中央动画引擎驱动，**不占用任何槽位**、数量无上限、不会注册失败。
 动画节点内嵌在控件结构体中（零堆分配），`we_gui_task_handler()` 每个调度周期遍历链表并调用 step 回调：
 
 ```c
@@ -155,7 +155,7 @@ we_anim_stop(&mylcd, &obj->anim);
    各控件的 `we_xxx_obj_delete()` 已内置此调用，自定义删除路径须自行保证。
 
 内置使用者：`toggle`、`progress`、`indicator`、`msgbox`、`slideshow`、`scroll_panel`、
-`dropdown`（滚动条淡出）。`WE_CFG_GUI_TASK_MAX_NUM` 的 4 个 task 槽完整保留给内核/用户扩展。
+`dropdown`（滚动条淡出）。
 
 ---
 
@@ -332,19 +332,32 @@ For per-widget API and behavior, see the corresponding `widget.md` under:
 - `Core/widgets/dropdown/widget.md`
 - `Core/widgets/stepper/widget.md`
 - `Core/widgets/indicator/widget.md`
+- `Core/widgets/gauge/widget.md`
+- `Core/widgets/list/widget.md`
+- `Core/widgets/roller/widget.md`
+- `Core/widgets/marquee/widget.md`
+- `Core/widgets/toast/widget.md`
+
+Experimental (preview zone) widgets keep the same convention under `Core/widgets_preview/<name>/widget.md` — e.g. `Core/widgets_preview/mask_group/widget.md`; they are simulator-only and may be removed at any time.
 
 Notable rendering notes:
 
 - `toggle` track and thumb are drawn via the shared analytic round-rect fill renderer.
 - `checkbox` box geometry is drawn via the shared analytic round-rect fill.
 - `chart` waveform-body / feathering ideas reference Arm-2D, but the implementation has been rewritten for WeGui's ring-buffer, dirty-rectangle, PFB clipping and integer coordinate pipeline.
-- `dropdown` expanded list uses pixel-level free scrolling; the scrollbar auto-fades to a residual minimum opacity (`WE_DROPDOWN_SB_IDLE_ALPHA`) after idle, driven by the central animation engine (no task slot). Its overlay popup draws through the single LCD-level `popup_layer`, so only one popup is open screen-wide.
+- `dropdown` expanded list uses pixel-level free scrolling; the scrollbar auto-fades to a residual minimum opacity (`WE_DROPDOWN_SB_IDLE_ALPHA`) after idle, driven by the central animation engine (no timer slot). Its overlay popup draws through the single LCD-level `popup_layer`, so only one popup is open screen-wide.
 - `stepper` stores its value as fixed-point `int32` (real value = `value / 10^decimals`); hold-to-repeat reuses the `STAY` event and consumes no timer slot.
-- `indicator` animates its on/off color transition (optional glow) via the central animation engine (see 3.1, no task slot); default is read-only, opt into click-toggle with `we_indicator_set_clickable()`.
-- All widget animations (`toggle`/`progress`/`indicator`/`msgbox`/`slideshow`/`scroll_panel`/`dropdown`) run on the central animation engine — none of them consume GUI task slots.
+- `indicator` animates its on/off color transition (optional glow) via the central animation engine (see 3.1, no timer slot); default is read-only, opt into click-toggle with `we_indicator_set_clickable()`.
+- All widget animations (`toggle`/`progress`/`indicator`/`msgbox`/`slideshow`/`scroll_panel`/`dropdown`) run on the central animation engine — none of them consume timer slots.
 - `slider`/`toggle`/`checkbox` support a value-changed callback (`we_xxx_set_changed_cb`), fired only on user interaction (programmatic setters do not fire it); `dropdown`/`stepper` had equivalent callbacks already.
 - A bare `group` now hit-forwards touch events to its children (press-lock + click re-verification), so interactive widgets inside a plain group receive input; a fully transparent group does not intercept input.
 - Container opacity propagates to children: `we_group_set_opacity` (and slideshow/scroll_panel opacity) fades the whole subtree. Mechanism: containers multiply into the lcd-level `opa_scale` around their children pass; every primitive applies it once at entry (`we_opa_apply`) — zero per-pixel cost when no fade is active, nesting composes automatically.
+- `gauge` redraws differentially: a value change invalidates only the old + new pointer footprints (static tick ring never redrawn; equal quantized angles submit nothing). Tick geometry is cached at init/`set_range`/`set_tick_count`, and value→angle uses a Q16 slope pre-divided in `set_range` — zero trig and zero mul/div in the draw callback.
+- `list` injects inertia from both drag release and no-STAY fast swipes, allows ±24px rubber-band overscroll with rebound, and fades its scrollbar after 600ms idle to a resident low alpha (dropdown idiom). Dirty marking is per-interaction: one row strip on press/release, the content clip rect on scroll, the scrollbar strip on fade.
+- `roller` snaps to the nearest row on slow release and flings on fast release (velocity-projected landing row, release velocity seeds the snap animation). Scrolling dirty-marks only the centered text column band, and text measurement is fully cached (font-constant y-bbox + row-width cache) — zero measurement calls in the draw loop.
+- `marquee` scrolls as a seamless two-segment loop on one central anim node and draws through a windowed glyph loop: glyphs left of the window only advance the cursor (no bitmap fetch), and drawing stops past the right edge. Static (non-scrolling) when the text fits; input passes through (`event_cb` NULL).
+- `toast` is a non-modal slide-in/stay/slide-out banner on one central anim node; it never blocks input and does not occupy the LCD `popup_layer`. Each animation step submits a single union of old + new bboxes; over-wide text is tail-truncated with "..." (prefix drawn zero-copy via PFB right-edge narrowing).
+- (preview zone) `mask_group` — incubating in `Core/widgets_preview/mask_group/` — is an effect container: children draw at full speed through the normal narrowed-PFB pass (same idiom as group/scroll_panel), then the container runs a per-stripe post-pass in order gradient → border strips → corner compositing toward a solid backdrop color. Corners are **per-corner independently configurable** round/chamfer/square (`we_mask_group_set_corner(idx, style, r)`, geometry identical to box: K×K corner squares, single-pass `we_mask_quarter_ring_alpha` outer+inner coverage for bordered round corners, chamfer per-row spans with alpha 0/128/255 and 0.586·bw inner inset). A border (`we_mask_group_set_border(color, width)`) clips content at its inner edge (CSS-box-like picture frame); the gradient fades content only — the border stays solid, and container opacity converges it toward the backdrop via a once-per-frame `bd_eff`. Rotated linear gradient uses the 512-step angle system (`0` = +X, `128` = +Y); the inner loop is one int32 add per pixel (Q16 DDA, per-stripe setup uses 3 int64 divisions). All-square corners with no border and no gradient degenerates to a zero-cost rect-clip group. Solid-backdrop semantics: masked-out pixels are restored to `backdrop` (defaults to the LCD bg color), so stacking the container on top of images/other widgets will reveal the backdrop color in masked areas (true backdrop capture would need a snapshot buffer — not in v1). Conic/sweep gradients are intentionally not offered (per-pixel atan2 is not viable on M0).
 
 ---
 
@@ -541,10 +554,18 @@ Each platform must define these macros before including `we_gui_config.h`:
 | `WE_CFG_DIRTY_MAX_NUM` | Max dirty rects (strategy 2) | `8` |
 | `WE_CFG_DEBUG_DIRTY_RECT` | Show dirty rects in red | `0` or `1` |
 | `WE_CFG_ENABLE_INDEXED_QOI` | Enable indexed QOI decode | `0` or `1` |
-| `WE_CFG_GUI_TASK_MAX_NUM` | Internal task slots | `4` |
 | `WE_CFG_GUI_TIMER_MAX_NUM` | User timer slots | `8` |
 | `WE_CFG_ENABLE_INPUT_PORT_BIND` | Enable input port binding | `0` or `1` |
 | `WE_CFG_ENABLE_STORAGE_PORT_BIND` | Enable storage port binding | `0` or `1` |
+
+Optional macros (defaulted by `we_gui_config.h` when the platform omits them):
+
+| Macro | Description | Default |
+|-------|-------------|---------|
+| `WE_LCD_FLUSH_ALIGN_X` | Flush-window X alignment granularity (power of two). Dirty rects are expanded at intake (`we_dirty_invalidate`) so every `set_addr` window has `x0 % A == 0` and `(x1 + 1) % A == 0`. For QSPI panels requiring x multiples of 2/4. Requires `SCREEN_WIDTH % A == 0`. | `1` |
+| `WE_LCD_FLUSH_ALIGN_Y` | Flush-window Y alignment granularity (power of two), same intake expansion for y. For QSPI panels (2/4) or SSD1306-class page OLEDs (`8`). Requires `SCREEN_HEIGHT % A == 0` and PFB rows (`USER_GRAM_NUM / SCREEN_WIDTH`) `% A == 0` so PFB chunking inherits the alignment. | `1` |
+
+See `Demo/we_lcd_port_template.h` for worked QSPI and SSD1306 (RGB565→1bpp page packing) port examples.
 
 Config header chain: `we_port.h` → selects platform config → `we_gui_config.h` validates all macros.
 
@@ -623,7 +644,7 @@ int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); //
 
 ### Existing Demos (DEMO_ID)
 
-Numbering is unified across all three targets — `1..21` are identical. The simulator
+Numbering is unified across all three targets — `1..28` are identical. The simulator
 additionally defines `0 = showcase` (simulator-only, needs 800×480). Select a demo by
 editing the `#define DEMO_ID` line near the top of `main`.
 
@@ -651,6 +672,13 @@ editing the `#define DEMO_ID` line near the top of `main`.
 | 19 | dropdown |
 | 20 | stepper |
 | 21 | indicator |
+| 22 | line |
+| 23 | box |
+| 24 | gauge |
+| 25 | list |
+| 26 | roller |
+| 27 | marquee |
+| 28 | toast |
 
 ---
 

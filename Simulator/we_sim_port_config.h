@@ -119,10 +119,6 @@ static inline void we_lcd_set_addr_port(uint16_t x0, uint16_t y0, uint16_t x1, u
 #define WE_CFG_ENABLE_INDEXED_QOI (1)
 #endif
 
-#ifndef WE_CFG_GUI_TASK_MAX_NUM
-#define WE_CFG_GUI_TASK_MAX_NUM (4)
-#endif
-
 #ifndef WE_CFG_ENABLE_INPUT_PORT_BIND
 #define WE_CFG_ENABLE_INPUT_PORT_BIND (0)
 #endif

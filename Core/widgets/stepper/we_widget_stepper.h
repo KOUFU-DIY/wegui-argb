@@ -16,6 +16,13 @@
  *     decimals=1, min=160, max=300, step=5, init=230。
  * -------------------------------------------------------------------------- */
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 置 0 单独裁剪步进器的按键回调与可聚焦性，其余控件不受影响。
+ * 键控步进依赖编辑态，WE_CFG_FOCUS_EDIT=0 时本支持整体关闭。 */
+#ifndef WE_STEPPER_USE_KEY
+#define WE_STEPPER_USE_KEY 1
+#endif
+
 /* 连续步进：按住后首次重复前的延迟（STAY 次数，约 16ms/次 → 25≈400ms） */
 #ifndef WE_STEPPER_HOLD_DELAY
 #define WE_STEPPER_HOLD_DELAY 25U
@@ -43,17 +50,16 @@ typedef struct we_stepper_obj_t
     int32_t min_value; /* 定点下限 */
     int32_t max_value; /* 定点上限 */
     int32_t step;      /* 单次步进的定点增量（>0） */
-    uint8_t decimals;  /* 小数位数，0 = 纯整数 */
-    uint8_t wrap;      /* 非 0：到边界回绕；0：到边界禁用对应按钮 */
-    uint8_t enabled;   /* 是否可交互 */
-    uint16_t radius;   /* 底框圆角 */
     const unsigned char *font;
     we_stepper_changed_cb_t changed_cb;
-    /* --- 交互运行态 --- */
+    uint16_t radius;   /* 底框圆角 */
+    uint16_t hold_cnt; /* 按住期间累计的 STAY 次数 */
+    char buf[16];      /* 数值文本缓冲（draw 时刷新） */
+    uint8_t decimals;  /* 小数位数，0 = 纯整数 */
     int8_t active_side; /* 当前按住的一侧：-1=减，+1=加，0=无 */
-    uint8_t pressed;    /* 是否处于按下态（用于按钮高亮） */
-    uint16_t hold_cnt;  /* 按住期间累计的 STAY 次数 */
-    char buf[16];       /* 数值文本缓冲（draw 时刷新） */
+    uint8_t wrap : 1;    /* 1：到边界回绕；0：到边界禁用对应按钮 */
+    uint8_t enabled : 1; /* 是否可交互 */
+    uint8_t pressed : 1; /* 是否处于按下态（用于按钮高亮） */
 } we_stepper_obj_t;
 
 /**

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Clean
 )
 
@@ -8,8 +8,28 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $simRoot = Join-Path $repoRoot 'Simulator'
 $buildDir = Join-Path $simRoot 'build'
 
+# 先停掉运行中的模拟器：exe 被占用会导致 -Clean 删除失败或链接期写不进
+# （与 VS Code 任务 sim: stop running 同口径，脚本内自带避免踩坑）
+Get-Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessName -like 'wegui_sim*' } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+
 if ($Clean -and (Test-Path $buildDir)) {
-    Remove-Item -Recurse -Force $buildDir
+    # OneDrive 对目录节点的句柄释放较慢，整树 Remove-Item -Recurse 容易报
+    # IOException。-Clean 只需要清空内容：先删文件、再自深向浅删子目录，
+    # 目录节点本身删不掉也无妨（空目录不影响全新配置）。
+    Get-ChildItem $buildDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+    $left = @(Get-ChildItem $buildDir -Recurse -File -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        Write-Warning ("有 " + $left.Count + " 个文件仍被占用未删除（如模拟器/杀软占用），继续构建可能复用旧产物")
+    }
+    Get-ChildItem $buildDir -Recurse -Directory -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | ForEach-Object {
+            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+    Remove-Item $buildDir -Force -ErrorAction SilentlyContinue
 }
 
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
@@ -65,6 +85,33 @@ elseif ($mingwMake -and $gcc -and $gxx) {
 }
 else {
     throw 'No supported local build toolchain found in PATH. Require either ninja+gcc+g++ or mingw32-make+gcc+g++.'
+}
+
+# 生成器自愈：build 缓存记录的生成器与本次选择不一致时（工具链切换、
+# OneDrive 回同步旧缓存等）自动清掉 CMakeCache/CMakeFiles 重新配置，
+# 避免 "Does not match the generator used previously" 卡死。
+$genIndex = [Array]::IndexOf($configureArgs, '-G')
+if ($genIndex -ge 0) {
+    $wantGen = $configureArgs[$genIndex + 1]
+    $cacheFile = Join-Path $buildDir 'CMakeCache.txt'
+    if (Test-Path $cacheFile) {
+        $m = Select-String -Path $cacheFile -Pattern '^CMAKE_GENERATOR:INTERNAL=(.+)$' | Select-Object -First 1
+        if ($m -and $m.Matches[0].Groups[1].Value -ne $wantGen) {
+            Write-Host ("CMake generator changed: '" + $m.Matches[0].Groups[1].Value + "' -> '" + $wantGen + "', purging stale cache")
+            Remove-Item $cacheFile -Force -ErrorAction SilentlyContinue
+            $cmFilesDir = Join-Path $buildDir 'CMakeFiles'
+            if (Test-Path $cmFilesDir) {
+                Get-ChildItem $cmFilesDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+                }
+                Get-ChildItem $cmFilesDir -Recurse -Directory -ErrorAction SilentlyContinue |
+                    Sort-Object FullName -Descending | ForEach-Object {
+                        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+                    }
+                Remove-Item $cmFilesDir -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
 
 & $cmake.Source @configureArgs

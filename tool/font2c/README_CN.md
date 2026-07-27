@@ -1,5 +1,9 @@
 # font2c
 
+[![CI](https://github.com/KOUFU-DIY/we_font2c/actions/workflows/ci.yml/badge.svg)](https://github.com/KOUFU-DIY/we_font2c/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KOUFU-DIY/we_font2c)](https://github.com/KOUFU-DIY/we_font2c/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `font2c` 是一个面向嵌入式项目的单文件字体取模工具。
 它可以把 `ttf` / `otf` / `ttc` 字体导出为：
 
@@ -13,6 +17,16 @@
 
 JSON 相关说明放在 `input/README_CN.md`。
 构建相关说明放在 `builder/README_CN.md`。
+更新记录放在 `CHANGELOG.md`。
+参与说明放在 `CONTRIBUTING.md`。
+
+## 仓库发布说明
+
+- `fonts/` 目录在仓库中默认保持为空，请在本地自行放入字体，并在公开分发前确认字体授权。
+- `output/` 和根目录下的 `font2c.exe` 属于本地构建产物，默认通过 Git 忽略。
+- 本仓库采用 MIT License，详见 [LICENSE](LICENSE)。
+- 已启用 Windows 和 macOS 的持续集成构建。
+- 推送 `v*` 标签会自动触发 Release 编译，生成 Windows 和 macOS 二进制。
 
 ## 快速开始
 
@@ -45,9 +59,50 @@ font2c.exe build input\arial_16_4bbp.json -o output
 ```txt
 font2c.exe build <config.json> [-o <output_dir>]
 font2c.exe build-all <input_dir> [-o <output_dir>]
+font2c.exe scan --src <dir> [--src <dir> ...] [扫描选项]
 font2c.exe --help
 font2c.exe --version
 ```
+
+## 字符集扫描
+
+`scan` 用于收集固件源码里实际用到的非 ASCII 字符，并让配置的
+`charset.chars` 与源码保持同步：
+
+```txt
+font2c.exe scan --src <dir> [--src <dir> ...] [--ext c,h] [--extra <file>]
+                [--json <cfg.json>] [--prune] [--out charset.txt] [--dry-run]
+```
+
+选项：
+
+- `--src <dir>`：源码目录，递归扫描，可重复
+- `--ext <list>`：逗号分隔的源码扩展名，默认 `c,h`
+- `--extra <file>`：UTF-8 文本文件，其中的字符并入扫描结果，可重复
+- `--json <cfg.json>`：把扫描结果合并进该配置的 `charset.chars`
+- `--prune`：配合 `--json`，同时删除扫描中没出现的字符
+- `--out <file>`：把扫描结果写入 UTF-8 文本文件
+- `--dry-run`：只报告，不写任何文件
+
+扫描规则：
+
+- 源码按 UTF-8 读取；容忍 BOM，非法字节序列跳过并给出警告
+- 剥离 `//` 与 `/* */` 注释；只从双引号字符串字面量中收集字符
+  （能正确处理 `\\`、`\"` 等转义，`\uXXXX` / `\UXXXXXXXX` 会被解码）
+- 只收集码点 `>= U+0080` 的字符；ASCII 建议由
+  `charset.ranges` 的 `U+0020`–`U+007E` 区间兜底
+- 结果按码点去重排序
+
+`--json` 更新规则：
+
+- 打印与当前 `charset.chars` 的差异：`+N new, M unseen`
+- 默认只增不删；`--prune` 才删除源码未见的字符
+- `charset.chars` 里已有的 ASCII 字符不会被添加、统计或删除；
+  `charset.ranges` 永远不会被修改
+- 只有 `charset.chars` 会变化；其它字段的值和顺序保持不变
+  （文件按标准 2 空格缩进重新写出）
+- 如果没有变化，不会重写文件
+- 运行时拼接的文字（例如 `sprintf`）扫不到，请写进 `--extra` 文件兜底
 
 ## 字体查找顺序
 

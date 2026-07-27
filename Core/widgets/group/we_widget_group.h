@@ -13,22 +13,26 @@ extern "C"
 #define WE_GROUP_CHILD_MAX 24
 #endif
 
+#if WE_GROUP_CHILD_MAX > 32
+#error "WE_GROUP_CHILD_MAX must be <= 32: slot occupancy is a uint32 bitmask (slot_used_mask)."
+#endif
+
 typedef struct
 {
     we_obj_t *child;
     int16_t local_x;
     int16_t local_y;
-    uint8_t used;
 } we_group_child_slot_t;
 
 typedef struct
 {
     we_obj_t base;                /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
+    we_obj_t *last_pressed_child; /* 命中转发：本次触摸序列按到的子控件 */
+    uint32_t slot_used_mask;      /* 槽位占用位图（bit i = child_slots[i] 在用） */
     colour_t bg_color;
     uint8_t opacity;
     we_group_child_slot_t child_slots[WE_GROUP_CHILD_MAX];
-    we_obj_t *last_pressed_child; /* 命中转发：本次触摸序列按到的子控件 */
 } we_group_obj_t;
 
 /**

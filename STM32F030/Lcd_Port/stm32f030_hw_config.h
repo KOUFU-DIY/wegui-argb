@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define SCREEN_X_OFFSET (0)
+#define SCREEN_X_OFFSET (-40)
 #define SCREEN_Y_OFFSET (0)
 
 #define _ST7735   (1)

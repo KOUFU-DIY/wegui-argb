@@ -14,11 +14,13 @@
  *   0x2 = 改进RLE
  *   0x3 = 原始QOI(无字典)
  *   0x4 = 索引QOI
+ *   0x5 = QOIF (img2bin 工具族预留，Core 暂未实现解码)
  *
  * 格式代码[3:0] 像素格式:
  *   0x0 = RGB565    0x1 = RGB888    0x2 = RGB555    0x3 = RGB444
  *   0x4 = RGB332    0x5 = ARGB8888  0x6 = ARGB6666  0x7 = ARGB4444
- *   0x8 = ARGB8565  0xF = OLED点阵
+ *   0x8 = ARGB8565  0x9 = ARGB2222  0xA = RAGB5155  0xF = OLED点阵
+ *   (0x9/0xA 为 img2bin 工具族预留，Core 暂未实现解码)
  */
 
 /* 信息头偏移 */
@@ -101,9 +103,7 @@ typedef enum
     IMG_ARGB8565_INDEXQOI = 0x48,
 } imgarry_type_t;
 
-extern const unsigned char img_rgb565_64x80[10246];
-extern const unsigned char img_rgb565_indexqoi_96x54[8074];
-extern const unsigned char img_argb8565_indexqoi_208x42[5236];
-extern const unsigned char img_argb8565_indexqoi_80x80[4784];
+/* demo 图片数组已迁至资源工作区自动生成（tool/res/out/res_images.c/.h，
+ * 由 tool/res/update_resources.cmd 一键更新）；本头文件只保留 v2 信息头契约。 */
 
 #endif

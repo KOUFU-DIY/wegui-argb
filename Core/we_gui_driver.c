@@ -18,60 +18,14 @@ limitations under the License.
 #include "we_render.h"
 
 /* --------------------------------------------------------------------------
- * GUI 周期任务调度辅助
+ * GUI 时间调度模型（两层）
  *
- * 设计目标：
- * 1. 把 GUI 内部周期逻辑从 we_gui_task_handler() 主体里拆出来；
- *    （注意：控件/容器动画走中央动画引擎 we_anim_t，链入 lcd->anim_head，不占 task 槽）
- * 2. 后续如果继续增加光标闪烁等内部周期逻辑，只需要注册任务回调；
- * 3. 使用固定数量数组，避免动态内存和复杂链表，适合低成本 MCU。
+ * 1. 用户定时器（timer_list，固定槽位数组）：面向业务层的
+ *    we_gui_timer_create 一族接口，适合"按时间触发"的逻辑；
+ * 2. 中央动画引擎（we_anim_t 侵入式链表，lcd->anim_head）：控件/容器
+ *    动画统一走这里，节点内嵌在控件结构体里，零堆、不占槽位、数量无上限。
+ * 两者都由 we_gui_task_handler() 每个调度周期统一推进。
  * -------------------------------------------------------------------------- */
-/**
- * @brief 执行一轮 GUI 内部任务回调分发
- * @param p_lcd 传入，当前 GUI 屏幕上下文指针
- * @param elapsed_ms 传入，本轮累计的已流逝时间，单位毫秒
- * @return 无
- * @note 仅分发已注册回调，不在此处做任务优先级或重入控制。
- */
-static void _we_gui_run_tasks(we_lcd_t *p_lcd, uint16_t elapsed_ms)
-{
-    uint8_t i;
-
-    if (p_lcd == NULL || elapsed_ms == 0U)
-        return;
-
-    for (i = 0; i < WE_CFG_GUI_TASK_MAX_NUM; i++)
-    {
-        if (p_lcd->task_list[i].cb != NULL)
-        {
-            p_lcd->task_list[i].cb(p_lcd, p_lcd->task_list[i].user_data, elapsed_ms);
-        }
-    }
-}
-
-/**
- * @brief 在 GUI 内部任务表中查找空闲槽位
- * @param p_lcd 传入，当前 GUI 屏幕上下文指针
- * @return 成功返回空槽索引(0 ~ WE_CFG_GUI_TASK_MAX_NUM-1)，失败返回 -1
- */
-static int8_t _we_gui_find_free_task_slot(we_lcd_t *p_lcd)
-{
-    uint8_t i;
-
-    if (p_lcd == NULL)
-        return -1;
-
-    for (i = 0; i < WE_CFG_GUI_TASK_MAX_NUM; i++)
-    {
-        if (p_lcd->task_list[i].cb == NULL)
-        {
-            return (int8_t)i;
-        }
-    }
-
-    return -1;
-}
-
 /**
  * @brief 在 GUI 用户定时器表中查找空闲槽位
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
@@ -1133,6 +1087,134 @@ uint8_t we_mask_quarter_circle_alpha(int16_t x, int16_t y, uint16_t radius,
     return (uint8_t)(((uint32_t)cov16 * 255U + 8U) >> 4);
 }
 
+/**
+ * @brief 计算同心内外两个四分之一圆在单个像素上的 alpha mask（单次子采样）
+ * @param x 传入，外圆外接正方形左上角 X 坐标
+ * @param y 传入，外圆外接正方形左上角 Y 坐标
+ * @param r_out 传入，外圆半径
+ * @param r_in 传入，内圆半径（<= r_out，0 表示无内圆）
+ * @param quadrant 传入，象限标识，取值见 WE_MASK_QUADRANT_xx
+ * @param px 传入，目标像素 X 坐标
+ * @param py 传入，目标像素 Y 坐标
+ * @param p_fill_alpha 传出，内圆覆盖 alpha（0~255，即“填充区”覆盖）
+ * @return 返回外圆覆盖 alpha（0~255）；环带（边框）覆盖 = 返回值 - *p_fill_alpha
+ * @note 供带边框圆角（如 box 控件）使用：内外圆同心，AA 带内 4x4 子采样只跑一遍，
+ *       每个采样点的 d² 同时与内外半径比较，比分别调两次 quarter-circle mask 省一半。
+ */
+uint8_t we_mask_quarter_ring_alpha(int16_t x, int16_t y, uint16_t r_out, uint16_t r_in,
+                                   uint8_t quadrant, int16_t px, int16_t py,
+                                   uint8_t *p_fill_alpha)
+{
+    int32_t cx16;
+    int32_t cy16;
+    int32_t ro16_sq;
+    int32_t ri16_sq;
+    int32_t near_dx;
+    int32_t near_dy;
+    int32_t far_dx;
+    int32_t far_dy;
+    int32_t near_d2;
+    int32_t far_d2;
+    uint8_t cov_o = 0U;
+    uint8_t cov_i = 0U;
+    uint8_t out_full;
+    uint8_t in_zero;
+    uint8_t syi;
+    uint8_t sxi;
+    static const uint8_t sample_ofs[4] = { 2U, 6U, 10U, 14U };
+
+    *p_fill_alpha = 0U;
+    if (r_out == 0U)
+        return 0U;
+
+    switch (quadrant)
+    {
+    case WE_MASK_QUADRANT_LT:
+        cx16 = (int32_t)(x + r_out) * 16;
+        cy16 = (int32_t)(y + r_out) * 16;
+        near_dx = (int32_t)(px + 1 - (x + r_out)) * 16;
+        near_dy = (int32_t)(py + 1 - (y + r_out)) * 16;
+        far_dx = (int32_t)(px - (x + r_out)) * 16;
+        far_dy = (int32_t)(py - (y + r_out)) * 16;
+        break;
+    case WE_MASK_QUADRANT_RT:
+        cx16 = (int32_t)x * 16;
+        cy16 = (int32_t)(y + r_out) * 16;
+        near_dx = (int32_t)(px - x) * 16;
+        near_dy = (int32_t)(py + 1 - (y + r_out)) * 16;
+        far_dx = (int32_t)(px + 1 - x) * 16;
+        far_dy = (int32_t)(py - (y + r_out)) * 16;
+        break;
+    case WE_MASK_QUADRANT_LB:
+        cx16 = (int32_t)(x + r_out) * 16;
+        cy16 = (int32_t)y * 16;
+        near_dx = (int32_t)(px + 1 - (x + r_out)) * 16;
+        near_dy = (int32_t)(py - y) * 16;
+        far_dx = (int32_t)(px - (x + r_out)) * 16;
+        far_dy = (int32_t)(py + 1 - y) * 16;
+        break;
+    case WE_MASK_QUADRANT_RB:
+    default:
+        cx16 = (int32_t)x * 16;
+        cy16 = (int32_t)y * 16;
+        near_dx = (int32_t)(px - x) * 16;
+        near_dy = (int32_t)(py - y) * 16;
+        far_dx = (int32_t)(px + 1 - x) * 16;
+        far_dy = (int32_t)(py + 1 - y) * 16;
+        break;
+    }
+
+    ro16_sq = ((int32_t)r_out * 16) * ((int32_t)r_out * 16);
+    ri16_sq = ((int32_t)r_in * 16) * ((int32_t)r_in * 16);
+    near_d2 = near_dx * near_dx + near_dy * near_dy;
+    if (near_d2 >= ro16_sq)
+        return 0U; /* 整像素在外圆之外 */
+
+    far_d2 = far_dx * far_dx + far_dy * far_dy;
+    out_full = (uint8_t)(far_d2 <= ro16_sq);
+    in_zero  = (uint8_t)(r_in == 0U || near_d2 >= ri16_sq);
+
+    if (out_full)
+    {
+        if (in_zero)
+            return 255U; /* 环带满覆盖、内圆无覆盖 */
+        if (far_d2 <= ri16_sq)
+        {
+            *p_fill_alpha = 255U; /* 整像素在内圆之内 */
+            return 255U;
+        }
+    }
+
+    /* 至少一侧处于 AA 边界带：一遍 4x4 子采样同时统计内外覆盖 */
+    for (syi = 0U; syi < 4U; syi++)
+    {
+        int32_t sy = (int32_t)py * 16 + sample_ofs[syi];
+        int32_t dy = sy - cy16;
+        int32_t dy2 = dy * dy;
+
+        for (sxi = 0U; sxi < 4U; sxi++)
+        {
+            int32_t sx = (int32_t)px * 16 + sample_ofs[sxi];
+            int32_t dx = sx - cx16;
+            int32_t d2 = dx * dx + dy2;
+            if (d2 <= ro16_sq)
+            {
+                cov_o++;
+                if (!in_zero && d2 <= ri16_sq)
+                    cov_i++;
+            }
+        }
+    }
+    if (out_full)
+        cov_o = 16U;
+
+    if (cov_i != 0U)
+        *p_fill_alpha = (cov_i >= 16U) ? 255U : (uint8_t)(((uint32_t)cov_i * 255U + 8U) >> 4);
+    if (cov_o == 0U)
+        return 0U;
+    return (cov_o >= 16U) ? 255U : (uint8_t)(((uint32_t)cov_o * 255U + 8U) >> 4);
+}
+
 uint8_t we_mask_round_rect_alpha(int16_t x, int16_t y, uint16_t w, uint16_t h,
                                  uint16_t radius, int16_t px, int16_t py)
 {
@@ -1426,6 +1508,163 @@ void we_draw_line(we_lcd_t *p_lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y
     }
 }
 
+/**
+ * @brief 整数平方根（向下取整），用于圆头线的端帽距离
+ */
+static uint32_t _we_isqrt32(uint32_t v)
+{
+    uint32_t res = 0U;
+    uint32_t bit = 1UL << 30;
+
+    while (bit > v)
+        bit >>= 2;
+    while (bit != 0U)
+    {
+        if (v >= res + bit)
+        {
+            v -= res + bit;
+            res = (res >> 1) + bit;
+        }
+        else
+        {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+    return res;
+}
+
+/**
+ * @brief 绘制圆头抗锯齿线段（单遍胶囊覆盖）
+ *
+ * 把“带圆头的线”当成一个胶囊形状（到线段距离 ≤ 半线宽），逐像素只算一次
+ * 覆盖率、只混合一次——因此任何透明度下都不会出现线身与圆头重叠处的二次
+ * 叠色。线身垂距用预乘的 1/len 求得（无逐像素除法）；端帽先用距离平方比阈值，
+ * 仅 1px 抗锯齿环才开方。逐扫描线做 x 区间裁剪，复杂度 ~ 线长×线宽。
+ *
+ * @param p_lcd   传入：GUI 屏幕上下文指针
+ * @param x0/y0   传入：起点
+ * @param x1/y1   传入：终点
+ * @param width   传入：线宽（像素）
+ * @param color   传入：线色
+ * @param opacity 传入：透明度（0~255）
+ */
+void we_draw_line_round(we_lcd_t *p_lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint8_t width, colour_t color,
+                        uint8_t opacity)
+{
+    int32_t   dx, dy, len2;
+    uint32_t  len, inv_len;
+    int32_t   r_fp, thr_in, thr_out, band_half;
+    int16_t   ext, minx, miny, maxx, maxy, px, py;
+    colour_t *gram;
+    int16_t   bx, ys;
+    uint16_t  pw;
+
+    if (p_lcd == NULL || width == 0U)
+        return;
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
+    if (opacity == 0U)
+        return;
+
+    dx = (int32_t)x1 - x0;
+    dy = (int32_t)y1 - y0;
+    len2 = dx * dx + dy * dy;
+    len = _we_isqrt32((uint32_t)len2);
+    inv_len = (len != 0U) ? ((1UL << 16) / len) : 0U;
+
+    r_fp      = (int32_t)width * 128;                     /* 半线宽 width/2 的 Q8 */
+    ext       = (int16_t)(width / 2U + 2U);               /* 外扩：半宽 + AA 余量 */
+    thr_in    = (int32_t)(width - 1) * (int32_t)(width - 1); /* 端帽实心阈值（4·d²） */
+    thr_out   = (int32_t)(width + 1) * (int32_t)(width + 1); /* 端帽圈外阈值（4·d²） */
+    band_half = (int32_t)ext * (int32_t)len;              /* 行裁剪：垂距≤R 的带半宽·len */
+
+    minx = (int16_t)(((x0 < x1) ? x0 : x1) - ext);
+    maxx = (int16_t)(((x0 > x1) ? x0 : x1) + ext);
+    miny = (int16_t)(((y0 < y1) ? y0 : y1) - ext);
+    maxy = (int16_t)(((y0 > y1) ? y0 : y1) + ext);
+
+    /* 裁剪到当前 PFB 行带 */
+    if (minx < p_lcd->pfb_area.x0) minx = p_lcd->pfb_area.x0;
+    if (maxx > p_lcd->pfb_area.x1) maxx = p_lcd->pfb_area.x1;
+    if (miny < p_lcd->pfb_y_start) miny = p_lcd->pfb_y_start;
+    if (maxy > p_lcd->pfb_y_end)   maxy = p_lcd->pfb_y_end;
+
+    gram = p_lcd->pfb_gram;
+    bx   = p_lcd->pfb_area.x0;
+    ys   = p_lcd->pfb_y_start;
+    pw   = p_lcd->pfb_width;
+
+    for (py = miny; py <= maxy; py++)
+    {
+        int16_t   rx0 = minx, rx1 = maxx;
+        int32_t   ey  = (int32_t)py - y0;
+        colour_t *row;
+
+        /* 逐扫描线 x 区间裁剪：保守取垂距≤R 的带（含端帽），对垂直/对角线大幅提速 */
+        if (dy != 0)
+        {
+            int32_t A = ey * dx;
+            int32_t a = x0 + (A - band_half) / dy;
+            int32_t b = x0 + (A + band_half) / dy;
+            if (a > b) { int32_t t = a; a = b; b = t; }  /* dy<0 时翻序 */
+            a -= 1; b += 1;                              /* 取整安全余量 */
+            if (a > (int32_t)minx) rx0 = (a > (int32_t)maxx) ? (int16_t)(maxx + 1) : (int16_t)a;
+            if (b < (int32_t)maxx) rx1 = (b < (int32_t)minx) ? (int16_t)(minx - 1) : (int16_t)b;
+            if (rx0 > rx1)
+                continue;
+        }
+
+        row = gram + (int32_t)(py - ys) * pw;
+
+        for (px = rx0; px <= rx1; px++)
+        {
+            int32_t ex  = (int32_t)px - x0;
+            int32_t dot = ex * dx + ey * dy;
+            int32_t cov;
+
+            if (len2 == 0 || dot <= 0 || dot >= len2)
+            {
+                /* 端帽：先用 4·d² 比阈值，绝大多数像素免开方 */
+                int32_t ddx = (dot >= len2 && len2 != 0) ? ((int32_t)px - x1) : ex;
+                int32_t ddy = (dot >= len2 && len2 != 0) ? ((int32_t)py - y1) : ey;
+                int32_t d2  = ddx * ddx + ddy * ddy;
+                int32_t q4  = 4 * d2;
+                if (q4 <= thr_in)
+                    cov = 255;
+                else if (q4 >= thr_out)
+                    cov = 0;
+                else
+                {
+                    int32_t df = (int32_t)_we_isqrt32(((uint32_t)d2) << 16);
+                    cov = (int32_t)((uint32_t)(255 * ((r_fp + 128) - df)) >> 8);
+                }
+            }
+            else
+            {
+                /* 线身：垂距 |cross|/len（预乘 1/len，无逐像素除法） */
+                int32_t cr = ex * dy - ey * dx;
+                int32_t df;
+                if (cr < 0)
+                    cr = -cr;
+                df = (int32_t)(((uint32_t)cr * inv_len) >> 8);
+                if (df <= r_fp - 128)
+                    cov = 255;
+                else if (df >= r_fp + 128)
+                    cov = 0;
+                else
+                    cov = (int32_t)((uint32_t)(255 * ((r_fp + 128) - df)) >> 8);
+            }
+
+            if (cov > 0)
+            {
+                uint8_t pa = we_div255((uint32_t)cov * (uint32_t)opacity);
+                if (pa > 0U)
+                    we_store_blended_color(row + (px - bx), color, pa);
+            }
+        }
+    }
+}
+
 /* =========================================================================
  * 预计算 0~128 步(对应 0°~90°)正弦表，Q15 格式，1.0 = 32767
  * 系统统一使用 512 步/圈，四分之一圆 = 128 步
@@ -1674,6 +1913,696 @@ void we_fill_gram(we_lcd_t *p_lcd, colour_t c)
  */
 void we_clear_gram(we_lcd_t *p_lcd) { we_fill_gram(p_lcd, p_lcd->bg_color); }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+/* --------------------------------------------------------------------------
+ * 全局聚焦 / 按键导航管理器
+ *
+ * 模型（分层作用域，"OK 向下钻 / BACK 向上退"）：
+ * 1. 语义键由端口消抖后注入 SPSC 环形队列（press/release 双沿或 inject
+ *    tap），we_gui_task_handler() 每周期消费并分发；
+ * 2. 可聚焦判定：类描述符带 key_cb 的交互控件，或子树内含可聚焦控件的
+ *    复合容器（class_flags 含 WE_CLASS_FLAG_CHILD_OWNER，
+ *    WE_CFG_FOCUS_NESTED=0 时不递归容器）；
+ * 3. 当前作用域由 focus_obj->parent 推导（父指针即栈，无需焦点栈）：
+ *    方向键在同层兄弟间按包围盒中心做空间四向就近移动（方向上无候选
+ *    则环绕到对侧最远者），NEXT/PREV 走线性环序；OK 进入容器或触发
+ *    控件，BACK 退回父容器本体，顶层再按则清除焦点；
+ * 4. 视觉为驱动级矩形光标：普通对象之后、popup 之前补画，
+ *    永远悬浮在控件之上且不压弹窗；弹层内部焦点由弹层自绘；
+ * 5. popup 激活期间吞掉全部按键，保住模态语义（弹层键通道后续接入）。
+ * 全部瞬态标志压缩在 focus_flags 一个字节里（WE_FOCUS_F_*），
+ * OK 最短按压窗口由 task_handler 直接倒计时，不占中央动画节点。
+ * -------------------------------------------------------------------------- */
+
+/* 焦点光标外扩总量（控件包围盒边缘 → 光标框外缘的距离） */
+#define _WE_FOCUS_EXPAND (WE_CFG_FOCUS_CURSOR_GAP + WE_CFG_FOCUS_CURSOR_THICKNESS)
+
+/**
+ * @brief 结构性判定对象是否为焦点候选（不触发 FOCUS 实例查询）
+ * @param obj 传入，待判定对象
+ * @return 1 表示候选（交互控件或子树含候选的容器），0 表示不可聚焦
+ */
+static uint8_t _we_focus_is_candidate(const we_obj_t *obj)
+{
+    if (obj == NULL || obj->class_p == NULL)
+        return 0U;
+    if (obj->class_p->key_cb != NULL)
+        return 1U;
+#if (WE_CFG_FOCUS_NESTED == 1)
+    if ((obj->class_p->class_flags & WE_CLASS_FLAG_CHILD_OWNER) != 0U)
+    {
+        const we_obj_t *child = ((const we_child_owner_t *)obj)->children_head;
+        while (child != NULL)
+        {
+            if (_we_focus_is_candidate(child))
+                return 1U;
+            child = child->next;
+        }
+    }
+#endif
+    return 0U;
+}
+
+/**
+ * @brief 标脏对象的焦点光标环形区域
+ * @param obj 传入，光标所属对象
+ * @return 无
+ * @note 直接提交与绘制端逐一对应的 4 条线宽条带（上/下贯通全宽，
+ *       左/右扣除与上下带的重叠），确定性 4 个脏矩形：控件本体与间隙
+ *       区域零重绘，且不经过 exclude 打洞路径的收益门限（小控件也
+ *       不会退化成整框）。
+ */
+static void _we_focus_cursor_invalidate(we_obj_t *obj)
+{
+    int16_t x0;
+    int16_t y0;
+    int16_t out_w;
+    int16_t side_h;
+
+    if (obj == NULL || obj->lcd == NULL)
+        return;
+
+    x0 = (int16_t)(obj->x - _WE_FOCUS_EXPAND);
+    y0 = (int16_t)(obj->y - _WE_FOCUS_EXPAND);
+    out_w = (int16_t)(obj->w + 2 * _WE_FOCUS_EXPAND);
+    side_h = (int16_t)(obj->h + 2 * WE_CFG_FOCUS_CURSOR_GAP);
+
+    /* 上、下条带（含四角） */
+    we_obj_invalidate_area(obj, x0, y0, out_w, WE_CFG_FOCUS_CURSOR_THICKNESS);
+    we_obj_invalidate_area(obj, x0, (int16_t)(obj->y + obj->h + WE_CFG_FOCUS_CURSOR_GAP),
+                           out_w, WE_CFG_FOCUS_CURSOR_THICKNESS);
+    /* 左、右条带（夹在上下带之间） */
+    we_obj_invalidate_area(obj, x0, (int16_t)(obj->y - WE_CFG_FOCUS_CURSOR_GAP),
+                           WE_CFG_FOCUS_CURSOR_THICKNESS, side_h);
+    we_obj_invalidate_area(obj, (int16_t)(obj->x + obj->w + WE_CFG_FOCUS_CURSOR_GAP),
+                           (int16_t)(obj->y - WE_CFG_FOCUS_CURSOR_GAP),
+                           WE_CFG_FOCUS_CURSOR_THICKNESS, side_h);
+}
+
+/* ---------------- OK 键按下/松开双沿机件 ----------------
+ * OK 按下沿：焦点控件进入按压态（btn 显示 PRESSED 且按住期间常驻），
+ * 管理器吞掉按住期间的重复按下沿（防系统连发误触发）；
+ * OK 松开沿：回发 WE_KEY_EVT_OK_RELEASE（控件回弹并触发点击）。
+ * tap 式注入（一按一松同周期到达）经"最短按压窗口"（WE_CFG_FOCUS_FLASH_MS）
+ * 延后回弹，保证按压视觉可见；焦点切走/清除时改发 WE_KEY_EVT_FLASH_END
+ * （仅回弹不点击）。方向/前后/BACK 键仍为按下沿触发，松开沿忽略。
+ * 不变式：OK_ARMED 置位期间按压目标恒为 focus_obj（arm 只发生在焦点上，
+ * 焦点切换/清除/删除必先取消），因此无需单独的目标指针。 */
+
+/**
+ * @brief 交付 OK 松开：清按压状态并回发 WE_KEY_EVT_OK_RELEASE
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ */
+static void _we_key_ok_deliver_release(we_lcd_t *lcd)
+{
+    we_obj_t *obj = ((lcd->focus_flags & WE_FOCUS_F_OK_ARMED) != 0U) ? lcd->focus_obj : NULL;
+
+    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND);
+    lcd->key_flash_left_ms = 0U;
+    if (obj != NULL && obj->class_p != NULL && obj->class_p->key_cb != NULL)
+        (void)obj->class_p->key_cb(obj, WE_KEY_EVT_OK_RELEASE);
+}
+
+/**
+ * @brief 取消 OK 按压（焦点切换/清除时）：仅回弹按压视觉，不触发点击
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ */
+static void _we_key_ok_cancel(we_lcd_t *lcd)
+{
+    we_obj_t *obj = ((lcd->focus_flags & WE_FOCUS_F_OK_ARMED) != 0U) ? lcd->focus_obj : NULL;
+
+    if ((lcd->focus_flags & (WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED)) == 0U)
+        return;
+    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND);
+    lcd->key_flash_left_ms = 0U;
+    if (obj != NULL && obj->class_p != NULL && obj->class_p->key_cb != NULL)
+        (void)obj->class_p->key_cb(obj, WE_KEY_EVT_FLASH_END); /* 仅回弹 */
+}
+
+/**
+ * @brief OK 按下沿被焦点控件消费后武装按压状态与最短按压窗口
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ * @note 窗口倒计时由 we_gui_task_handler 直接消费 elapsed_ms 推进，
+ *       不占用中央动画节点。
+ */
+static void _we_key_ok_arm(we_lcd_t *lcd)
+{
+    lcd->focus_flags |= WE_FOCUS_F_OK_ARMED;
+    lcd->key_flash_left_ms = WE_CFG_FOCUS_FLASH_MS;
+}
+
+/**
+ * @brief 尝试把焦点移到目标对象（含 FOCUS 实例查询）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param obj 传入，目标对象
+ * @return 1 表示焦点已落到目标（或目标本就是焦点），0 表示目标拒绝/不可聚焦
+ */
+static uint8_t _we_focus_try_set(we_lcd_t *lcd, we_obj_t *obj)
+{
+    we_obj_t *old = lcd->focus_obj;
+
+    if (obj == old)
+        return 1U;
+    if (!_we_focus_is_candidate(obj))
+        return 0U;
+    /* 交互控件按实例查询（DISABLED/全透明可拒绝）；容器无查询直接接受 */
+    if (obj->class_p->key_cb != NULL && obj->class_p->key_cb(obj, WE_KEY_EVT_FOCUS) == 0U)
+        return 0U;
+
+    lcd->focus_flags &= (uint8_t)~WE_FOCUS_F_EDIT; /* 焦点切换自动退出编辑态 */
+    _we_key_ok_cancel(lcd); /* 按住 OK 期间焦点切换：旧控件仅回弹不触发点击 */
+    if (old != NULL)
+    {
+        if (old->class_p != NULL && old->class_p->key_cb != NULL)
+            (void)old->class_p->key_cb(old, WE_KEY_EVT_DEFOCUS);
+        _we_focus_cursor_invalidate(old);
+    }
+    lcd->focus_obj = obj;
+    _we_focus_cursor_invalidate(obj);
+
+    /* 通知祖先容器链"子树内有对象获得焦点"：scroll_panel 等据此滚动
+     * 跟随，保证焦点子控件（含光标环）滚入可视区。 */
+    {
+        we_obj_t *anc = obj->parent;
+        while (anc != NULL)
+        {
+            if (anc->class_p != NULL && anc->class_p->key_cb != NULL)
+                (void)anc->class_p->key_cb(anc, WE_KEY_EVT_CHILD_FOCUS);
+            anc = anc->parent;
+        }
+    }
+    return 1U;
+}
+
+/**
+ * @brief 取当前焦点所在作用域的兄弟链表头
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param ref 传入，作用域内任一对象（通常为当前焦点）
+ * @return 兄弟链表头指针（顶层链表或父容器子链表）
+ */
+static we_obj_t *_we_focus_scope_head(we_lcd_t *lcd, const we_obj_t *ref)
+{
+    if (ref->parent != NULL)
+        return ((we_child_owner_t *)ref->parent)->children_head;
+    return lcd->obj_list_head;
+}
+
+/**
+ * @brief 无焦点时聚焦顶层第一个接受的候选对象
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ */
+static void _we_focus_init_first(we_lcd_t *lcd)
+{
+    we_obj_t *it = lcd->obj_list_head;
+    while (it != NULL)
+    {
+        if (_we_focus_try_set(lcd, it))
+            return;
+        it = it->next;
+    }
+}
+
+/**
+ * @brief 判定对象当前是否可接受聚焦（结构候选 + FOCUS 实例查询，无副作用）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param obj 传入，待判定对象
+ * @return 1 可聚焦，0 不可
+ */
+static uint8_t _we_focus_acceptable(we_lcd_t *lcd, we_obj_t *obj)
+{
+    (void)lcd;
+    if (!_we_focus_is_candidate(obj))
+        return 0U;
+    if (obj->class_p->key_cb != NULL && obj->class_p->key_cb(obj, WE_KEY_EVT_FOCUS) == 0U)
+        return 0U;
+    return 1U;
+}
+
+/**
+ * @brief 空间四向移动焦点：按包围盒中心在当前作用域内做方向就近搜索
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param dx 传入，水平方向（-1/0/+1）
+ * @param dy 传入，垂直方向（-1/0/+1）
+ * @return 无
+ * @note 评分 = 主轴投影距离 + 2×侧偏（主轴投影须为正，即真的在该方向上）；
+ *       方向上没有任何候选时环绕到对侧最远者（主轴反向投影最大）。
+ *       候选判定含 FOCUS 实例查询（无副作用），选中后经 _we_focus_try_set
+ *       正式落焦。
+ */
+static void _we_focus_move_dir(we_lcd_t *lcd, int16_t dx, int16_t dy)
+{
+    we_obj_t *cur = lcd->focus_obj;
+    we_obj_t *it = _we_focus_scope_head(lcd, cur);
+    int32_t ccx = (int32_t)cur->x + cur->w / 2;
+    int32_t ccy = (int32_t)cur->y + cur->h / 2;
+    we_obj_t *best = NULL;
+    int32_t best_score = 0x7FFFFFFF;
+    we_obj_t *wrap = NULL;
+    int32_t wrap_far = -1;
+
+    for (; it != NULL; it = it->next)
+    {
+        int32_t pdx;
+        int32_t pdy;
+        int32_t primary;
+        int32_t second;
+
+        if (it == cur || !_we_focus_acceptable(lcd, it))
+            continue;
+
+        pdx = ((int32_t)it->x + it->w / 2) - ccx;
+        pdy = ((int32_t)it->y + it->h / 2) - ccy;
+        primary = (dx != 0) ? pdx * dx : pdy * dy; /* 主轴投影（正 = 在目标方向） */
+        second = (dx != 0) ? pdy : pdx;            /* 侧偏 */
+        if (second < 0)
+            second = -second;
+
+        if (primary > 0)
+        {
+            int32_t score = primary + 2 * second;
+
+            if (score < best_score)
+            {
+                best_score = score;
+                best = it;
+            }
+        }
+        else if (-primary > wrap_far)
+        {
+            wrap_far = -primary; /* 对侧最远者：方向上无候选时的环绕落点 */
+            wrap = it;
+        }
+    }
+
+    if (best != NULL)
+        (void)_we_focus_try_set(lcd, best);
+    else if (wrap != NULL)
+        (void)_we_focus_try_set(lcd, wrap);
+}
+
+/**
+ * @brief 在当前作用域兄弟间线性移动焦点（NEXT/PREV，到边界回绕）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param dir_next 传入，1 = 向后（NEXT），0 = 向前（PREV）
+ * @return 无
+ * @note 逐个尝试候选直到有对象接受聚焦；转满一圈无人接受则原地不动。
+ */
+static void _we_focus_move(we_lcd_t *lcd, uint8_t dir_next)
+{
+    we_obj_t *cur = lcd->focus_obj;
+    we_obj_t *head = _we_focus_scope_head(lcd, cur);
+    we_obj_t *pick = cur;
+
+    for (;;)
+    {
+        if (dir_next)
+        {
+            pick = (pick->next != NULL) ? pick->next : head;
+        }
+        else
+        {
+            /* 单向链表取前驱：从头扫到 pick 的前一个；pick 已是头则回绕取尾 */
+            we_obj_t *it = head;
+            we_obj_t *prev = NULL;
+            while (it != NULL && it != pick)
+            {
+                prev = it;
+                it = it->next;
+            }
+            if (prev == NULL)
+            {
+                it = head;
+                while (it != NULL && it->next != NULL)
+                    it = it->next;
+                prev = it;
+            }
+            pick = prev;
+        }
+        if (pick == NULL || pick == cur)
+            return; /* 作用域内没有其他可聚焦对象 */
+        if (_we_focus_try_set(lcd, pick))
+            return;
+    }
+}
+
+#if (WE_CFG_FOCUS_NESTED == 1)
+/**
+ * @brief OK 下钻：焦点进入容器，落到第一个接受的子候选上
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ */
+static void _we_focus_enter(we_lcd_t *lcd)
+{
+    we_obj_t *cur = lcd->focus_obj;
+    we_obj_t *child;
+
+    if (cur->class_p == NULL || (cur->class_p->class_flags & WE_CLASS_FLAG_CHILD_OWNER) == 0U)
+        return;
+    child = ((we_child_owner_t *)cur)->children_head;
+    while (child != NULL)
+    {
+        if (_we_focus_try_set(lcd, child))
+            return;
+        child = child->next;
+    }
+}
+#endif
+
+/**
+ * @brief BACK 上退：焦点退回父容器本体；已在顶层则清除焦点
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ * @note WE_CFG_FOCUS_NESTED=0 时不存在"退回容器"语义，BACK 直接清焦点。
+ */
+static void _we_focus_back(we_lcd_t *lcd)
+{
+#if (WE_CFG_FOCUS_NESTED == 1)
+    we_obj_t *cur = lcd->focus_obj;
+
+    if (cur->parent != NULL)
+        (void)_we_focus_try_set(lcd, cur->parent);
+    else
+        we_focus_set(lcd, NULL);
+#else
+    we_focus_set(lcd, NULL);
+#endif
+}
+
+/**
+ * @brief 分发单个语义键队列编码（键值 | 可选的松开沿标志）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param code 传入，键值，松开沿带 WE_KEY_RELEASE_FLAG
+ * @return 无
+ */
+static void _we_focus_dispatch(we_lcd_t *lcd, uint8_t code)
+{
+    we_obj_t *cur;
+    uint8_t key = (uint8_t)(code & (uint8_t)~WE_KEY_RELEASE_FLAG);
+
+    /* 松开沿最优先处理（按压状态同步不受弹层/焦点门控影响）：
+     * 焦点侧只有 OK 消费松开沿；弹层键通道额外收到原始编码
+     * （键值 | WE_KEY_RELEASE_FLAG），供弹层内控件做按下/松开双沿
+     * 手感（软键盘击键等），不消费的弹层忽略即可。 */
+    if ((code & WE_KEY_RELEASE_FLAG) != 0U)
+    {
+        if (key == WE_KEY_OK && (lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U)
+        {
+            if (lcd->key_flash_left_ms > 0U)
+                lcd->focus_flags |= WE_FOCUS_F_REL_PEND; /* 仍在最短按压窗口内：挂起补发 */
+            else
+                _we_key_ok_deliver_release(lcd);
+        }
+        if (lcd->popup_layer.active && lcd->popup_layer.key_cb != NULL)
+            (void)lcd->popup_layer.key_cb(lcd->popup_layer.owner, code);
+        return;
+    }
+
+    /* 弹层键通道：弹层激活期间按下沿改送弹层 key_cb（dropdown 展开列表
+     * 键控导航等）；未挂接 key_cb 的弹层维持吞键模态，两种情况下按键
+     * 都不会穿透到被遮挡的普通控件。 */
+    if (lcd->popup_layer.active)
+    {
+        if (lcd->popup_layer.key_cb != NULL)
+            (void)lcd->popup_layer.key_cb(lcd->popup_layer.owner, key);
+        return;
+    }
+
+    /* OK 按下沿去重：按住期间的系统连发直接丢弃（防连续触发） */
+    if (key == WE_KEY_OK)
+    {
+        if ((lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U)
+            return;
+        lcd->focus_flags = (uint8_t)((lcd->focus_flags | WE_FOCUS_F_OK_HELD) &
+                                     (uint8_t)~(WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND));
+        lcd->key_flash_left_ms = 0U;
+    }
+
+    cur = lcd->focus_obj;
+    if (cur != NULL && cur->class_p == NULL)
+    {
+        /* 防御：焦点对象已被外部置失效，立即丢弃引用（同 pressed_obj 口径） */
+        lcd->focus_obj = NULL;
+        cur = NULL;
+    }
+
+    if (cur == NULL)
+    {
+        /* 无焦点：任意导航键唤出焦点；OK/BACK 忽略 */
+        if (key != WE_KEY_OK && key != WE_KEY_BACK)
+            _we_focus_init_first(lcd);
+        return;
+    }
+
+#if (WE_CFG_FOCUS_EDIT == 1)
+    /* 编辑态：全部按键先交焦点控件调值；未消费的 OK/BACK 退出编辑，
+     * 其余导航键吞掉（编辑期间不移动焦点）。 */
+    if ((lcd->focus_flags & WE_FOCUS_F_EDIT) != 0U)
+    {
+        if (cur->class_p->key_cb != NULL && cur->class_p->key_cb(cur, key) != 0U)
+        {
+            if (key == WE_KEY_OK)
+                _we_key_ok_arm(lcd); /* 武装按压状态，等待松开沿 */
+            return;
+        }
+        if (key == WE_KEY_OK || key == WE_KEY_BACK)
+            we_focus_edit_exit(lcd);
+        return;
+    }
+#endif
+
+    /* 焦点控件优先消费（btn 吃 OK；值类控件在编辑态吃方向键） */
+    if (cur->class_p->key_cb != NULL && cur->class_p->key_cb(cur, key) != 0U)
+    {
+        if (key == WE_KEY_OK)
+            _we_key_ok_arm(lcd); /* 武装按压状态，等待松开沿 */
+        return;
+    }
+
+    /* 管理器默认导航：方向键 = 空间四向就近，Tab/前后 = 线性环序 */
+    switch (key)
+    {
+    case WE_KEY_UP:
+        _we_focus_move_dir(lcd, 0, -1);
+        break;
+    case WE_KEY_DOWN:
+        _we_focus_move_dir(lcd, 0, 1);
+        break;
+    case WE_KEY_LEFT:
+        _we_focus_move_dir(lcd, -1, 0);
+        break;
+    case WE_KEY_RIGHT:
+        _we_focus_move_dir(lcd, 1, 0);
+        break;
+    case WE_KEY_NEXT:
+        _we_focus_move(lcd, 1U);
+        break;
+    case WE_KEY_PREV:
+        _we_focus_move(lcd, 0U);
+        break;
+#if (WE_CFG_FOCUS_NESTED == 1)
+    case WE_KEY_OK:
+        _we_focus_enter(lcd);
+        break;
+#endif
+    case WE_KEY_BACK:
+        _we_focus_back(lcd);
+        break;
+    default:
+        break;
+    }
+}
+
+/**
+ * @brief 键队列入队（编码值 = 键值 | 可选松开沿标志）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param code 传入，队列编码值
+ * @return 无
+ * @note SPSC 环形队列：本函数只写 tail（可在中断里调用），消费侧只写
+ *       head，无读改写竞态；先写数据槽再推进 tail，容量 = 队列深度-1，
+ *       队满丢弃本次注入。下标回绕用位与（深度限定 2 的幂，省除法）。
+ */
+static void _we_key_enqueue(we_lcd_t *lcd, uint8_t code)
+{
+    uint8_t tail = lcd->key_q_tail;
+    uint8_t next = (uint8_t)((tail + 1U) & (WE_CFG_KEY_QUEUE_LEN - 1U));
+
+    if (next == lcd->key_q_head)
+        return; /* 队满丢弃本次注入 */
+    lcd->key_queue[tail] = code;
+    lcd->key_q_tail = next;
+}
+
+void we_gui_key_press(we_lcd_t *lcd, uint8_t key)
+{
+    if (lcd == NULL || key == WE_KEY_NONE || key > WE_KEY_BACK)
+        return; /* WE_KEY_EVT_* 通知类键值禁止注入 */
+    _we_key_enqueue(lcd, key);
+}
+
+void we_gui_key_release(we_lcd_t *lcd, uint8_t key)
+{
+    if (lcd == NULL || key == WE_KEY_NONE || key > WE_KEY_BACK)
+        return;
+    _we_key_enqueue(lcd, (uint8_t)(key | WE_KEY_RELEASE_FLAG));
+}
+
+void we_gui_key_inject(we_lcd_t *lcd, uint8_t key)
+{
+    /* tap 语义 = 一按一松；OK 键经最短按压窗口保证按压视觉可见 */
+    we_gui_key_press(lcd, key);
+    we_gui_key_release(lcd, key);
+}
+
+void we_focus_set(we_lcd_t *lcd, we_obj_t *obj)
+{
+    if (lcd == NULL)
+        return;
+    if (obj == NULL)
+    {
+        we_obj_t *old = lcd->focus_obj;
+        if (old == NULL)
+            return;
+        _we_key_ok_cancel(lcd); /* 清焦点前先取消 OK 按压（仅回弹不点击） */
+        if (old->class_p != NULL && old->class_p->key_cb != NULL)
+            (void)old->class_p->key_cb(old, WE_KEY_EVT_DEFOCUS);
+        lcd->focus_obj = NULL;
+        lcd->focus_flags &= (uint8_t)~WE_FOCUS_F_EDIT;
+        _we_focus_cursor_invalidate(old);
+        return;
+    }
+    if (obj->lcd != lcd)
+        return;
+    (void)_we_focus_try_set(lcd, obj);
+}
+
+we_obj_t *we_focus_get(we_lcd_t *lcd) { return (lcd != NULL) ? lcd->focus_obj : NULL; }
+
+uint8_t we_focus_candidate(we_obj_t *obj) { return _we_focus_is_candidate(obj); }
+
+#if (WE_CFG_FOCUS_EDIT == 1)
+void we_focus_edit_enter(we_lcd_t *lcd)
+{
+    if (lcd == NULL || lcd->focus_obj == NULL || (lcd->focus_flags & WE_FOCUS_F_EDIT) != 0U)
+        return;
+    lcd->focus_flags |= WE_FOCUS_F_EDIT;
+    _we_focus_cursor_invalidate(lcd->focus_obj); /* 光标换编辑色 */
+}
+
+void we_focus_edit_exit(we_lcd_t *lcd)
+{
+    if (lcd == NULL || (lcd->focus_flags & WE_FOCUS_F_EDIT) == 0U)
+        return;
+    lcd->focus_flags &= (uint8_t)~WE_FOCUS_F_EDIT;
+    if (lcd->focus_obj != NULL)
+        _we_focus_cursor_invalidate(lcd->focus_obj); /* 光标恢复导航色 */
+}
+
+uint8_t we_focus_edit_active(we_lcd_t *lcd)
+{
+    return (lcd != NULL && (lcd->focus_flags & WE_FOCUS_F_EDIT) != 0U) ? 1U : 0U;
+}
+#endif /* WE_CFG_FOCUS_EDIT */
+
+/**
+ * @brief 在钳制矩形内填充一条光标边带
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param x0 传入，边带左上角 X；y0 传入，边带左上角 Y
+ * @param x1 传入，边带右下角 X；y1 传入，边带右下角 Y
+ * @param cx0/cy0/cx1/cy1 传入，祖先链裁剪矩形（含端点）
+ * @param c 传入，光标颜色
+ * @return 无
+ */
+static void _we_focus_fill_clipped(we_lcd_t *lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                                   int16_t cx0, int16_t cy0, int16_t cx1, int16_t cy1, colour_t c)
+{
+    if (x0 < cx0)
+        x0 = cx0;
+    if (y0 < cy0)
+        y0 = cy0;
+    if (x1 > cx1)
+        x1 = cx1;
+    if (y1 > cy1)
+        y1 = cy1;
+    if (x0 > x1 || y0 > y1)
+        return;
+    we_fill_rect(lcd, x0, y0, (uint16_t)(x1 - x0 + 1), (uint16_t)(y1 - y0 + 1), c, 255U);
+}
+
+/**
+ * @brief 绘制焦点矩形光标（渲染循环内：普通对象之后、popup 之前调用）
+ * @param p_lcd 传入，当前 GUI 屏幕上下文指针
+ * @return 无
+ * @note 光标沿焦点对象祖先链裁剪，容器（scroll_panel 等）视口外不越界；
+ *       与当前 PFB 切片无交集时一次 AABB 判定即返回。
+ */
+static void _we_focus_draw_cursor(we_lcd_t *p_lcd)
+{
+    we_obj_t *obj = p_lcd->focus_obj;
+    int16_t x0, y0, x1, y1;     /* 光标框外缘（含端点） */
+    int16_t cx0, cy0, cx1, cy1; /* 祖先链裁剪矩形 */
+    const we_obj_t *anc;
+    colour_t c;
+
+    if (obj == NULL || obj->class_p == NULL)
+        return;
+
+    x0 = (int16_t)(obj->x - _WE_FOCUS_EXPAND);
+    y0 = (int16_t)(obj->y - _WE_FOCUS_EXPAND);
+    x1 = (int16_t)(obj->x + obj->w - 1 + _WE_FOCUS_EXPAND);
+    y1 = (int16_t)(obj->y + obj->h - 1 + _WE_FOCUS_EXPAND);
+
+    /* 快速剔除：光标区与当前 PFB 切片无交集直接返回 */
+    if (x1 < p_lcd->pfb_area.x0 || x0 > p_lcd->pfb_area.x1 ||
+        y1 < (int16_t)p_lcd->pfb_y_start || y0 > (int16_t)p_lcd->pfb_y_end)
+        return;
+
+    cx0 = x0;
+    cy0 = y0;
+    cx1 = x1;
+    cy1 = y1;
+    for (anc = obj->parent; anc != NULL; anc = anc->parent)
+    {
+        if (cx0 < anc->x)
+            cx0 = anc->x;
+        if (cy0 < anc->y)
+            cy0 = anc->y;
+        if (cx1 > (int16_t)(anc->x + anc->w - 1))
+            cx1 = (int16_t)(anc->x + anc->w - 1);
+        if (cy1 > (int16_t)(anc->y + anc->h - 1))
+            cy1 = (int16_t)(anc->y + anc->h - 1);
+    }
+    if (cx0 > cx1 || cy0 > cy1)
+        return;
+
+#if (WE_CFG_FOCUS_EDIT == 1)
+    c = ((p_lcd->focus_flags & WE_FOCUS_F_EDIT) != 0U)
+            ? RGB888TODEV(WE_CFG_FOCUS_EDIT_R, WE_CFG_FOCUS_EDIT_G, WE_CFG_FOCUS_EDIT_B)
+            : RGB888TODEV(WE_CFG_FOCUS_CURSOR_R, WE_CFG_FOCUS_CURSOR_G, WE_CFG_FOCUS_CURSOR_B);
+#else
+    c = RGB888TODEV(WE_CFG_FOCUS_CURSOR_R, WE_CFG_FOCUS_CURSOR_G, WE_CFG_FOCUS_CURSOR_B);
+#endif
+
+    /* 四条边带：上、下贯通全宽，左、右扣除与上下带的重叠 */
+    _we_focus_fill_clipped(p_lcd, x0, y0, x1,
+                           (int16_t)(y0 + WE_CFG_FOCUS_CURSOR_THICKNESS - 1),
+                           cx0, cy0, cx1, cy1, c);
+    _we_focus_fill_clipped(p_lcd, x0, (int16_t)(y1 - WE_CFG_FOCUS_CURSOR_THICKNESS + 1), x1, y1,
+                           cx0, cy0, cx1, cy1, c);
+    _we_focus_fill_clipped(p_lcd, x0, (int16_t)(y0 + WE_CFG_FOCUS_CURSOR_THICKNESS),
+                           (int16_t)(x0 + WE_CFG_FOCUS_CURSOR_THICKNESS - 1),
+                           (int16_t)(y1 - WE_CFG_FOCUS_CURSOR_THICKNESS),
+                           cx0, cy0, cx1, cy1, c);
+    _we_focus_fill_clipped(p_lcd, (int16_t)(x1 - WE_CFG_FOCUS_CURSOR_THICKNESS + 1),
+                           (int16_t)(y0 + WE_CFG_FOCUS_CURSOR_THICKNESS), x1,
+                           (int16_t)(y1 - WE_CFG_FOCUS_CURSOR_THICKNESS),
+                           cx0, cy0, cx1, cy1, c);
+}
+#endif /* WE_CFG_ENABLE_KEY_INPUT */
+
 /**
  * @brief 立即执行一次整帧重绘。
  * @param p_lcd 传入，GUI 屏幕上下文指针。
@@ -1711,6 +2640,12 @@ static void _we_engine_refresh(we_lcd_t *p_lcd)
         curr = curr->next;
     }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    /* 2.5 焦点矩形光标：普通对象之后、popup 之前补画，
+     *     悬浮在所有控件之上但绝不压住弹窗。 */
+    _we_focus_draw_cursor(p_lcd);
+#endif
+
     /* 3. LCD 级 overlay popup 永远最后绘制，避免被普通父容器裁剪。 */
     if (p_lcd->popup_layer.active && p_lcd->popup_layer.draw_cb != NULL)
     {
@@ -1721,30 +2656,6 @@ static void _we_engine_refresh(we_lcd_t *p_lcd)
             p_lcd->popup_layer.draw_cb(p_lcd->popup_layer.owner);
         }
     }
-}
-
-/**
- * @brief GUI 内部注册一个带上下文数据的周期任务。
- * @param p_lcd 传入，GUI 屏幕上下文指针。
- * @param cb 传入，任务回调函数指针。
- * @param user_data 传入，回调执行时要透传给任务的上下文指针。
- * @return 任务编号，成功时返回 0 ~ WE_CFG_GUI_TASK_MAX_NUM-1，失败返回 -1。
- * @note 该函数只负责在固定任务表中寻找空槽并写入任务信息，不做业务层判断。
- */
-int8_t _we_gui_task_register_with_data(we_lcd_t *p_lcd, we_gui_task_cb_t cb, void *user_data)
-{
-    int8_t task_id;
-
-    if (p_lcd == NULL || cb == NULL)
-        return -1;
-
-    task_id = _we_gui_find_free_task_slot(p_lcd);
-    if (task_id < 0)
-        return -1;
-
-    p_lcd->task_list[(uint8_t)task_id].cb = cb;
-    p_lcd->task_list[(uint8_t)task_id].user_data = user_data;
-    return task_id;
 }
 
 /**
@@ -1906,23 +2817,6 @@ void we_gui_tick_inc(we_lcd_t *p_lcd, uint16_t ms)
 }
 
 /**
- * @brief GUI 内部注销一个已注册的周期任务。
- * @param p_lcd 传入，GUI 屏幕上下文指针。
- * @param task_id 传入，待注销的任务编号。
- * @return 无。
- */
-void _we_gui_task_unregister(we_lcd_t *p_lcd, int8_t task_id)
-{
-    if (p_lcd == NULL)
-        return;
-    if (task_id < 0 || task_id >= WE_CFG_GUI_TASK_MAX_NUM)
-        return;
-
-    p_lcd->task_list[(uint8_t)task_id].cb = NULL;
-    p_lcd->task_list[(uint8_t)task_id].user_data = NULL;
-}
-
-/**
  * @brief 创建并启动一个 GUI 定时器。
  * @param p_lcd 传入，GUI 屏幕上下文指针。
  * @param cb 传入，定时器回调函数。
@@ -2034,7 +2928,7 @@ void we_gui_timer_delete(we_lcd_t *p_lcd, int8_t timer_id)
  * @return 无
  * @note 实现步骤：
  *       1. 先消费 tick 累计时间。
- *       2. 再推进 GUI 内部任务和用户定时器。
+ *       2. 再推进用户定时器和中央动画链表。
  *       3. 遍历当前脏矩形并逐块推送到底层显示端口。
  *       4. 本轮真正发生刷新后，统计一帧渲染并清空脏区。
  */
@@ -2062,13 +2956,41 @@ void we_gui_task_handler(we_lcd_t *p_lcd)
     }
 #endif
 
-    /* 2. 消费累计时间，推进内部任务和用户定时器。 */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    /* 1.5 消费语义键环形队列（SPSC：本侧只写 head，注入侧只写 tail）。 */
+    while (p_lcd->key_q_head != p_lcd->key_q_tail)
+    {
+        uint8_t key = p_lcd->key_queue[p_lcd->key_q_head];
+        p_lcd->key_q_head = (uint8_t)((p_lcd->key_q_head + 1U) & (WE_CFG_KEY_QUEUE_LEN - 1U));
+        _we_focus_dispatch(p_lcd, key);
+    }
+#endif
+
+    /* 2. 消费累计时间，推进用户定时器。 */
     elapsed_ms = p_lcd->tick_elapsed_ms;
     p_lcd->tick_elapsed_ms = 0U;
-    _we_gui_run_tasks(p_lcd, elapsed_ms);
     _we_gui_run_timers(p_lcd, elapsed_ms);
 
-    /* 2.5 推进中央动画链表（控件动画，不占 task 槽）。
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    /* 2.4 OK 最短按压窗口倒计时（直接消费 elapsed_ms，不占动画节点）：
+     *     到期时若松开沿已挂起则补发回弹+点击；仍按住则仅停表，
+     *     等真实松开沿到达时即时交付。 */
+    if (p_lcd->key_flash_left_ms != 0U && elapsed_ms != 0U)
+    {
+        if (elapsed_ms >= (uint16_t)p_lcd->key_flash_left_ms)
+        {
+            p_lcd->key_flash_left_ms = 0U;
+            if ((p_lcd->focus_flags & WE_FOCUS_F_REL_PEND) != 0U)
+                _we_key_ok_deliver_release(p_lcd);
+        }
+        else
+        {
+            p_lcd->key_flash_left_ms = (uint8_t)(p_lcd->key_flash_left_ms - elapsed_ms);
+        }
+    }
+#endif
+
+    /* 2.5 推进中央动画链表（控件动画）。
      *     先存 next 再调 step_cb，允许回调内摘除自身节点。 */
     if (elapsed_ms != 0U)
     {
@@ -2230,6 +3152,26 @@ void we_obj_delete(we_obj_t *obj)
     if (obj->lcd->pressed_obj == obj)
         obj->lcd->pressed_obj = NULL;
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    // 2.6 焦点引用防悬空：被删对象是焦点本身或焦点的祖先容器时一并清理
+    //     （删除路径不发 DEFOCUS 通知）。OK 按压目标恒为焦点，故编辑态与
+    //     武装/挂起标志一起清零即可；HELD 保留，待物理松开沿自然清零。
+    if (obj->lcd->focus_obj != NULL)
+    {
+        const we_obj_t *it = obj->lcd->focus_obj;
+        while (it != NULL && it != obj)
+            it = it->parent;
+        if (it == obj)
+        {
+            _we_focus_cursor_invalidate(obj->lcd->focus_obj);
+            obj->lcd->focus_obj = NULL;
+            obj->lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_EDIT | WE_FOCUS_F_OK_ARMED |
+                                                WE_FOCUS_F_REL_PEND);
+            obj->lcd->key_flash_left_ms = 0U;
+        }
+    }
+#endif
+
     // 3. 清空对象状态，避免后续误用。
     obj->next = NULL;
     obj->parent = NULL;
@@ -2240,7 +3182,7 @@ void we_obj_delete(we_obj_t *obj)
 /* --------------------------------------------------------------------------
  * 中央动画引擎
  *
- * 控件动画不再占用 GUI task 槽：节点内嵌在控件结构体里，挂到
+ * 控件动画不占用任何槽位：节点内嵌在控件结构体里，挂到
  * lcd->anim_head 侵入式链表上，由 we_gui_task_handler 每周期统一推进。
  * 空链时开销仅一次判空；start 不会失败（彻底消除"槽满→动画静默消失"）。
  * -------------------------------------------------------------------------- */
@@ -2483,6 +3425,9 @@ void we_popup_layer_close_any(we_lcd_t *lcd)
     lcd->popup_layer.draw_cb = NULL;
     lcd->popup_layer.event_cb = NULL;
     lcd->popup_layer.close_cb = NULL;
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    lcd->popup_layer.key_cb = NULL;
+#endif
 
     we_dirty_invalidate(&lcd->dirty_mgr, old_area.x0, old_area.y0,
                         (int16_t)(old_area.x1 - old_area.x0 + 1),
@@ -2534,9 +3479,21 @@ void we_popup_layer_open(we_lcd_t *lcd, uint8_t type, void *owner,
     lcd->popup_layer.draw_cb = draw_cb;
     lcd->popup_layer.event_cb = event_cb;
     lcd->popup_layer.close_cb = close_cb;
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    lcd->popup_layer.key_cb = NULL; /* 键通道由拥有者 open 后按需挂接 */
+#endif
 
     we_popup_layer_invalidate(lcd);
 }
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+void we_popup_layer_set_key_cb(we_lcd_t *lcd, void *owner,
+                               uint8_t (*key_cb)(void *owner, uint8_t key))
+{
+    if (we_popup_layer_is_owner(lcd, owner))
+        lcd->popup_layer.key_cb = key_cb;
+}
+#endif
 
 /**
  * @brief 更新当前 overlay popup 区域。
@@ -2572,7 +3529,7 @@ void we_popup_layer_set_area(we_lcd_t *lcd, void *owner, const we_area_t *area)
  * @return 无
  * @note 实现步骤：
  *       1. 选择本次初始化要绑定的 PFB 缓冲区和底层端口接口；
- *       2. 初始化背景色、对象链表、时间累计、任务表和统计字段；
+ *       2. 初始化背景色、对象链表、时间累计、定时器表和统计字段；
  *       3. 初始化脏矩形管理器；
  *       4. 把整屏标记为脏区，确保首帧一定完整刷新。
  */
@@ -2601,11 +3558,6 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
     p_lcd->obj_list_head = NULL; // 对象链表初始为空
     p_lcd->tick_elapsed_ms = 0U; // GUI 时间累计从 0 开始
 
-    for (i = 0; i < WE_CFG_GUI_TASK_MAX_NUM; i++)
-    {
-        p_lcd->task_list[i].cb = NULL;
-        p_lcd->task_list[i].user_data = NULL;
-    }
     for (i = 0; i < WE_CFG_GUI_TIMER_MAX_NUM; i++)
     {
         p_lcd->timer_list[i].cb = NULL;
@@ -2628,6 +3580,13 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
     p_lcd->gesture_press_y = 0;
     p_lcd->pressed_obj = NULL;
     p_lcd->gesture_had_stay = 0U;
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    p_lcd->focus_obj = NULL; // 焦点从无开始，首个导航键或 we_focus_set 唤出
+    p_lcd->focus_flags = 0U;
+    p_lcd->key_flash_left_ms = 0U;
+    p_lcd->key_q_head = 0U;
+    p_lcd->key_q_tail = 0U;
+#endif
 #if (WE_CFG_ENABLE_INPUT_PORT_BIND == 1)
     p_lcd->input_read_cb = NULL;
 #endif
@@ -2680,7 +3639,10 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
     /* LCD 级 overlay popup 拥有最高输入优先级：
      * popup 激活时，先把原始触摸状态事件交给 popup 处理，
      * 若 popup 消费（返回非 0），直接结束，普通对象不再收到本次事件。
-     * 这样点击 popup 外部可由 popup 自行决定关闭，避免穿透到下层控件。 */
+     * 这样点击 popup 外部可由 popup 自行决定关闭，避免穿透到下层控件。
+     * RELEASED 被消费后跟发一次 CLICKED（与普通对象的派发时序对齐），
+     * 弹层内控件（软键盘等）的"原键释放确认点击"状态机才能闭环；
+     * RELEASED 处理中可能已关闭弹层（dropdown 选中/点外部），补发前复检。 */
     if (lcd->popup_layer.active && lcd->popup_layer.event_cb != NULL)
     {
         we_event_t pe = WE_EVENT_STAY;
@@ -2694,7 +3656,13 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
         if (data->state != WE_TOUCH_STATE_NONE)
         {
             if (lcd->popup_layer.event_cb(lcd->popup_layer.owner, pe, data) != 0U)
+            {
+                if (pe == WE_EVENT_RELEASED && lcd->popup_layer.active &&
+                    lcd->popup_layer.event_cb != NULL)
+                    (void)lcd->popup_layer.event_cb(lcd->popup_layer.owner,
+                                                    WE_EVENT_CLICKED, data);
                 return;
+            }
         }
     }
 
@@ -2724,6 +3692,27 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
         lcd->gesture_press_x = data->x;
         lcd->gesture_press_y = data->y;
         lcd->gesture_had_stay = 0U;
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+        /* 触摸焦点跟随（切换时自动退出编辑态）：按到可聚焦控件时焦点
+         * 移过去；目标本身不可聚焦时沿父链向上退，落到最近的可聚焦
+         * 祖先（如点中容器内的装饰 label → 焦点落到容器本体）；
+         * 父链走到顶仍无可聚焦归属、或点在空白处（无目标）时，
+         * 视为"点到焦点体系之外"——取消当前聚焦（光标消失）。 */
+        if (target != NULL)
+        {
+            we_obj_t *cand = target;
+
+            while (cand != NULL && !_we_focus_try_set(lcd, cand))
+                cand = cand->parent;
+            if (cand == NULL)
+                we_focus_set(lcd, NULL);
+        }
+        else
+        {
+            we_focus_set(lcd, NULL);
+        }
+#endif
 
         if (target != NULL)
         {

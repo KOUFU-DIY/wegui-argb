@@ -17,10 +17,64 @@ static void _slider_draw_cb(void *ptr);
  */
 static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：OK 进/退编辑态，编辑态方向键按 量程/20 步进调值。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note we_slider_set_value 属程序路径不触发 changed_cb；键控调值视为用户
+ *       交互，值变化后在此手动补发回调（与触摸拖拽口径一致）。
+ */
+static uint8_t _slider_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_slider_obj_t *obj = (we_slider_obj_t *)ptr;
+    we_lcd_t *lcd = obj->base.lcd;
+    uint8_t step;
+    uint8_t old;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        return (obj->opacity != 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK:
+        if (we_focus_edit_active(lcd))
+            we_focus_edit_exit(lcd);
+        else
+            we_focus_edit_enter(lcd);
+        return 1U;
+    case WE_KEY_LEFT:
+    case WE_KEY_DOWN:
+    case WE_KEY_RIGHT:
+    case WE_KEY_UP:
+        if (!we_focus_edit_active(lcd))
+            return 0U; /* 导航态：方向键交焦点管理器移动焦点 */
+        step = (uint8_t)((uint8_t)(obj->max_value - obj->min_value) / 20U);
+        if (step == 0U)
+            step = 1U;
+        old = obj->value;
+        if (key_evt == WE_KEY_LEFT || key_evt == WE_KEY_DOWN)
+            we_slider_sub_value(obj, step);
+        else
+            we_slider_add_value(obj, step);
+        if (obj->value != old && obj->changed_cb != NULL)
+            obj->changed_cb(obj, obj->value);
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+#endif
+
 static const we_class_t _slider_class = {
     .draw_cb = _slider_draw_cb,
     .event_cb = _slider_event_cb,
-        .set_pos_cb = NULL
+        .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
+    .key_cb = _slider_key_cb,
+#endif
 };
 
 static const colour_t _slider_black = RGB888_CONST(0, 0, 0);

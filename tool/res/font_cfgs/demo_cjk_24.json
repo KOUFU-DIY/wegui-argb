@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "symbol": "demo_cjk_24",
+  "font": {
+    "file": "msyh.ttc",
+    "size": 24
+  },
+  "render": {
+    "bpp": 2
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"],
+      ["U+4E00", "U+9FFF"]
+    ],
+    "chars": "一七三中九二五八六十单四回外字定常库挂按文断时显正测确示符系络统网置菜行言设试语返间"
+  },
+  "deploy": {
+    "mode": "external"
+  }
+}

@@ -13,8 +13,8 @@
 
 #include "demo_common.h"
 #include "merged_bin.h"
-#include "msyh_16_4bbp_ascii_menu_mix.h"
-#include "msyh_24_2bbp_ascii_menu_mix.h"
+#include "demo_cjk_16.h"
+#include "demo_cjk_24.h"
 #include "widgets/font_flash/we_widget_font_flash.h"
 #include "widgets/label/we_widget_label.h"
 #include <stdio.h>
@@ -94,8 +94,8 @@ void we_flash_font_simple_demo_init(we_lcd_t *lcd)
                       ff_status_buf, we_font_consolas_18,
                       RGB888TODEV(255, 196, 80), 255);
 
-    font_handle.font = &msyh_16_4bbp_ascii_menu_mix;
-    font_handle.blob_addr = MSYH_16_4BBP_ASCII_MENU_MIX_ADDR;
+    font_handle.font = &demo_cjk_16;
+    font_handle.blob_addr = DEMO_CJK_16_ADDR;
 
     if (!we_flash_font_face_init(&ff_face, lcd, &font_handle,
                                  ff_glyph_scratch, (uint32_t)sizeof(ff_glyph_scratch)))

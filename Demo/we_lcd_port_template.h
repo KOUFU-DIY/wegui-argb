@@ -80,4 +80,66 @@ void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
 /* PFB 缓冲像素数量，最小建议为 SCREEN_WIDTH * 1 */
 #define GRAM_NUM (SCREEN_WIDTH * 2)
 
+/* =========================
+ * 2. 刷新区域像素对齐（可选）
+ * =========================
+ *
+ * WE_LCD_FLUSH_ALIGN_X / WE_LCD_FLUSH_ALIGN_Y（不定义时默认 1 = 不对齐）。
+ * 部分屏幕对刷新窗口坐标有硬件粒度要求，核心会在脏矩形入库时把矩形扩张到
+ * 对齐边界（Core/dirty_driver.c），扩出的边缘随矩形整块重绘，因此
+ * lcd_set_addr 收到的 x0/y0 恒为对齐倍数、x1/y1 恒为对齐倍数-1（含端点）。
+ * 约束（we_gui_config.h 编译期校验）：对齐值必须是 2 的幂；SCREEN_WIDTH /
+ * SCREEN_HEIGHT 及 PFB 行数（USER_GRAM_NUM / SCREEN_WIDTH）必须是对应
+ * 对齐值的整数倍。
+ *
+ * 【示例 A：QSPI 接口彩屏】
+ * 不少 QSPI 屏（含部分 SPI IC 的横竖对齐限制）要求窗口 x/y 起止坐标按
+ * 2 或 4 对齐，否则 IC 直接丢弃设窗命令或错位显示。只需：
+ *
+ *   #define WE_LCD_FLUSH_ALIGN_X (4)
+ *   #define WE_LCD_FLUSH_ALIGN_Y (4)
+ *
+ * set_addr / flush 回调无需任何改动——坐标到达端口前已经对齐。
+ *
+ * 【示例 B：SSD1306 页式单色 OLED（128x64）】
+ * SSD1306 显存按"页"组织：1 页 = 8 行，每字节对应 1 列 x 8 行。y 向必须
+ * 按 8 对齐，x 向可逐列寻址：
+ *
+ *   #define SCREEN_WIDTH  128
+ *   #define SCREEN_HEIGHT 64
+ *   #define WE_LCD_FLUSH_ALIGN_X (1)
+ *   #define WE_LCD_FLUSH_ALIGN_Y (8)
+ *   #define USER_GRAM_NUM (SCREEN_WIDTH * 8)   // PFB 行数须为 8 的倍数
+ *
+ * 端口回调写法要点（伪代码）：
+ *
+ *   static uint16_t win_x0, win_w, win_row;    // set_addr 记录窗口状态
+ *
+ *   void ssd1306_set_addr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+ *   {
+ *       // y0/y1 已被核心保证按 8 对齐（y0 % 8 == 0，(y1+1) % 8 == 0）
+ *       win_x0 = x0; win_w = x1 - x0 + 1; win_row = 0;
+ *       ssd1306_cmd_set_col_range(x0, x1);
+ *       ssd1306_cmd_set_page_range(y0 >> 3, y1 >> 3);  // page = y / 8
+ *   }
+ *
+ *   void ssd1306_flush(uint16_t *gram, uint32_t pix_size)
+ *   {
+ *       // 每收满 8 行就把 RGB565 阈值化并按列打包成 1bpp 页字节发出。
+ *       // PFB 行数为 8 的倍数时，每次 flush 块都是整页，无跨块残页。
+ *       uint16_t rows = pix_size / win_w;
+ *       for (uint16_t page_row = 0; page_row < rows; page_row += 8) {
+ *           for (uint16_t col = 0; col < win_w; col++) {
+ *               uint8_t b = 0;
+ *               for (uint8_t bit = 0; bit < 8; bit++) {
+ *                   uint16_t px = gram[(page_row + bit) * win_w + col];
+ *                   if (px != 0) b |= (uint8_t)(1u << bit);  // 亮度阈值化
+ *               }
+ *               ssd1306_data(b);
+ *           }
+ *       }
+ *       win_row += rows;
+ *   }
+ */
+
 #endif

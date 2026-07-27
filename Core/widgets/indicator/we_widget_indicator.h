@@ -22,6 +22,13 @@
 #define WE_INDICATOR_USE_ANIM 1
 #endif
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 置 0 单独裁剪指示灯的按键回调与可聚焦性，其余控件不受影响。
+ * （运行时仍需 we_indicator_set_clickable 开启才可聚焦。） */
+#ifndef WE_INDICATOR_USE_KEY
+#define WE_INDICATOR_USE_KEY 1
+#endif
+
 /* 默认动画时长（毫秒），可通过 we_indicator_set_anim() 运行时修改 */
 #ifndef WE_INDICATOR_ANIM_MS
 #define WE_INDICATOR_ANIM_MS 250U
@@ -67,20 +74,20 @@ typedef uint8_t (*we_indicator_event_cb_t)(void *obj, we_event_t event,
 typedef struct we_indicator_obj_t
 {
     we_obj_t base;
-    colour_t on_color;        /* 点亮色 */
-    colour_t off_color;       /* 熄灭色 */
     we_indicator_event_cb_t user_event_cb; /* 非 NULL 时接管全部事件 */
     we_ease_fn_t ease;        /* 缓动函数，默认 we_ease_in_out_sine */
+    we_anim_t anim;           /* 中央动画引擎节点（不占 GUI task 槽） */
     uint16_t anim_ms;         /* 动画时长（毫秒） */
     uint16_t anim_acc_ms;     /* 已累计动画时间 */
     uint16_t progress;        /* 当前视觉进度，0..256（Q8） */
-    we_anim_t anim;           /* 中央动画引擎节点（不占 GUI task 槽） */
-    uint8_t  state;           /* 目标态：0=灭，1=亮 */
+    colour_t on_color;        /* 点亮色 */
+    colour_t off_color;       /* 熄灭色 */
     uint8_t  opacity;         /* 整体不透明度（0~255） */
-    uint8_t  pressed;         /* 当前是否被按下 */
-    uint8_t  anim_enabled;    /* 0=瞬切，非0=动画过渡 */
-    uint8_t  glow;            /* 0=纯圆，非0=点亮时外发光晕 */
-    uint8_t  clickable;       /* 0=只读，非0=点击翻转 */
+    uint8_t  state : 1;        /* 目标态：0=灭，1=亮 */
+    uint8_t  pressed : 1;      /* 当前是否被按下 */
+    uint8_t  anim_enabled : 1; /* 0=瞬切，1=动画过渡 */
+    uint8_t  glow : 1;         /* 0=纯圆，1=点亮时外发光晕 */
+    uint8_t  clickable : 1;    /* 0=只读，1=点击翻转 */
 } we_indicator_obj_t;
 
 /* --------------------------------------------------------------------------

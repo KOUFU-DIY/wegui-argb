@@ -193,6 +193,37 @@ static uint8_t _checkbox_event_cb(void *ptr, we_event_t event, we_indev_data_t *
     return 1;
 }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CHECKBOX_USE_KEY == 1)
+/**
+ * @brief 按键/焦点回调：OK = 翻转勾选（镜像触摸 CLICKED 语义）。
+ * @param ptr 回调透传对象指针。
+ * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @return 非 0 表示已消费。
+ * @note 与触摸路径一致：有用户回调时业务交用户回调（data 为 NULL），
+ *       否则执行默认勾选翻转并触发 changed_cb。
+ */
+static uint8_t _checkbox_key_cb(void *ptr, uint8_t key_evt)
+{
+    we_checkbox_obj_t *cb = (we_checkbox_obj_t *)ptr;
+
+    switch (key_evt)
+    {
+    case WE_KEY_EVT_FOCUS:
+        return (cb->opacity != 0U) ? 1U : 0U;
+    case WE_KEY_EVT_DEFOCUS:
+        return 1U;
+    case WE_KEY_OK:
+        if (cb->user_event_cb != NULL)
+            (void)cb->user_event_cb(ptr, WE_EVENT_CLICKED, NULL);
+        else
+            we_checkbox_toggle(cb);
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+#endif
+
 /* ---- 公开 API ---- */
 
 /**
@@ -239,7 +270,10 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
     static const we_class_t _cb_class = {
         .draw_cb = _checkbox_draw_cb,
         .event_cb = _checkbox_event_cb,
-        .set_pos_cb = NULL
+        .set_pos_cb = NULL,
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CHECKBOX_USE_KEY == 1)
+        .key_cb = _checkbox_key_cb,
+#endif
 };
 
     obj->base.lcd = lcd;

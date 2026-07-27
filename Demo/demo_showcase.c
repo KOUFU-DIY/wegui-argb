@@ -22,9 +22,9 @@
 #include "simple_widget_demos.h"
 
 #include "demo_common.h"
-#include "image_res.h"
+#include "res_images.h"
 #include "merged_bin.h"
-#include "msyh_16_4bbp_ascii_menu_mix.h"
+#include "demo_cjk_16.h"
 #include "widgets/btn/we_widget_btn.h"
 #include "widgets/toggle/we_widget_toggle.h"
 #include "widgets/checkbox/we_widget_checkbox.h"
@@ -450,8 +450,8 @@ void we_showcase_simple_demo_init(we_lcd_t *lcd)
     we_slideshow_set_child_pos(&sc_mini, (we_obj_t *)&sc_mini_p1, 52, 44);
 
     /* ================= C 列 x=405 ================= */
-    we_img_obj_init(&sc_img, lcd, 405, 40, img_rgb565_64x80, 255U);
-    we_img_ex_obj_init(&sc_img_ex, lcd, 540, 80, img_rgb565_64x80, 255U);
+    we_img_obj_init(&sc_img, lcd, 405, 40, demo_sprite, 255U);
+    we_img_ex_obj_init(&sc_img_ex, lcd, 540, 80, demo_sprite, 255U);
 
     /* 注意：arc 的 (cx,cy) 是圆心坐标，外接框为 ±(r+thickness)。
      * 圆心 (443,180) → 包围盒约 (405..481, 142..218)，避开上方 img 与左侧 B 列。 */
@@ -465,11 +465,11 @@ void we_showcase_simple_demo_init(we_lcd_t *lcd)
      * 真实尺寸摆放——放 (405,330) 占 405..533 × 330..394，
      * 上方 MSGBOX 按钮(止于322)、下方说明行(434)、右侧 D 列(605)均留余量。 */
     (void)we_flash_img_obj_init(&sc_fimg, lcd, 405, 330,
-                                bin_addr_table[IMG_DEMO_RGB565_ID], 255U);
+                                bin_addr_table[DEMO_RAW_ID], 255U);
 
     /* 外挂 flash 中文字库 */
-    sc_ff_handle.font = &msyh_16_4bbp_ascii_menu_mix;
-    sc_ff_handle.blob_addr = MSYH_16_4BBP_ASCII_MENU_MIX_ADDR;
+    sc_ff_handle.font = &demo_cjk_16;
+    sc_ff_handle.blob_addr = DEMO_CJK_16_ADDR;
     if (we_flash_font_face_init(&sc_ff_face, lcd, &sc_ff_handle,
                                 sc_ff_scratch, (uint32_t)sizeof(sc_ff_scratch)))
     {

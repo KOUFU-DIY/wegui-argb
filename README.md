@@ -1,14 +1,14 @@
-# WeGui-ARGB · V0.2.1
+# WeGui-ARGB · V0.2.2
 
 轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供 SDL2 PC 模拟器。
 
-> 当前版本 **V0.2.1**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
+> 当前版本 **V0.2.2**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
 
 ## 特性
 
 - 小内存占用的局部帧缓冲（PFB）渲染
 - 脏矩形刷新策略（全屏 / 单包围盒 / 多脏矩形）
-- 统一的 GUI tick / task / timer 调度
+- 统一的 GUI tick / timer / 中央动画调度
 - 内置控件与完整 demo 工程
 - 支持外部 Flash 图片与字体资源
 - 同时支持 STM32F103 / STM32F030 硬件目标与 SDL2 模拟器目标
@@ -50,8 +50,10 @@
 | 19 | dropdown | 22.3 KB | 6.09 KB | 同上方汇总表 F030 行 |
 | 20 | stepper | 20.0 KB | 6.23 KB | |
 | 21 | indicator | 19.4 KB | 6.36 KB | |
+| 22 | line | 20.2 KB | 6.46 KB | |
+| 23 | box | 21.0 KB | 6.14 KB | 动画默认编译期关闭（`WE_BOX_USE_ANIM`） |
 
-> ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex` 的 ROM 偏大是 demo 内嵌了未压缩图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..21 均可单独烧录到 F030。F103 同口径约再大 0.5~0.8 KB（多一份外挂 flash 端口实现）。
+> ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex` 的 ROM 偏大是 demo 内嵌了未压缩图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..28 均可单独烧录到 F030。F103 同口径约再大 0.5~0.8 KB（多一份外挂 flash 端口实现）。第 24~28 号（gauge/list/roller/marquee/toast）为本轮新毕业控件，ROM/RAM 尚未实测记录。
 
 ## 当前控件状态
 
@@ -77,6 +79,13 @@
 - dropdown
 - stepper
 - indicator
+- line
+- box
+- gauge
+- list
+- roller
+- marquee
+- toast
 
 其中：
 
@@ -85,10 +94,41 @@
 - `chart` 的波形主体与柔边绘制思路参考自 Arm-2D，但实现已按 WeGui 的环形缓冲、脏矩形、PFB 裁剪与整数坐标体系重写
 - `dropdown` 展开列表支持无级（像素级）拖拽滚动，滚动条按空闲时间自动淡出至常驻最低透明度
 - `stepper` 数值用定点 int32 存储，按住可连续步进且不占用 timer 槽
-- `indicator` 圆形状态灯通过中央动画引擎（`we_anim_t`，不占 task 槽）做亮灭过渡，可选外发光晕
+- `indicator` 圆形状态灯通过中央动画引擎（`we_anim_t`，不占定时器槽位）做亮灭过渡，可选外发光晕
 - `msgbox` 为水平居中的模态弹窗，采用透明度淡入/淡出 + 解析式圆角面板
-- 所有带动画的控件（toggle/progress/indicator/msgbox/slideshow/scroll_panel/dropdown）统一走**中央动画引擎**，不占用 GUI task 槽、数量无上限、空闲自动摘链
+- `line` 为抗锯齿线段（圆头/平头），端点几何、颜色、透明度三通道各占独立动画节点、可同时动画
+- `box` 为矩形面板：四角可各自独立配置圆角/切角/直角，支持边框厚度与颜色；中央与直边整块快速填充，仅四角方块逐像素抗锯齿合成；颜色/透明度动画为编译期可选项（`WE_BOX_USE_ANIM`，默认关闭）
+- `gauge` 为仪表盘（刻度/指针/中心帽全部复用现有抗锯齿原语）：指针差分标脏——数值变化只重绘新旧指针位形两块包围盒、静态刻度区零重绘；值→角度走 set_range 预除的 Q16 斜率，draw 内零三角函数、零乘除
+- `list` 为数据驱动列表菜单（字符串数组由调用方持有，控件只存指针）：拖拽松手与快速轻扫都注入惯性，越界橡皮筋过冲后回弹，滚动条空闲自动渐隐至常驻低透明（dropdown 同款口径）；行按压/滚动/滚动条各自精细标脏
+- `roller` 为滚轮选值器：慢速松手就近吸附，快速甩动惯性继承拖拽速度、滑过多行再减速吸附，轻点上/下可见行直达该行；滚动只标文本列带，文字测量走 y-bbox 常量化 + 行宽缓存（绘制内环零测量调用）
+- `marquee` 为跑马灯标签："放得下静止、放不下循环滚动"自适应（两段绘制无缝接缝 + 可停留）；窗口化字形绘制对不可见字形只做游标快进（零位图取址、零像素扫描），滚动由单个中央动画节点推进
+- `toast` 为非模态轻提示横幅：顶部滑入 → 停留 → 滑出全程不拦截输入、不占 LCD 弹层槽；滑动每步把新旧包围盒 union 成单个矩形一次标脏，超宽文本尾部自动截断加省略号
+- 所有带动画的控件（toggle/progress/indicator/msgbox/slideshow/scroll_panel/dropdown/line/gauge/list/roller/marquee/toast）统一走**中央动画引擎**，不占用定时器槽位、数量无上限、空闲自动摘链
 - 容器透明度可向子控件级联传播（group/slideshow/scroll_panel）；裸 `group` 会把触摸事件转发给内部子控件，全透明 group 不拦截输入
+
+除稳定区外，仓库另设 **preview 孵化区**：实验控件位于 `Core/widgets_preview/`（demo 在
+`Demo/preview/`，DEMO_ID 使用 100 起的独立编号段），仅模拟器编译、不进 Keil 硬件工程，
+未细致优化、随时可能下架；毕业后才迁入 `Core/widgets/` 与稳定编号段。当前含 `mask_group`
+在内共 26 个实验控件，完整清单见 `Demo/preview/preview_demos.h` 顶部的编号一览。
+
+## 控件演示
+
+全部为模拟器实录（280×240、10fps 循环 GIF，`docs/demo_gifs/`）。交互型控件（slider/dropdown/stepper 等）仅展示其 demo 的自动动画部分。
+
+| | | |
+|:---:|:---:|:---:|
+| **label**<br>![label](docs/demo_gifs/demo_01_label.gif) | **btn**<br>![btn](docs/demo_gifs/demo_02_btn.gif) | **img**<br>![img](docs/demo_gifs/demo_03_img.gif) |
+| **img_ex**<br>![img_ex](docs/demo_gifs/demo_04_img_ex.gif) | **arc**<br>![arc](docs/demo_gifs/demo_05_arc.gif) | **group**<br>![group](docs/demo_gifs/demo_06_group.gif) |
+| **slideshow**<br>![slideshow](docs/demo_gifs/demo_07_slideshow.gif) | **concentric arc**<br>![concentric_arc](docs/demo_gifs/demo_08_concentric_arc.gif) | **checkbox**<br>![checkbox](docs/demo_gifs/demo_09_checkbox.gif) |
+| **label_ex**<br>![label_ex](docs/demo_gifs/demo_10_label_ex.gif) | **chart**<br>![chart](docs/demo_gifs/demo_11_chart.gif) | **toggle**<br>![toggle](docs/demo_gifs/demo_12_toggle.gif) |
+| **progress**<br>![progress](docs/demo_gifs/demo_13_progress.gif) | **msgbox**<br>![msgbox](docs/demo_gifs/demo_14_msgbox.gif) | **img_flash**<br>![flash_img](docs/demo_gifs/demo_15_flash_img.gif) |
+| **font_flash**<br>![flash_font](docs/demo_gifs/demo_16_flash_font.gif) | **slider**<br>![slider](docs/demo_gifs/demo_17_slider.gif) | **scroll_panel**<br>![scroll_panel](docs/demo_gifs/demo_18_scroll_panel.gif) |
+| **dropdown**<br>![dropdown](docs/demo_gifs/demo_19_dropdown.gif) | **stepper**<br>![stepper](docs/demo_gifs/demo_20_stepper.gif) | **indicator**<br>![indicator](docs/demo_gifs/demo_21_indicator.gif) |
+| **line**<br>![line](docs/demo_gifs/demo_22_line.gif) | **box**<br>![box](docs/demo_gifs/demo_23_box.gif) | **gauge**<br>![gauge](docs/demo_gifs/demo_24_gauge.gif) |
+| **list**<br>![list](docs/demo_gifs/demo_25_list.gif) | **roller**<br>![roller](docs/demo_gifs/demo_26_roller.gif) | **marquee**<br>![marquee](docs/demo_gifs/demo_27_marquee.gif) |
+| **toast**<br>![toast](docs/demo_gifs/demo_28_toast.gif) | | |
+
+> preview 孵化区 26 个实验控件的演示 GIF 在仓库根目录 `preview_gifs/`（不随 README 展示，编号对照 `Demo/preview/preview_demos.h`）。
 
 ## 仓库结构
 
@@ -141,7 +181,7 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 
 ## Demo 选择
 
-当前 simple demo 共 **21 个**，三个目标（Simulator / STM32F103 / STM32F030）编号已统一：`1..21` 完全一致；Simulator 额外用 `0 = showcase`（全控件汇总，仅模拟器，需 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
+当前 simple demo 共 **28 个**，三个目标（Simulator / STM32F103 / STM32F030）编号已统一：`1..28` 完全一致；Simulator 额外用 `0 = showcase`（全控件汇总，仅模拟器，需 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
 
 下表为统一后的 `DEMO_ID`：
 
@@ -169,6 +209,13 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 | 19 | dropdown |
 | 20 | stepper |
 | 21 | indicator |
+| 22 | line |
+| 23 | box |
+| 24 | gauge |
+| 25 | list |
+| 26 | roller |
+| 27 | marquee |
+| 28 | toast |
 
 > `0`（showcase）仅 Simulator 提供；STM32 无此项。未列编号回退到 `label`（Simulator）/ `btn`（STM32）。
 

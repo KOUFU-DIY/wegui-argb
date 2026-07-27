@@ -3,6 +3,15 @@
 
 #include "we_gui_driver.h"
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 闭合态：OK 按下沿主框进入按压态，松开沿展开列表；
+ * 展开态经弹层键通道导航：上/下（或前/后）移动高亮行并滚动跟随、
+ * OK 选中当前行并收起、BACK 直接收起。
+ * 置 0 单独裁剪本控件的按键支持，其余控件不受影响。 */
+#ifndef WE_DROPDOWN_USE_KEY
+#define WE_DROPDOWN_USE_KEY 1
+#endif
+
 /* --------------------------------------------------------------------------
  * 下拉选择控件（dropdown）
  *
@@ -37,6 +46,21 @@
 #endif
 
 /* 单个选项 */
+/* 展开列表越界过冲上限（像素）：拖拽最多超出边界的距离（list 同款橡皮筋） */
+#ifndef WE_DROPDOWN_OVERSCROLL_LIMIT
+#define WE_DROPDOWN_OVERSCROLL_LIMIT 24
+#endif
+
+/* 回弹拉力：每步回弹 = 过冲 / PULL_DIV（下限 1px），对齐 list/scroll_panel */
+#ifndef WE_DROPDOWN_REBOUND_PULL_DIV
+#define WE_DROPDOWN_REBOUND_PULL_DIV 3
+#endif
+
+/* 回弹单步上限（像素） */
+#ifndef WE_DROPDOWN_REBOUND_MAX_STEP
+#define WE_DROPDOWN_REBOUND_MAX_STEP 24
+#endif
+
 typedef struct
 {
     const char *text;  /* 选项显示文本（UTF-8） */
@@ -54,27 +78,33 @@ typedef void (*we_dropdown_changed_cb_t)(struct we_dropdown_obj_t *obj,
 typedef struct we_dropdown_obj_t
 {
     we_obj_t base;
+
+    /* 4 字节对齐成员（指针/int32/动画节点）在前，消 padding */
     const we_dropdown_option_t *options;
+    const unsigned char *font;
+    we_dropdown_changed_cb_t changed_cb;
+    int32_t scroll_px;          /* popup 内容向上滚动的像素偏移（无级，0=顶部对齐） */
+    int32_t drag_start_scroll;  /* 按下时的 scroll_px */
+    we_anim_t sb_anim;          /* 淡出动画节点（不占 GUI task 槽，收敛即摘链） */
+    we_anim_t rb_anim;          /* 回弹动画节点（收敛即摘链，list 同款口径） */
+
+    /* 2 字节成员 */
     uint16_t option_cnt;
     int16_t selected_idx;     /* 当前选中项，-1 表示未选 */
     int16_t hover_idx;        /* popup 中当前按下高亮项，-1 表示无 */
-    int32_t scroll_px;        /* popup 内容向上滚动的像素偏移（无级，0=顶部对齐） */
-    uint8_t opened;           /* 是否已展开 */
-    uint8_t pressed;          /* 主框是否处于按下态 */
-    uint8_t enabled;          /* 是否可交互 */
-    uint8_t max_visible_items;
     uint16_t item_h;          /* 单项高度（含主框/列表项） */
     uint16_t radius;
-    const unsigned char *font;
-    we_dropdown_changed_cb_t changed_cb;
-    /* --- popup 内部拖拽滚动状态，无需外部访问 --- */
-    int16_t drag_start_y;       /* 按下时的 Y 坐标 */
-    int32_t drag_start_scroll;  /* 按下时的 scroll_px */
-    uint8_t dragging;           /* 本次触摸是否已判定为拖拽滚动 */
-    /* --- 滚动条自动淡出状态，由中央动画引擎驱动 --- */
-    uint8_t  sb_alpha;          /* 滚动条当前透明度（0~255），0=完全隐藏 */
-    uint16_t sb_idle_ms;        /* 自上次滚动以来累计的空闲毫秒 */
-    we_anim_t sb_anim;          /* 淡出动画节点（不占 GUI task 槽，收敛即摘链） */
+    int16_t drag_start_y;     /* 按下时的 Y 坐标 */
+    uint16_t sb_idle_ms;      /* 自上次滚动以来累计的空闲毫秒 */
+
+    /* 1 字节成员与状态位域 */
+    uint8_t max_visible_items;
+    uint8_t sb_alpha;         /* 滚动条当前透明度（0~255），0=完全隐藏 */
+    uint8_t opened : 1;       /* 是否已展开 */
+    uint8_t pressed : 1;      /* 主框是否处于按下态 */
+    uint8_t enabled : 1;      /* 是否可交互 */
+    uint8_t dragging : 1;     /* 本次触摸是否已判定为拖拽滚动 */
+    uint8_t rebounding : 1;   /* 回弹动画进行中标志 */
 } we_dropdown_obj_t;
 
 /**

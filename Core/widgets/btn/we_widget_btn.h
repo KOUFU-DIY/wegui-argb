@@ -3,6 +3,13 @@
 
 #include "we_gui_driver.h"
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 置 0 单独裁剪按钮的按键回调与可聚焦性（类描述符 key_cb 为 NULL，
+ * 焦点遍历自动跳过本类控件），其余控件不受影响。 */
+#ifndef WE_BTN_USE_KEY
+#define WE_BTN_USE_KEY 1
+#endif
+
 /* --------------------------------------------------------------------------
  * 是否启用按钮自定义样式
  *
@@ -16,25 +23,6 @@
  * -------------------------------------------------------------------------- */
 #ifndef WE_BTN_USE_CUSTOM_STYLE
 #define WE_BTN_USE_CUSTOM_STYLE 0
-#endif
-
-/* --------------------------------------------------------------------------
- * 按钮圆角边框绘制模式
- *
- * 注意：当前实现已统一走解析式圆角填充（we_draw_round_rect_analytic_fill），
- * 取消了按钮私有边框逻辑，代码中没有任何分支消费本宏，故本宏暂未生效，
- * 仅保留以备后续恢复双模式切换。
- *
- * 0：
- * 精细模式，使用按钮私有的圆角边框绘制逻辑。
- * 观感更好，圆角和边框衔接更自然，但代码体积更大。
- *
- * 1：
- * 紧凑模式，尽量复用通用圆角矩形绘制能力。
- * 代码更小，但圆角边框衔接会更生硬。
- * -------------------------------------------------------------------------- */
-#ifndef WE_BTN_DRAW_MODE
-#define WE_BTN_DRAW_MODE 0
 #endif
 
 typedef enum
@@ -62,11 +50,11 @@ typedef struct
     const char *text;
     const unsigned char *font;
     we_btn_event_cb_t user_event_cb;
-    uint8_t state; /* 当前按钮状态，按 we_btn_state_t 枚举值存储 */
 #if WE_BTN_USE_CUSTOM_STYLE
     we_btn_style_t styles[WE_BTN_STATE_MAX];
 #endif
     uint16_t radius;
+    uint8_t state; /* 当前按钮状态，按 we_btn_state_t 枚举值存储 */
     uint8_t opacity;
 } we_btn_obj_t;
 

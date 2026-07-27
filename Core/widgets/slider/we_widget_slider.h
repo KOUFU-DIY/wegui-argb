@@ -8,6 +8,13 @@ extern "C"
 {
 #endif
 
+/* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
+ * 置 0 单独裁剪滑条的按键回调与可聚焦性，其余控件不受影响。
+ * 键控调值依赖编辑态，WE_CFG_FOCUS_EDIT=0 时本支持整体关闭。 */
+#ifndef WE_SLIDER_USE_KEY
+#define WE_SLIDER_USE_KEY 1
+#endif
+
 #ifndef WE_SLIDER_TRACK_THICKNESS
 #define WE_SLIDER_TRACK_THICKNESS 8U
 #endif
@@ -32,18 +39,18 @@ typedef void (*we_slider_changed_cb_t)(void *obj, uint8_t value);
 typedef struct
 {
     we_obj_t base;
+    we_slider_changed_cb_t changed_cb; /* 可为 NULL；为空时调用方需自行轮询 get_value 获取数值 */
+    colour_t track_color;
+    colour_t fill_color;
+    colour_t thumb_color;
     uint8_t min_value;
     uint8_t max_value;
     uint8_t value;
     uint8_t opacity;
     uint8_t track_thickness;
     uint8_t thumb_size;
+    uint8_t orient;      /* we_slider_orient_t 枚举值（存 uint8：跨编译器定宽省 RAM） */
     uint8_t pressed : 1;
-    we_slider_orient_t orient;
-    colour_t track_color;
-    colour_t fill_color;
-    colour_t thumb_color;
-    we_slider_changed_cb_t changed_cb; /* 可为 NULL；为空时调用方需自行轮询 get_value 获取数值 */
 } we_slider_obj_t;
 
 /**
