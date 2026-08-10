@@ -1,0 +1,16 @@
+# focus2: edit-mode value adjust (slider/stepper/roller)
+5 kinject OK
+15 kinject RIGHT
+20 kinject RIGHT
+25 kinject RIGHT
+35 kinject OK
+45 kinject NEXT
+55 kinject OK
+65 kinject UP
+70 kinject UP
+80 kinject BACK
+90 kinject NEXT
+100 kinject OK
+110 kinject DOWN
+120 kinject DOWN
+130 kinject BACK

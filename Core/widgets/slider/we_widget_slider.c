@@ -73,7 +73,7 @@ static const we_class_t _slider_class = {
     .event_cb = _slider_event_cb,
         .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
-    .key_cb = _slider_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -558,8 +558,17 @@ static void _slider_draw_cb(void *ptr)
  * @param data 输入设备事件数据指针。
  * @return 1 表示事件已消费，0 表示无效。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
+static uint8_t _slider_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _slider_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_slider_obj_t *obj = (we_slider_obj_t *)ptr;
     uint8_t old_value;
     uint8_t new_value;

@@ -52,7 +52,7 @@ static int32_t _gg_next_target(void)
 }
 
 /**
- * @brief 初始化 gauge preview demo。
+ * @brief 初始化 gauge demo。
  * @param lcd 传入：GUI 屏幕上下文指针。
  * @return 无。
  */
@@ -91,7 +91,7 @@ void we_gauge_simple_demo_init(we_lcd_t *lcd)
 }
 
 /**
- * @brief gauge preview demo 周期更新。
+ * @brief gauge demo 周期更新。
  * @param lcd 传入：GUI 屏幕上下文指针。
  * @param ms_tick 传入：本轮累计毫秒数。
  * @return 无。

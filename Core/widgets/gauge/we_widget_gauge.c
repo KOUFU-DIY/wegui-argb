@@ -1,12 +1,12 @@
 /**
  * @file  we_widget_gauge.c
- * @brief 仪表盘控件（gauge）实现 —— preview 孵化区
+ * @brief 仪表盘控件（gauge）实现
  *
  * 刻度与指针全部复用 we_draw_line_round（圆头抗锯齿线），中心帽复用
  * we_draw_round_rect_analytic_fill 退化的实心抗锯齿圆，不新增渲染图元。
  * 数值扫动经单个中央动画节点推进（不占 GUI timer 槽），全程整数运算。
  *
- * 毕业级优化（本轮）：
+ * 实现要点：
  *   1. 指针差分标脏：数值变化只提交"旧指针位形"与"新指针位形"两块
  *      包围盒（各自并入中心帽），静态刻度区零重绘（_gauge_invalidate_pointer）；
  *   2. 刻度几何缓存：主刻度内外端点偏移在 init/set_tick_count 时一次算好，
@@ -141,9 +141,9 @@ static void _gauge_polar(int16_t cx, int16_t cy, int32_t r, int16_t angle,
  * @param out_cy 传出：表盘中心 Y。
  * @return 外半径 R（像素）；<= 4 时调用方应放弃绘制/标脏。
  * @note 常规尺寸：R = min(w,h)/2 - 2（2px 抗锯齿羽化余量，覆盖默认
- *       刻度线宽 2 的墨迹晕圈：半宽 1 + 羽化 1）。极小表盘护栏：
+ *       刻度线宽 2 的有效像素晕圈：半宽 1 + 羽化 1）。极小表盘护栏：
  *       min(w,h) < WE_GAUGE_SMALL_SIZE 时按最外元素（外端点落在 R 上的
- *       圆头刻度线，指针线宽更大时用指针兜底）的墨迹晕圈
+ *       圆头刻度线，指针线宽更大时用指针兜底）的有效像素晕圈
  *       线宽/2 + 1px 羽化 + 1px 取整余量钳缩 R，保证 AA 不越出包围盒。
  *       指针端点在 0.72R、中心帽半径 <= R-1（由 R > 4 保证），恒更安全。
  */
@@ -211,7 +211,7 @@ static void _gauge_rebuild_ticks(we_gauge_obj_t *obj)
  * @param x1 脏区右下角 X（闭区间）。
  * @param y1 脏区右下角 Y。
  * @return 无。
- * @note 墨迹恒在控件矩形内（_gauge_geometry 护栏保证），钳制不丢像素。
+ * @note 有效像素恒在控件矩形内（_gauge_geometry 护栏保证），钳制不丢像素。
  */
 static void _gauge_submit_dirty(we_gauge_obj_t *obj,
                                 int16_t x0, int16_t y0, int16_t x1, int16_t y1)
@@ -232,7 +232,7 @@ static void _gauge_submit_dirty(we_gauge_obj_t *obj,
  * @param new_v 变化后的显示值（已钳制在量程内）。
  * @return 无。
  * @note 单块包围盒 = 圆心与指针端点的 min/max 矩形，向外扩
- *       max(指针半宽 + 2, 帽半径 + 1)：既包住指针胶囊墨迹与 1px 羽化，
+ *       max(指针半宽 + 2, 帽半径 + 1)：既包住指针胶囊的有效像素与 1px 羽化，
  *       也包住中心帽的 AA 边缘（帽压在指针根部上，指针换向时帽边缘
  *       混色随之变化）。旧/新两块分别提交，不合成大盒——扫动小步进时
  *       两块高度重叠可被脏矩形管理器合并，大步进时避免标脏中间无关区。

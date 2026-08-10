@@ -2,6 +2,7 @@
 #define __WE_WIDGET_LOGVIEW_H
 
 #include "we_gui_driver.h"
+#include "we_scroll.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -78,8 +79,9 @@ typedef struct we_logview_obj_t
     /* 4 字节对齐成员在前，消 padding */
     char *line_buf;             /* 行缓冲基址（调用方提供，line_cnt x line_len 扁平数组） */
     const unsigned char *font;  /* 字体资源（init 必传） */
+    we_scroll_t sc;             /* 滚动物理状态机（无惯性档；scroll_px 为距底偏移，
+                                 * 方向与常规相反，喂入时主轴坐标取负） */
     int32_t scroll_px;          /* 距底部对齐位置的向上偏移（0 = 贴底） */
-    int32_t press_scroll;       /* 按下时 scroll_px */
 
     /* 2 字节成员 */
     uint16_t line_len;          /* 单行字节容量（含结尾 \0） */
@@ -88,7 +90,6 @@ typedef struct we_logview_obj_t
     uint16_t used;              /* 已写入的有效行数（<= line_cnt） */
     uint16_t row_h;             /* 行高（像素，= 字体行高 + 2） */
     uint16_t radius;            /* 面板圆角半径 */
-    int16_t press_y;            /* 按下时触摸 Y */
     colour_t bg_color;          /* 面板底色 */
     colour_t text_color;        /* 日志文字色 */
     colour_t sb_color;          /* 滚动条滑块色 */
@@ -96,8 +97,6 @@ typedef struct we_logview_obj_t
     /* 1 字节成员与状态位域 */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
     uint8_t follow : 1;         /* 自动跟随最新行标志 */
-    uint8_t tracking : 1;       /* 本次触摸序列有效标志 */
-    uint8_t dragging : 1;       /* 已进入拖拽滚动标志 */
 } we_logview_obj_t;
 
 /**

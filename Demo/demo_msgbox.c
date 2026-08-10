@@ -51,8 +51,8 @@ static void _popup_set_status(const char *text)
  */
 static void _popup_hide_all(void)
 {
-    we_msgbox_hide(&popup_ok_box);
-    we_msgbox_hide(&popup_ok_cancel_box);
+    we_popup_hide(&popup_ok_box);
+    we_popup_hide(&popup_ok_cancel_box);
 }
 
 /**
@@ -63,7 +63,7 @@ static void _popup_hide_all(void)
 static void _popup_ok_cb(we_msgbox_obj_t *obj)
 {
     _popup_set_status("AUTO HANDLE: msgbox_ok -> OK");
-    we_msgbox_hide(obj);
+    we_popup_hide(obj);
 }
 
 /**
@@ -74,7 +74,7 @@ static void _popup_ok_cb(we_msgbox_obj_t *obj)
 static void _popup_ok_cancel_ok_cb(we_msgbox_obj_t *obj)
 {
     _popup_set_status("AUTO HANDLE: msgbox_ok_cancel -> OK");
-    we_msgbox_hide(obj);
+    we_popup_hide(obj);
 }
 
 /**
@@ -85,7 +85,7 @@ static void _popup_ok_cancel_ok_cb(we_msgbox_obj_t *obj)
 static void _popup_ok_cancel_cancel_cb(we_msgbox_obj_t *obj)
 {
     _popup_set_status("AUTO HANDLE: msgbox_ok_cancel -> CANCEL");
-    we_msgbox_hide(obj);
+    we_popup_hide(obj);
 }
 
 /**
@@ -153,7 +153,7 @@ void we_msgbox_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
             popup_demo_stage = 1U;
             _popup_hide_all();
             _popup_set_status("SHOW: msgbox_ok");
-            we_msgbox_show(&popup_ok_box);
+            we_popup_show(&popup_ok_box);
         }
         break;
     case 1:
@@ -171,7 +171,7 @@ void we_msgbox_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
             popup_demo_stage = 3U;
             _popup_hide_all();
             _popup_set_status("SHOW: msgbox_ok_cancel");
-            we_msgbox_show(&popup_ok_cancel_box);
+            we_popup_show(&popup_ok_cancel_box);
         }
         break;
     case 3:

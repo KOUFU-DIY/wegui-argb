@@ -28,7 +28,7 @@
  *
  * 弹层模式（隐藏/收回软键盘）：
  *   we_keyboard_popup_init 创建的键盘不挂普通对象链表，经 LCD 弹层
- *   （WE_POPUP_TYPE_KEYBOARD）承载：we_keyboard_popup_show 从屏底滑入
+ *   （LCD 顶层链 + 模态）承载：we_keyboard_popup_show 从屏底滑入
  *   （toast 同款 Q8 状态机，一个中央动画节点），点击键盘外部区域或
  *   BACK 键滑出收回；show 可绑定目标输入框（we_textarea_obj_t*），
  *   普通键/退格直接 we_textarea_input 注入，"OK" 确定键触发 done_cb
@@ -74,7 +74,7 @@
 #endif
 
 /* 本控件弹层键导航开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
- * 置 0 裁剪键光标与弹层键通道回调（触摸弹层模式不受影响）。 */
+ * 置 0 裁剪键光标与模态键通道回调（触摸弹层模式不受影响）。 */
 #ifndef WE_KEYBOARD_USE_KEY
 #define WE_KEYBOARD_USE_KEY 1
 #endif
@@ -209,7 +209,7 @@ void we_keyboard_popup_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
  * @return 无。
  * @note 绑定后普通键/退格直接注入目标（we_textarea_input），无需 key_cb；
  *       滑出中途调用则从当前位置反向滑入；重复 show 仅更新绑定目标。
- *       同屏唯一弹层：会自动顶掉已打开的其他弹层（dropdown 等）。
+ *       同屏唯一弹层：会自动替换已打开的其他弹层（dropdown 等）。
  */
 void we_keyboard_popup_show(we_keyboard_obj_t *obj, void *target_textarea);
 
@@ -235,7 +235,7 @@ void we_keyboard_set_done_cb(we_keyboard_obj_t *obj, we_keyboard_done_cb_t cb);
  * @param obj 控件对象指针。
  * @param code 语义键编码（松开沿带 WE_KEY_RELEASE_FLAG）。
  * @return 1 = 已消费；0 = BACK 键未消费（由宿主决定收回动作）。
- * @note 供 ime_pinyin 等组合宿主在自己的弹层键通道里转发；
+ * @note 供 ime_pinyin 等组合宿主在自己的模态键通道里转发；
  *       键盘自身的弹层模式内部已接好，无需调用。
  */
 uint8_t we_keyboard_key_nav(we_keyboard_obj_t *obj, uint8_t code);

@@ -53,7 +53,7 @@ static const we_class_t _toggle_class = {
     .event_cb = _toggle_event_cb,
         .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
-    .key_cb = _toggle_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -258,8 +258,17 @@ colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
  * @param data 输入设备事件数据指针。
  * @return 返回状态标志（1 有效，0 无效）。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
+static uint8_t _toggle_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _toggle_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_toggle_obj_t *obj = (we_toggle_obj_t *)ptr;
 
     /* 用户自定义回调优先，接管全部事件 */

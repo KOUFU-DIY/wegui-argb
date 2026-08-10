@@ -1,0 +1,9 @@
+# dropdown: expand top -> tap list area -> expand bottom -> tap outside
+10 down 80 85
+12 up
+40 down 80 133
+42 up
+80 down 80 217
+82 up
+120 down 250 40
+122 up

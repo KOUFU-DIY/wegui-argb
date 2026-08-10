@@ -1,0 +1,13 @@
+# focus: Tab tour -> OK trigger -> enter group -> back out -> arrows
+5 kinject NEXT
+15 kinject NEXT
+25 kinject NEXT
+35 kinject OK
+50 kinject NEXT
+60 kinject OK
+75 kinject NEXT
+85 kinject OK
+100 kinject BACK
+110 kinject BACK
+120 kinject UP
+130 kinject LEFT

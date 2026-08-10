@@ -39,15 +39,6 @@ extern "C"
  *   启用渐变             → 容器 ∩ 条带区域整体一遍"加法 + 混色"。
  * -------------------------------------------------------------------------- */
 
-/* 蒙版容器最多挂载的子控件数量 */
-#ifndef WE_MASK_GROUP_CHILD_MAX
-#define WE_MASK_GROUP_CHILD_MAX 12
-#endif
-
-#if WE_MASK_GROUP_CHILD_MAX > 32
-#error "WE_MASK_GROUP_CHILD_MAX must be <= 32: slot occupancy is a uint32 bitmask (slot_used_mask)."
-#endif
-
 /* 渐变类型 */
 typedef enum
 {
@@ -73,13 +64,6 @@ typedef enum
 
 typedef struct
 {
-    we_obj_t *child;
-    int16_t local_x;
-    int16_t local_y;
-} we_mask_group_child_slot_t;
-
-typedef struct
-{
     we_obj_t base;              /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
 
@@ -97,9 +81,6 @@ typedef struct
     uint8_t grad_a0;            /* 渐变起点 alpha（投影最小端，255 = 完全可见） */
     uint8_t grad_a1;            /* 渐变终点 alpha（投影最大端） */
 
-    uint32_t slot_used_mask; /* 槽位占用位图（bit i = child_slots[i] 在用） */
-    we_mask_group_child_slot_t child_slots[WE_MASK_GROUP_CHILD_MAX];
-    we_obj_t *last_pressed_child; /* 命中转发：本次触摸序列按到的子控件 */
 } we_mask_group_obj_t;
 
 /**
@@ -118,7 +99,7 @@ void we_mask_group_obj_init(we_mask_group_obj_t *obj, we_lcd_t *lcd,
                             int16_t x, int16_t y, int16_t w, int16_t h);
 
 /**
- * @brief 删除蒙版容器：先逐个删除全部子控件并清空 slot，再删除容器自身。
+ * @brief 删除蒙版容器：子控件经 we_obj_delete 的 CHILD_OWNER 后序递归一并删除。
  * @param obj 控件对象指针。
  * @return 无。
  */
@@ -134,7 +115,7 @@ void we_mask_group_obj_delete(we_mask_group_obj_t *obj);
 void we_mask_group_add_child(we_mask_group_obj_t *obj, we_obj_t *child);
 
 /**
- * @brief 将子控件从容器中移除（去链并释放 slot）。
+ * @brief 将子控件从容器中移除（去链，绝对坐标保持不变）。
  * @param obj 控件对象指针。
  * @param child 目标子控件对象指针。
  * @return 无。
@@ -153,7 +134,7 @@ void we_mask_group_set_child_pos(we_mask_group_obj_t *obj, we_obj_t *child,
                                  int16_t local_x, int16_t local_y);
 
 /**
- * @brief 按各 slot 局部坐标重新刷新全部子控件的屏幕绝对位置。
+ * @brief 兼容空操作：子控件绝对坐标即唯一事实源。
  * @param obj 控件对象指针。
  * @return 无。
  */

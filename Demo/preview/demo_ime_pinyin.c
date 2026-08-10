@@ -18,11 +18,11 @@
 #include "widgets/label/we_widget_label.h"
 #include "widgets_preview/ime_pinyin/we_widget_ime_pinyin.h"
 #include "widgets_preview/textarea/we_widget_textarea.h"
-#include "demo_ime_16.h"
+#include "msyh_16_4bpp_ime.h"
 #include <string.h>
 
 /* 含中文的 IME 字库（ASCII + GB2312 一级 3755 字，16px 4bpp internal） */
-#define IME_DEMO_FONT ((const unsigned char *)&demo_ime_16)
+#define IME_DEMO_FONT ((const unsigned char *)&msyh_16_4bpp_ime)
 
 /* 回显缓冲上限（含结尾 0；一个 CJK 字 3 字节） */
 #define IME_ECHO_BUF_MAX 64U
@@ -186,7 +186,7 @@ void we_ime_pinyin_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
                        &ime_last_frames, ime_fps_buf, ms_tick);
 
     /* 自动演示脚本只在弹层展开期间步进（收回后暂停，点输入框恢复） */
-    if (!we_popup_layer_is_owner(lcd, &ime_pad))
+    if (we_modal_get(lcd) != (we_obj_t *)&ime_pad)
         return;
 
     ime_step_acc = (uint16_t)(ime_step_acc + ms_tick);

@@ -187,6 +187,26 @@ static void _ime_invalidate_echo(we_ime_pinyin_obj_t *obj)
 }
 
 /**
+ * @brief 取当前绑定的目标输入框，目标已被删除时自动解绑并返回 NULL
+ * @param obj 传入：本控件对象指针
+ * @return 有效目标指针；未绑定或目标已被删除返回 NULL
+ * @note 跨控件裸指针绑定的防悬空口径：we_obj_delete 会把被删对象的
+ *       class_p 清空，这里据此识别失效绑定并自动置空（与
+ *       we_gui_indev_handler 对 pressed_obj 的防御同源）。
+ */
+static void *_ime_target(we_ime_pinyin_obj_t *obj)
+{
+    we_obj_t *t = (we_obj_t *)obj->target;
+
+    if (t != NULL && t->class_p == NULL)
+    {
+        obj->target = NULL;
+        t = NULL;
+    }
+    return (void *)t;
+}
+
+/**
  * @brief 统一上屏出口：弹层模式绑定目标时直接注入输入框，再走 commit 回调。
  * @param obj 传入：控件对象指针。
  * @param utf8 传入：候选字/透传键值字符串（"\b" = 退格）。
@@ -194,7 +214,7 @@ static void _ime_invalidate_echo(we_ime_pinyin_obj_t *obj)
  */
 static void _ime_emit(we_ime_pinyin_obj_t *obj, const char *utf8)
 {
-    if (obj->popup_mode && obj->target != NULL)
+    if (obj->popup_mode && _ime_target(obj) != NULL)
     {
         we_textarea_input((we_textarea_obj_t *)obj->target, utf8);
         _ime_invalidate_echo(obj); /* 回显条同步刷新 */
@@ -222,7 +242,7 @@ static void _ime_invalidate_slot(we_ime_pinyin_obj_t *obj, int8_t slot)
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
 /* --------------------------------------------------------------------------
- * 候选栏键控光标（弹层键通道用，随内嵌键盘的 WE_KEYBOARD_USE_KEY 门控）
+ * 候选栏键控光标（模态键通道用，随内嵌键盘的 WE_KEYBOARD_USE_KEY 门控）
  * -------------------------------------------------------------------------- */
 
 /**
@@ -513,7 +533,7 @@ static void _ime_kb_key_cb(void *kb, const char *key)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 在槽位矩形中水平/垂直居中绘制一小段文本（按墨迹 bbox 垂直居中）。
+ * @brief 在槽位矩形中水平/垂直居中绘制一小段文本（按有效像素区 bbox 垂直居中）。
  * @param obj 传入：控件对象指针。
  * @param str 传入：NUL 结尾 UTF-8 文本。
  * @param sx 传入：槽位左上角 X。
@@ -568,7 +588,7 @@ static void _ime_pinyin_draw_cb(void *ptr)
         we_fill_rect(lcd, obj->base.x, obj->base.y, (uint16_t)obj->base.w,
                      (uint16_t)WE_KEYBOARD_ECHO_H, obj->bg_color, obj->opacity);
 
-        if (obj->target != NULL && obj->font != NULL && avail_w > 0)
+        if (_ime_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
             const char *text = we_textarea_get_text((const we_textarea_obj_t *)obj->target);
             we_area_t old_pfb_area = lcd->pfb_area;
@@ -727,7 +747,7 @@ static void _ime_pinyin_draw_cb(void *ptr)
  * @note 面板（拼音条 + 候选栏）矩形内的触摸一律消费；键盘区的触摸
  *       由链表更靠后的内嵌键盘对象拦截，不会派发到这里。
  */
-static uint8_t _ime_pinyin_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
+static uint8_t _ime_panel_event_body(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_ime_pinyin_obj_t *obj = (we_ime_pinyin_obj_t *)ptr;
     int8_t slot;
@@ -798,8 +818,57 @@ static uint8_t _ime_pinyin_event_cb(void *ptr, we_event_t event, we_indev_data_t
     return 1U; /* 面板矩形内其余事件（SWIPE 等）也不穿透 */
 }
 
+static void _ime_popup_close_cb(void *owner);
+static uint8_t _ime_popup_event(void *owner, we_event_t event, we_indev_data_t *data);
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+static uint8_t _ime_popup_key_cb(void *owner, uint8_t code);
+#endif
+static void _ime_popup_draw(void *owner);
+void we_ime_pinyin_popup_hide(we_ime_pinyin_obj_t *obj);
+
+/**
+ * @brief 统一事件入口：弹层模式承接模态语义（MODAL_CLOSE/键直送/区域路由），
+ *        普通模式直通面板处理体。
+ */
+static uint8_t _ime_pinyin_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
+{
+    we_ime_pinyin_obj_t *obj = (we_ime_pinyin_obj_t *)ptr;
+
+    if (obj->popup_mode)
+    {
+        if (event == WE_EVENT_MODAL_CLOSE)
+        {
+            we_obj_invalidate((we_obj_t *)obj);
+            we_obj_detach((we_obj_t *)obj);
+            _ime_popup_close_cb(obj);
+            return 1U;
+        }
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+        if ((uint8_t)event >= WE_KEY_UP)
+            return _ime_popup_key_cb(obj, (uint8_t)event);
+#endif
+        return _ime_popup_event(obj, event, data);
+    }
+    return _ime_panel_event_body(ptr, event, data);
+}
+
+/**
+ * @brief 统一绘制入口：弹层模式画全套（面板三条 + 内嵌键盘），普通模式画面板。
+ */
+static void _ime_class_draw_cb(void *ptr)
+{
+    we_ime_pinyin_obj_t *obj = (we_ime_pinyin_obj_t *)ptr;
+
+    if (obj->popup_mode)
+    {
+        _ime_popup_draw(obj);
+        return;
+    }
+    _ime_pinyin_draw_cb(ptr);
+}
+
 static const we_class_t _ime_pinyin_class = {
-    .draw_cb = _ime_pinyin_draw_cb,
+    .draw_cb = _ime_class_draw_cb,
     .event_cb = _ime_pinyin_event_cb,
     .set_pos_cb = NULL /* preview 限制：不支持移动（内嵌键盘坐标不跟随） */
 };
@@ -817,43 +886,7 @@ static const we_class_t _ime_pinyin_class = {
 #define _IME_SLIDE_SHOWN  2U
 #define _IME_SLIDE_OUT    3U
 
-/**
- * @brief 把顶层对象从 LCD 普通链表摘下（弹层承载改造用，不清对象字段）。
- * @param lcd 传入：GUI 屏幕上下文指针。
- * @param o 传入：目标对象。
- * @return 无。
- */
-static void _ime_detach_top(we_lcd_t *lcd, we_obj_t *o)
-{
-    we_obj_t **pp = &lcd->obj_list_head;
 
-    while (*pp != NULL)
-    {
-        if (*pp == o)
-        {
-            *pp = o->next;
-            o->next = NULL;
-            return;
-        }
-        pp = &(*pp)->next;
-    }
-}
-
-/**
- * @brief 按当前 base 矩形同步弹层 area（set_area 内部标脏旧/新区域）。
- * @param obj 传入：控件对象指针。
- * @return 无。
- */
-static void _ime_popup_sync_area(we_ime_pinyin_obj_t *obj)
-{
-    we_area_t a;
-
-    a.x0 = obj->base.x;
-    a.y0 = obj->base.y;
-    a.x1 = (int16_t)(obj->base.x + obj->base.w - 1);
-    a.y1 = (int16_t)(obj->base.y + obj->base.h - 1);
-    we_popup_layer_set_area(obj->base.lcd, obj, &a);
-}
 
 /**
  * @brief 按 slide_q8 计算面板 y（自屏底升起），内嵌键盘坐标同步跟随。
@@ -863,12 +896,14 @@ static void _ime_popup_sync_area(we_ime_pinyin_obj_t *obj)
 static void _ime_slide_apply(we_ime_pinyin_obj_t *obj)
 {
     we_lcd_t *lcd = obj->base.lcd;
+    int16_t ny = (int16_t)((int32_t)lcd->height -
+                           ((int32_t)obj->base.h * (int32_t)obj->slide_q8) / 256);
 
-    obj->base.y = (int16_t)((int32_t)lcd->height -
-                            ((int32_t)obj->base.h * (int32_t)obj->slide_q8) / 256);
+    /* 顶层对象：面板位移经 we_obj_set_pos（旧/新整区标脏，覆盖内嵌键盘），
+     * 内嵌键盘坐标随后同步（kb 不在链上，由面板 draw 分派绘制）。 */
+    we_obj_set_pos((we_obj_t *)obj, obj->base.x, ny);
     obj->kb.base.y = (int16_t)(_ime_bars_y(obj) + WE_IME_PINYIN_BUF_H +
                                WE_IME_PINYIN_CAND_H);
-    _ime_popup_sync_area(obj);
 }
 
 /**
@@ -911,7 +946,9 @@ static void _ime_slide_step_cb(void *owner, uint16_t elapsed_ms)
             obj->slide_q8 = 0U;
             _ime_slide_apply(obj);
             we_anim_stop(obj->base.lcd, &obj->anim);
-            we_popup_layer_close(obj->base.lcd, obj); /* close_cb 复位为 HIDDEN */
+            we_modal_close(obj->base.lcd, (we_obj_t *)obj);
+            we_obj_detach((we_obj_t *)obj); /* 已滑至屏外，摘链无需再标脏 */
+            _ime_popup_close_cb(obj);       /* 复位为 HIDDEN */
             return;
         }
         obj->slide_q8 = (uint16_t)q;
@@ -924,7 +961,7 @@ static void _ime_slide_step_cb(void *owner, uint16_t elapsed_ms)
 }
 
 /**
- * @brief 弹层关闭回调：正常滑出或被其他弹层顶掉时统一复位状态。
+ * @brief 弹层关闭回调：正常滑出或被其他弹层替换时统一复位状态。
  * @param owner 传入：控件对象指针。
  * @return 无。
  */
@@ -950,7 +987,7 @@ static void _ime_popup_close_cb(void *owner)
     obj->kb.pressed = 0U;
     obj->kb.press_idx = -1;
     obj->popup_press_kb = 0U;
-    if (obj->target != NULL) /* 弹层关闭 = 目标退出编辑态（光标熄灭停表） */
+    if (_ime_target(obj) != NULL) /* 弹层关闭 = 目标退出编辑态（光标熄灭停表） */
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
 }
 
@@ -984,7 +1021,7 @@ static uint8_t _ime_popup_event(void *owner, we_event_t event, we_indev_data_t *
             return obj->kb.base.class_p->event_cb(&obj->kb, event, data);
         return 1U;
     }
-    return _ime_pinyin_event_cb(obj, event, data);
+    return _ime_panel_event_body(obj, event, data);
 }
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
@@ -1061,7 +1098,7 @@ static uint8_t _ime_cand_key(we_ime_pinyin_obj_t *obj, uint8_t code)
 #endif /* WE_KEYBOARD_USE_KEY */
 
 /**
- * @brief 弹层键通道回调：候选区光标优先拦截，其余转发键盘键光标导航，
+ * @brief 模态键通道回调：候选区光标优先拦截，其余转发键盘键光标导航，
  *        BACK（键盘区）收回。
  * @param owner 传入：控件对象指针。
  * @param code 传入：语义键编码（松开沿带 WE_KEY_RELEASE_FLAG）。
@@ -1205,8 +1242,8 @@ void we_ime_pinyin_popup_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
         return; /* 底层 init 被参数守卫拒绝 */
 
     /* 弹层承载：把面板与内嵌键盘从普通链表摘下（不清对象字段） */
-    _ime_detach_top(lcd, (we_obj_t *)obj);
-    _ime_detach_top(lcd, (we_obj_t *)&obj->kb);
+    we_obj_detach((we_obj_t *)obj);
+    we_obj_detach((we_obj_t *)&obj->kb);
 
     obj->popup_mode = 1U;
 
@@ -1233,7 +1270,7 @@ void we_ime_pinyin_popup_show(we_ime_pinyin_obj_t *obj, void *target_textarea)
     lcd = obj->base.lcd;
 
     /* 编辑态交接：旧目标熄灭光标，新目标进入编辑态开始闪烁 */
-    if (obj->target != NULL && obj->target != target_textarea)
+    if (_ime_target(obj) != NULL && obj->target != target_textarea)
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
     obj->target = target_textarea;
     if (target_textarea != NULL)
@@ -1242,19 +1279,13 @@ void we_ime_pinyin_popup_show(we_ime_pinyin_obj_t *obj, void *target_textarea)
     if (obj->slide_state == _IME_SLIDE_SHOWN)
         return;
 
-    if (!we_popup_layer_is_owner(lcd, obj))
+    if (obj->slide_state == _IME_SLIDE_HIDDEN)
     {
-        we_area_t a;
-
-        a.x0 = obj->base.x;
-        a.y0 = obj->base.y;
-        a.x1 = (int16_t)(obj->base.x + obj->base.w - 1);
-        a.y1 = (int16_t)(obj->base.y + obj->base.h - 1);
-        we_popup_layer_open(lcd, WE_POPUP_TYPE_KEYBOARD, obj, &a,
-                            _ime_popup_draw, _ime_popup_event, _ime_popup_close_cb);
-#if (WE_CFG_ENABLE_KEY_INPUT == 1)
-        we_popup_layer_set_key_cb(lcd, obj, _ime_popup_key_cb);
-#endif
+        /* 首次弹出：面板对象挂顶层链并声明模态（内嵌键盘不单独挂链，
+         * 由面板 draw 分派绘制、触摸按区域路由）。滑出中反向 re-show
+         * 时仍在链上/仍是模态，无需重复挂接。 */
+        we_obj_attach_to_top(lcd, (we_obj_t *)obj);
+        we_modal_open(lcd, (we_obj_t *)obj);
     }
 
     obj->slide_state = _IME_SLIDE_IN;
@@ -1272,14 +1303,8 @@ void we_ime_pinyin_popup_hide(we_ime_pinyin_obj_t *obj)
         return;
     if (obj->slide_state == _IME_SLIDE_HIDDEN || obj->slide_state == _IME_SLIDE_OUT)
         return;
-    if (obj->target != NULL) /* 收回即退出编辑态（光标立即熄灭） */
+    if (_ime_target(obj) != NULL) /* 收回即退出编辑态（光标立即熄灭） */
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
-    if (!we_popup_layer_is_owner(obj->base.lcd, obj))
-    {
-        _ime_popup_close_cb(obj); /* 弹层已被顶掉：直接复位状态兜底 */
-        return;
-    }
-
     obj->slide_state = _IME_SLIDE_OUT;
     we_anim_start(obj->base.lcd, &obj->anim, _ime_slide_step_cb, obj);
 }
@@ -1476,11 +1501,8 @@ void we_ime_pinyin_obj_delete(we_ime_pinyin_obj_t *obj)
         return;
 
     if (obj->base.lcd != NULL)
-    {
         we_anim_stop(obj->base.lcd, &obj->anim);
-        if (obj->popup_mode)
-            we_popup_layer_close(obj->base.lcd, obj); /* 非拥有者时为空操作 */
-    }
     we_keyboard_obj_delete(&obj->kb);
-    we_obj_delete((we_obj_t *)obj); /* 弹层模式不在链表上，摘链自然落空 */
+    /* 弹层态的模态引用与顶层摘链由 we_obj_delete 的内核回收统一完成 */
+    we_obj_delete((we_obj_t *)obj);
 }

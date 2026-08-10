@@ -1,5 +1,4 @@
 #include "sdl_port.h"
-#include "merged_bin.h"
 #include "we_gui_driver.h"
 #include "we_user_config.h"
 #include <SDL.h>
@@ -7,8 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 模拟外挂 flash：g_merged_bin_data 按地址布局 */
-extern const unsigned char g_merged_bin_data[];
+/* 模拟外挂 flash：直接读 exe 旁的 merged_bin.bin（tool/3.bin2c 产物，
+ * CMake 构建后自动拷贝）。缺文件时读出 0xFF，等同已擦除的 flash。 */
+static FILE *sim_flash_file = NULL;
+static uint32_t sim_flash_size = 0U;
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
@@ -29,6 +30,14 @@ static uint8_t g_has_pending_input = 0;
  */
 void sim_lcd_init(void)
 {
+    /* 屏幕缓冲先于 SDL 初始化分配：即使窗口/渲染器创建失败（如 autotest
+     * 的 dummy 视频驱动裁剪环境），flush 端口与帧哈希仍可正常工作。 */
+    screen_buffer = (uint32_t *)malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+    if (screen_buffer != NULL)
+    {
+        memset(screen_buffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
         printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
@@ -56,11 +65,49 @@ void sim_lcd_init(void)
     texture =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-    screen_buffer = (uint32_t *)malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
-    if (screen_buffer != NULL)
+}
+
+/**
+ * @brief 对当前屏幕缓冲做 FNV-1a 链式哈希（autotest 帧校验用）
+ * @param h 传入：上一帧累计哈希（首帧传 2166136261u）
+ * @return 融入本帧全部像素后的哈希值
+ * @note 只依赖 screen_buffer 内容，与 SDL 渲染路径无关，dummy 驱动下同样有效。
+ */
+void sim_lcd_dump_ppm(const char *path)
+{
+    FILE *fp = fopen(path, "wb");
+    int i;
+
+    if (fp == NULL || screen_buffer == NULL)
+        return;
+    fprintf(fp, "P6 %d %d 255 ", (int)SCREEN_WIDTH, (int)SCREEN_HEIGHT);
+    for (i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++)
     {
-        memset(screen_buffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
+        uint32_t px = screen_buffer[i];
+        unsigned char rgb[3];
+
+        rgb[0] = (unsigned char)(px >> 16);
+        rgb[1] = (unsigned char)(px >> 8);
+        rgb[2] = (unsigned char)px;
+        fwrite(rgb, 1, 3, fp);
     }
+    fclose(fp);
+}
+
+uint32_t sim_lcd_hash(uint32_t h)
+{
+    const uint8_t *pb = (const uint8_t *)screen_buffer;
+    uint32_t n = (uint32_t)SCREEN_WIDTH * (uint32_t)SCREEN_HEIGHT * 4U;
+    uint32_t i;
+
+    if (pb == NULL)
+        return h;
+    for (i = 0U; i < n; i++)
+    {
+        h ^= pb[i];
+        h *= 16777619u;
+    }
+    return h;
 }
 
 /**
@@ -273,25 +320,56 @@ void we_input_port_read(we_indev_data_t *data)
 }
 
 /**
- * @brief 初始化存储硬件抽象层（模拟器为空实现）
+ * @brief 初始化存储硬件抽象层：打开 exe 旁的外挂 flash 镜像文件
+ * @note 在 lcd_hw_init（内含 SDL_Init）之后调用；找不到文件不算致命错误，
+ *       后续读取全部返回 0xFF（demo 15/16 会显示初始化失败提示）。
  */
-void storage_hw_init(void) {}
+void storage_hw_init(void)
+{
+    char *base = SDL_GetBasePath();
 
-/* 模拟外挂 flash 读取：整块 g_merged_bin_data 按地址直接映射。*/
+    if (base != NULL)
+    {
+        char path[512];
+
+        snprintf(path, sizeof(path), "%smerged_bin.bin", base);
+        SDL_free(base);
+        sim_flash_file = fopen(path, "rb");
+    }
+    if (sim_flash_file == NULL)
+        sim_flash_file = fopen("merged_bin.bin", "rb"); /* 兜底：当前目录 */
+
+    if (sim_flash_file != NULL)
+    {
+        fseek(sim_flash_file, 0L, SEEK_END);
+        sim_flash_size = (uint32_t)ftell(sim_flash_file);
+    }
+    else
+    {
+        SDL_Log("merged_bin.bin not found; external-flash reads return 0xFF");
+    }
+}
+
 /**
- * @brief 从模拟外挂 flash 镜像读取数据
+ * @brief 从模拟外挂 flash 镜像读取数据（fseek + fread 直读 bin 文件）
  * @param addr 读取起始地址
  * @param buf 目标缓冲区
  * @param len 读取长度（字节）
  */
 void we_storage_port_read(uint32_t addr, uint8_t buf[], uint32_t len)
 {
-    uint32_t i;
-    for (i = 0U; i < len; i++)
+    uint32_t got = 0U;
+
+    if (sim_flash_file != NULL && addr < sim_flash_size)
     {
-        uint32_t offset = addr + i;
-        buf[i] = (offset < MERGED_BIN_SIZE) ? g_merged_bin_data[offset] : 0xFFU;
+        uint32_t avail = sim_flash_size - addr;
+        uint32_t n = (len < avail) ? len : avail;
+
+        if (fseek(sim_flash_file, (long)addr, SEEK_SET) == 0)
+            got = (uint32_t)fread(buf, 1U, n, sim_flash_file);
     }
+    if (got < len)
+        memset(&buf[got], 0xFF, (size_t)(len - got)); /* 越界/缺文件补已擦除态 */
 }
 
 /* WASD 键盘模拟滑动手势的状态机。

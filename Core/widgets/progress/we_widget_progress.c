@@ -104,7 +104,7 @@ static void _progress_invalidate_fill_change(we_progress_obj_t *obj, uint16_t ol
      * - 左侧已保留区域在 old/new 两次绘制中几何完全一致
      * - 真正发生变化的只有 fill 宽度边界扫过的那一段列带
      * 因此这里只标脏 [min_fill_w, max_fill_w) 对应的窄条区域，
-     * 不再像旧实现那样按 radius 额外向两侧扩张。 */
+     * 无需按 radius 额外向两侧扩张。 */
     x0 = (int16_t)(obj->base.x + (int16_t)min_fill_w);
     w = (int16_t)(max_fill_w - min_fill_w);
 

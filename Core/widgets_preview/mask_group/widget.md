@@ -23,7 +23,7 @@
 
 ## 可调宏
 在 `we_user_config.h` 中可覆盖：
-- `WE_MASK_GROUP_CHILD_MAX`（默认 12）
+- （子控件数量无上限，槽位表已移除）
 
 ## 渲染模型与成本
 - 子控件阶段与 group 完全一致：收窄 PFB 窗口（矩形硬裁剪）+ `opa_scale` 透明度级联

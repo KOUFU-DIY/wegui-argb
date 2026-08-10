@@ -1,6 +1,6 @@
 /**
  * @file  we_widget_marquee.c
- * @brief 跑马灯标签控件（preview）：固定窗口内循环滚动的单行文本
+ * @brief 跑马灯标签控件（marquee）：固定窗口内循环滚动的单行文本
  *
  * 渲染：draw_cb 先按 group 的标准套路把 PFB 窗口收窄到自身矩形
  * （save/restore pfb_area / pfb_y_start / pfb_y_end / pfb_gram），
@@ -10,8 +10,8 @@
  * frac_acc += elapsed_ms * speed，凑满 1000 前进 1px；
  * offset 到达 text_w + WE_MARQUEE_GAP 后回零并停留 pause_ms。
  *
- * 毕业级优化（本轮）：
- *   1. 自建窗口化字形绘制循环（_marquee_draw_segment）取代 we_draw_string
+ * 实现要点：
+ *   1. 自建窗口化字形绘制循环（_marquee_draw_segment），不走 we_draw_string
  *      全量遍历：窗口左侧完全裁掉的字形只做 UTF-8 解码 + adv_w 游标快进
  *      （零位图取址、零像素扫描），游标越过窗口右缘立即 break；
  *      逐帧绘制成本只与可见字形数相关，与文本总长解耦；
@@ -151,7 +151,7 @@ static void _marquee_update_anim(we_marquee_obj_t *obj)
 }
 
 /* --------------------------------------------------------------------------
- * 窗口化字形绘制（毕业优化核心：左侧游标快进 + 右缘提前退出）
+ * 窗口化字形绘制（左侧游标快进 + 右缘提前退出）
  * -------------------------------------------------------------------------- */
 
 /**
@@ -200,10 +200,10 @@ static uint8_t _marquee_utf8_next(const char **pp, uint16_t *out_code)
 /**
  * @brief 将行对齐的字形 alpha 位图混合到当前 PFB（marquee 私有精简 blit）。
  * @param lcd GUI 屏幕上下文指针（PFB 窗口已收窄到控件矩形 ∩ 脏区带）。
- * @param x 字形墨迹左上角 X（屏幕绝对坐标）。
- * @param y 字形墨迹左上角 Y。
- * @param w 字形墨迹宽（像素）。
- * @param h 字形墨迹高（像素）。
+ * @param x 字形有效像素区左上角 X（屏幕绝对坐标）。
+ * @param y 字形有效像素区左上角 Y。
+ * @param w 字形有效像素区宽（像素）。
+ * @param h 字形有效像素区高（像素）。
  * @param src 字形位图首地址（按行对齐紧凑存放）。
  * @param row_stride 位图每行字节数。
  * @param bpp 位深（1/2/4/8）。
@@ -271,7 +271,7 @@ static void _marquee_blit_glyph(we_lcd_t *lcd, int16_t x, int16_t y,
  * @param text_y 文本行顶 Y（字形按 y_ofs 相对此基准落位）。
  * @param opacity 有效不透明度（已含容器级联，> 0）。
  * @return 无。
- * @note 快进阶段：墨迹右缘（cursor + x_ofs + box_w）未进窗口左缘的字形
+ * @note 快进阶段：有效像素区右缘（cursor + x_ofs + box_w）未进窗口左缘的字形
  *       只做解码 + adv_w 游标累加，不取位图、不扫像素；绘制阶段逐字形
  *       blit；游标越过窗口右缘（cursor_x > win_x1，与 we_draw_string 同
  *       判据）立即结束本段。窗口 = 控件矩形 ∩ 当前脏区带，所以局部重绘

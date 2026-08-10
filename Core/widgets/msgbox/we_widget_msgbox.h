@@ -158,19 +158,6 @@ void we_popup_show(we_popup_obj_t *obj);
 void we_popup_hide(we_popup_obj_t *obj);
 
 /**
- * @brief 显示消息框（兼容旧接口，等价于 we_popup_show）。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static inline void we_msgbox_show(we_msgbox_obj_t *obj) { we_popup_show(obj); }
-/**
- * @brief 隐藏消息框（兼容旧接口，等价于 we_popup_hide）。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static inline void we_msgbox_hide(we_msgbox_obj_t *obj) {     we_popup_hide(obj); }
-
-/**
  * @brief 隐藏并删除弹窗：摘除动画链节点（we_popup_hide 内）并从对象链表移除。
  * @param obj 目标控件对象指针。
  * @return 无。
@@ -181,16 +168,6 @@ static inline void we_popup_obj_delete(we_popup_obj_t *obj)
         return;
     we_popup_hide(obj);
     we_obj_delete((we_obj_t *)obj);
-}
-
-/**
- * @brief 隐藏并删除消息框：摘除动画链节点（we_popup_hide 内）并从对象链表移除。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static inline void we_msgbox_obj_delete(we_msgbox_obj_t *obj)
-{
-    we_popup_obj_delete(obj);
 }
 
 #ifdef __cplusplus

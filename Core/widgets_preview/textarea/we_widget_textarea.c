@@ -220,14 +220,43 @@ static void _textarea_draw_cb(void *ptr)
  * -------------------------------------------------------------------------- */
 
 /**
+ * @brief 取绑定的弹层编辑器，目标已被删除时自动解绑并返回 NULL
+ * @param obj 传入：本控件对象指针
+ * @return 有效目标指针；未绑定或目标已被删除返回 NULL
+ * @note 跨控件裸指针绑定的防悬空口径：we_obj_delete 会把被删对象的
+ *       class_p 清空，这里据此识别失效绑定并自动置空（与
+ *       we_gui_indev_handler 对 pressed_obj 的防御同源）。
+ */
+static void *_ta_editor(we_textarea_obj_t *obj)
+{
+    we_obj_t *t = (we_obj_t *)obj->editor;
+
+    if (t != NULL && t->class_p == NULL)
+    {
+        obj->editor = NULL;
+        t = NULL;
+    }
+    return (void *)t;
+}
+
+/**
  * @brief 控件事件回调：点击仅作按压视觉反馈（无焦点系统，视为常聚焦）。
  * @param ptr 回调透传对象指针。
  * @param event 输入事件类型。
  * @param data 输入设备事件数据指针。
  * @return 1 = 事件已消费，0 = 穿透（仅完全透明时）。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TEXTAREA_USE_KEY == 1)
+static uint8_t _textarea_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _textarea_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TEXTAREA_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _textarea_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_textarea_obj_t *obj = (we_textarea_obj_t *)ptr;
 
     (void)data;
@@ -254,7 +283,7 @@ static uint8_t _textarea_event_cb(void *ptr, we_event_t event, we_indev_data_t *
 
     case WE_EVENT_CLICKED:
         if (obj->summon_cb != NULL) /* 点击呼出绑定的弹层编辑器（本框为注入目标） */
-            obj->summon_cb(obj->editor, obj);
+            obj->summon_cb(_ta_editor(obj), obj);
         break;
 
     default:
@@ -269,7 +298,7 @@ static uint8_t _textarea_event_cb(void *ptr, we_event_t event, we_indev_data_t *
  * @param ptr 回调透传对象指针。
  * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
  * @return 非 0 表示已消费。
- * @note 键盘弹出后按键全部走弹层键通道，不再经过本回调；
+ * @note 键盘弹出后按键全部走模态键通道，不经过本回调；
  *       收回后焦点仍在本输入框上，可再次 OK 呼出。
  */
 static uint8_t _textarea_key_cb(void *ptr, uint8_t key_evt)
@@ -296,7 +325,7 @@ static uint8_t _textarea_key_cb(void *ptr, uint8_t key_evt)
             we_obj_invalidate((we_obj_t *)obj);
         }
         if (obj->summon_cb != NULL)
-            obj->summon_cb(obj->editor, obj);
+            obj->summon_cb(_ta_editor(obj), obj);
         return 1U;
     case WE_KEY_EVT_FLASH_END: /* 取消：仅回弹不呼出 */
         if (obj->pressed)
@@ -316,7 +345,7 @@ static const we_class_t _textarea_class = {
     .event_cb = _textarea_event_cb,
     .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TEXTAREA_USE_KEY == 1)
-    .key_cb = _textarea_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 

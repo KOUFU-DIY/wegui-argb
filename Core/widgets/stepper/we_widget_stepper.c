@@ -350,8 +350,17 @@ static int8_t _stepper_hit_side(const we_stepper_obj_t *obj, int16_t px)
  * @param data 输入数据。
  * @return 1 表示消费事件。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
+static uint8_t _stepper_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _stepper_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_stepper_obj_t *obj = (we_stepper_obj_t *)ptr;
     int8_t side;
 
@@ -447,7 +456,7 @@ static const we_class_t _stepper_class = {
     .event_cb = _stepper_event_cb,
     .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
-    .key_cb = _stepper_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 

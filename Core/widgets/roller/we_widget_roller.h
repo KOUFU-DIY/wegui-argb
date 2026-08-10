@@ -16,7 +16,7 @@ extern "C"
 #endif
 
 /* --------------------------------------------------------------------------
- * 滚轮选值器（roller）—— preview 孵化区实验控件
+ * 滚轮选值器（roller）
  *
  * 垂直滚轮：选项沿 Y 轴排布，控件中央一行为"选中行"（背景圆角高亮条 +
  * 主色文字），上下行按距中心的行距做透明度递减（255/160/90/55/40 分档，
@@ -134,18 +134,18 @@ extern "C"
 #define WE_ROLLER_WCACHE_SIZE 16U
 #endif
 
-/* y 方向 bbox 常量化的扫描上限：set_options 时扫描前 N 个选项取墨迹
+/* y 方向 bbox 常量化的扫描上限：set_options 时扫描前 N 个选项取有效像素区
  * 纵向并集作为全字体共用 y_top/y_bot。权衡：全量扫描对超长选项表的
- * 绑定开销为 O(总字符数)，故设上限；N 之后若出现更高墨迹的字形，行内
+ * 绑定开销为 O(总字符数)，故设上限；N 之后若出现有效像素区更高的字形，行内
  * 垂直居中可能偏 1~2px（数字/时间/档位类均匀选项完全无影响）。
- * 副作用（有意为之）：所有行共用同一垂直基准，滚动中不再出现旧实现
- * "逐行独立 bbox 居中"导致的基线抖动。 */
+ * 副作用（有意为之）：所有行共用同一垂直基准，滚动中不出现
+ * "逐行独立 bbox 居中"式的基线抖动。 */
 #ifndef WE_ROLLER_BBOX_SCAN_MAX
 #define WE_ROLLER_BBOX_SCAN_MAX 32U
 #endif
 
 /* 滚动标脏文本列带的左右安全余量（像素）：覆盖字形 x_ofs 为负 /
- * 墨迹超出步进宽度（如斜体溢出）的边缘像素；使用大幅倾斜字体可调大 */
+ * 有效像素区超出步进宽度（如斜体溢出）的边缘像素；使用大幅倾斜字体可调大 */
 #ifndef WE_ROLLER_DIRTY_PAD
 #define WE_ROLLER_DIRTY_PAD 4
 #endif
@@ -194,8 +194,8 @@ typedef struct we_roller_obj_t
     /* 1 字节成员与状态位域 */
     uint8_t visible_rows;       /* 可见行数（奇数） */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
-    int8_t text_y_top;          /* 字体 y bbox 常量缓存：墨迹顶部偏移 */
-    int8_t text_y_bot;          /* 字体 y bbox 常量缓存：墨迹底部偏移 */
+    int8_t text_y_top;          /* 字体 y bbox 常量缓存：有效像素区顶部偏移 */
+    int8_t text_y_bot;          /* 字体 y bbox 常量缓存：有效像素区底部偏移 */
     uint8_t tracking : 1;       /* 本次触摸序列是否有效（PRESSED 起点） */
     uint8_t dragging : 1;       /* 是否已进入跟手拖拽 */
     uint8_t tap_armed : 1;      /* 本按压序列未进入拖拽（CLICKED 判定点击直达用） */

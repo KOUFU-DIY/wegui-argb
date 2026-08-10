@@ -186,7 +186,7 @@ static void _btnmatrix_draw_cb(void *ptr)
         we_draw_round_rect_analytic_fill(lcd, cx, cy, (uint16_t)cw, (uint16_t)ch,
                                          draw_r, bg, obj->opacity);
 
-        /* 2. 键名文字（水平按测宽、垂直按墨迹 bbox 居中） */
+        /* 2. 键名文字（水平按测宽、垂直按有效像素区 bbox 居中） */
         label = obj->labels[idx];
         if (obj->font != NULL)
         {

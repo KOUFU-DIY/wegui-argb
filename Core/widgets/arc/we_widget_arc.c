@@ -463,7 +463,7 @@ _arc_invalidate_bbox_exclude_hole(obj, obj->base.x, obj->base.y, obj->base.w, ob
 /**
  * @brief 设置圆弧当前进度值，并触发对应区域重绘。
  * @param obj 圆弧控件对象指针。
- * @param value 进度值（0~255，对应 0%~100%）。
+ * @param value 进度值（0-255，对应 0%-100%）。
  * @return 无。
  */
 void we_arc_set_value(we_arc_obj_t *obj, uint8_t value)
@@ -511,7 +511,7 @@ _arc_invalidate_bbox_exclude_hole(obj, bx, by, ex - bx + 1, ey - by + 1,
 /**
  * @brief 设置控件透明度并按需重绘。
  * @param obj 目标控件对象指针。
- * @param opacity 不透明度（0~255）。
+ * @param opacity 不透明度(0~255)。
  * @return 无。
  */
 void we_arc_set_opacity(we_arc_obj_t *obj, uint8_t opacity)

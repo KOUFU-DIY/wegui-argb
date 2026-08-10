@@ -6,7 +6,7 @@
 
 /* ----------------------------- 版本 ----------------------------- */
 /* 框架版本号（字符串），与 README / 对外发布保持一致 */
-#define WE_GUI_VERSION "V0.2.2"
+#define WE_GUI_VERSION "V0.2.3"
 
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
@@ -26,6 +26,20 @@
 
 /* DMA 双 BUF 模式开关 */
 #define GRAM_DMA_BUFF_EN (1)
+
+/* 刷新区域像素对齐粒度（QSPI 彩屏 / SSD1306 页式 OLED 等硬件需求）。
+ * 部分屏幕对刷新窗口坐标有硬件粒度要求：
+ *   - QSPI 接口彩屏常要求 set_addr 的 x/y 起止坐标为 2 或 4 的倍数；
+ *   - SSD1306 等页式单色 OLED 以 8 行为一页，y 向必须按 8 对齐。
+ * 语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把矩形
+ * 扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上取整到
+ * 对齐倍数-1。扩出的边缘随本矩形整块走正常渲染路径重绘，因此推屏时
+ * set_addr 收到的窗口天然对齐，且像素流与窗口严格一致。
+ * 取值必须为 2 的幂；平台端口不定义时默认 1（不对齐），
+ * 现有平台零行为、零开销变化。 */
+#define WE_LCD_FLUSH_ALIGN_X (1)
+#define WE_LCD_FLUSH_ALIGN_Y (1)
+
 
 /* ------------------------- 脏矩形配置 ------------------------- */
 /* 脏矩形策略
@@ -53,8 +67,7 @@
 #define WE_CFG_ENABLE_INDEXED_QOI (1)
 
 /* --------------------------- GUI 定时器配置 --------------------------- */
-/* 面向用户开放的 GUI 定时器数量上限 */
-#define WE_CFG_GUI_TIMER_MAX_NUM (8)
+/* 用户定时器已改为调用方持有的侵入式节点（we_gui_timer_t）：无槽位上限 */
 
 /* -------------------------- 输入接口 -------------------------- */
 /* 输入接口(按键或触摸)开关
@@ -65,6 +78,19 @@
 /* 滑动手势识别阈值（像素）
  * 位移超过此值才判定为 swipe，而不是普通点击。 */
 #define WE_CFG_SWIPE_THRESHOLD (30)
+
+/* 手势接管阈值（像素）：按压后位移超过此值，内核沿祖先链发起
+ * WE_EVENT_DRAG_BEGIN 接管询问，可滚动容器从子控件手中接管手势（默认 8） */
+// #define WE_CFG_DRAG_THRESHOLD (8)
+
+/* 层次输入裁剪（默认 1）：置 0 后命中测试不下钻容器子树、拖拽接管询问
+ * 剔除——控件全部平铺、不在滚动容器里放交互控件的产品可省 ROM 与栈 */
+// #define WE_CFG_ENABLE_NESTED_INPUT (1)
+
+/* 顶层链 + 模态裁剪（默认 1）：置 0 后 attach_to_top 退化为 bring_to_front、
+ * modal 三函数退化为空 stub——不用 msgbox/toast/dropdown 弹层语义的产品
+ * 可整段裁掉（弹层控件仍可编译，只是失去保证置顶与吞键语义） */
+// #define WE_CFG_ENABLE_TOP_LAYER (1)
 
 /* ----------------------- 聚焦与按键导航 ----------------------- */
 /* 全局聚焦 + 按键导航总开关
@@ -95,7 +121,7 @@
 // #define WE_CFG_FOCUS_CURSOR_G (181)
 // #define WE_CFG_FOCUS_CURSOR_B (255)
 // #define WE_CFG_FOCUS_FLASH_MS (90U)       /* OK 最短按压窗口（毫秒，≤255） */
-// #define WE_CFG_KEY_QUEUE_LEN (4)          /* 语义键环形队列深度（2 的幂，容量=深度-1） */
+// #define WE_CFG_KEY_QUEUE_LEN (8)          /* 语义键环形队列深度（2 的幂，容量=深度-1，默认 8） */
 
 /* ------------------------ 外部储存接口 ------------------------ */
 /* 外部储存接口开关
@@ -154,8 +180,6 @@
 // #define WE_CFG_CHART_AA_CURVE (0)
 
 /* ------------------------- group 控件 ------------------------- */
-/* 控件组最多挂载的子控件数量 */
-// #define WE_GROUP_CHILD_MAX (24)
 
 /* ------------------------ img_ex 控件 ------------------------ */
 /* 图片旋转缩放取样模式
@@ -244,11 +268,9 @@
 // #define WE_SLIDESHOW_PAGE_MAX (8)
 
 /* 幻灯片内最多挂载的子控件数量（所有页面合计） */
-// #define WE_SLIDESHOW_CHILD_MAX (24)
 
 /* ---------------------- scroll_panel 控件 ---------------------- */
 /* 面板最多挂载的子控件数量 */
-// #define WE_SCROLL_PANEL_CHILD_MAX (24)
 
 /* 右缘滚动条宽度（像素） */
 // #define WE_SCROLL_PANEL_SCROLLBAR_W (4U)

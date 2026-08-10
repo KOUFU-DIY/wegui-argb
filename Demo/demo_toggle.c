@@ -19,8 +19,14 @@ static we_label_obj_t  tgl_title;
 static we_label_obj_t  tgl_fps_label;
 static we_label_obj_t  tgl_hint;
 static we_label_obj_t  tgl_status_label;
-static we_label_obj_t  tgl_lbl[4];
-static we_toggle_obj_t tgl[4];
+static we_label_obj_t  tgl_wifi_lbl;
+static we_label_obj_t  tgl_bt_lbl;
+static we_label_obj_t  tgl_dark_lbl;
+static we_label_obj_t  tgl_all_lbl;
+static we_toggle_obj_t tgl_wifi;
+static we_toggle_obj_t tgl_bt;
+static we_toggle_obj_t tgl_dark;
+static we_toggle_obj_t tgl_all;
 
 static uint32_t tgl_fps_timer;
 static uint32_t tgl_last_frames;
@@ -36,10 +42,10 @@ static char     tgl_status_buf[32];
  */
 static uint8_t _snap(void)
 {
-    return (uint8_t)((we_toggle_is_checked(&tgl[0]) << 0) |
-                     (we_toggle_is_checked(&tgl[1]) << 1) |
-                     (we_toggle_is_checked(&tgl[2]) << 2) |
-                     (we_toggle_is_checked(&tgl[3]) << 3));
+    return (uint8_t)((we_toggle_is_checked(&tgl_wifi) << 0) |
+                     (we_toggle_is_checked(&tgl_bt) << 1) |
+                     (we_toggle_is_checked(&tgl_dark) << 2) |
+                     (we_toggle_is_checked(&tgl_all) << 3));
 }
 
 /**
@@ -49,10 +55,10 @@ static uint8_t _snap(void)
 static void _update_status(void)
 {
     sprintf(tgl_status_buf, "W:%d BT:%d DK:%d All:%d",
-            we_toggle_is_checked(&tgl[0]),
-            we_toggle_is_checked(&tgl[1]),
-            we_toggle_is_checked(&tgl[2]),
-            we_toggle_is_checked(&tgl[3]));
+            we_toggle_is_checked(&tgl_wifi),
+            we_toggle_is_checked(&tgl_bt),
+            we_toggle_is_checked(&tgl_dark),
+            we_toggle_is_checked(&tgl_all));
     we_label_set_text(&tgl_status_label, tgl_status_buf);
 }
 
@@ -83,9 +89,9 @@ static uint8_t _all_event_cb(void *obj, we_event_t event, we_indev_data_t *data)
         uint8_t val;
         we_toggle_toggle(t);
         val = we_toggle_is_checked(t);
-        we_toggle_set_checked(&tgl[0], val);
-        we_toggle_set_checked(&tgl[1], val);
-        we_toggle_set_checked(&tgl[2], val);
+        we_toggle_set_checked(&tgl_wifi, val);
+        we_toggle_set_checked(&tgl_bt, val);
+        we_toggle_set_checked(&tgl_dark, val);
         break;
     }
     default:
@@ -111,7 +117,6 @@ void we_toggle_simple_demo_init(we_lcd_t *lcd)
     int16_t tgl_h    = 24;
     int16_t lbl_x    = (int16_t)(mx + tgl_w + 12);
     int16_t tgl_y_off = (int16_t)((row_h - tgl_h) / 2);
-    static const char *const labels[4] = {"WiFi", "Bluetooth", "Dark Mode", "ALL"};
 
     tgl_fps_timer   = 0U;
     tgl_last_frames = 0U;
@@ -131,37 +136,61 @@ void we_toggle_simple_demo_init(we_lcd_t *lcd)
                       "tap|anim|link|auto", we_font_consolas_18,
                       RGB888TODEV(138, 152, 170), 255);
 
+    /* 第 1 行：WiFi */
     {
-        int16_t i;
-        for (i = 0; i < 3; i++)
-        {
-            int16_t row_y = (int16_t)(start_y + row_h * i);
-            int16_t sw_y  = (int16_t)(row_y + tgl_y_off);
-            int16_t lbl_y;
-            int8_t  yt, yb;
-
-            we_toggle_obj_init(&tgl[i], lcd, mx, sw_y, tgl_w, tgl_h, NULL);
-            we_get_text_bbox(we_font_consolas_18, labels[i], &yt, &yb);
-            lbl_y = (int16_t)(row_y + row_h / 2) - (yt + yb) / 2;
-            we_label_obj_init(&tgl_lbl[i], lcd, lbl_x, lbl_y,
-                              labels[i], we_font_consolas_18,
-                              RGB888TODEV(220, 228, 238), 255);
-        }
-    }
-
-    we_toggle_set_checked(&tgl[1], 1);
-
-    {
-        int16_t row_y = (int16_t)(start_y + row_h * 3);
-        int16_t sw_y  = (int16_t)(row_y + tgl_y_off);
+        int16_t row_y = start_y;
         int16_t lbl_y;
         int8_t  yt, yb;
 
-        we_toggle_obj_init(&tgl[3], lcd, mx, sw_y, tgl_w, tgl_h, _all_event_cb);
-        we_get_text_bbox(we_font_consolas_18, labels[3], &yt, &yb);
+        we_toggle_obj_init(&tgl_wifi, lcd, mx, (int16_t)(row_y + tgl_y_off), tgl_w, tgl_h, NULL);
+        we_get_text_bbox(we_font_consolas_18, "WiFi", &yt, &yb);
         lbl_y = (int16_t)(row_y + row_h / 2) - (yt + yb) / 2;
-        we_label_obj_init(&tgl_lbl[3], lcd, lbl_x, lbl_y,
-                          labels[3], we_font_consolas_18,
+        we_label_obj_init(&tgl_wifi_lbl, lcd, lbl_x, lbl_y,
+                          "WiFi", we_font_consolas_18,
+                          RGB888TODEV(220, 228, 238), 255);
+    }
+
+    /* 第 2 行：Bluetooth */
+    {
+        int16_t row_y = (int16_t)(start_y + row_h);
+        int16_t lbl_y;
+        int8_t  yt, yb;
+
+        we_toggle_obj_init(&tgl_bt, lcd, mx, (int16_t)(row_y + tgl_y_off), tgl_w, tgl_h, NULL);
+        we_get_text_bbox(we_font_consolas_18, "Bluetooth", &yt, &yb);
+        lbl_y = (int16_t)(row_y + row_h / 2) - (yt + yb) / 2;
+        we_label_obj_init(&tgl_bt_lbl, lcd, lbl_x, lbl_y,
+                          "Bluetooth", we_font_consolas_18,
+                          RGB888TODEV(220, 228, 238), 255);
+    }
+
+    /* 第 3 行：Dark Mode */
+    {
+        int16_t row_y = (int16_t)(start_y + row_h * 2);
+        int16_t lbl_y;
+        int8_t  yt, yb;
+
+        we_toggle_obj_init(&tgl_dark, lcd, mx, (int16_t)(row_y + tgl_y_off), tgl_w, tgl_h, NULL);
+        we_get_text_bbox(we_font_consolas_18, "Dark Mode", &yt, &yb);
+        lbl_y = (int16_t)(row_y + row_h / 2) - (yt + yb) / 2;
+        we_label_obj_init(&tgl_dark_lbl, lcd, lbl_x, lbl_y,
+                          "Dark Mode", we_font_consolas_18,
+                          RGB888TODEV(220, 228, 238), 255);
+    }
+
+    we_toggle_set_checked(&tgl_bt, 1);
+
+    /* 第 4 行：ALL 联动开关（自定义回调联动前三个） */
+    {
+        int16_t row_y = (int16_t)(start_y + row_h * 3);
+        int16_t lbl_y;
+        int8_t  yt, yb;
+
+        we_toggle_obj_init(&tgl_all, lcd, mx, (int16_t)(row_y + tgl_y_off), tgl_w, tgl_h, _all_event_cb);
+        we_get_text_bbox(we_font_consolas_18, "ALL", &yt, &yb);
+        lbl_y = (int16_t)(row_y + row_h / 2) - (yt + yb) / 2;
+        we_label_obj_init(&tgl_all_lbl, lcd, lbl_x, lbl_y,
+                          "ALL", we_font_consolas_18,
                           RGB888TODEV(245, 214, 120), 255);
     }
 
@@ -190,7 +219,7 @@ void we_toggle_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     if (tgl_auto_timer >= 2500U)
     {
         tgl_auto_timer = 0U;
-        we_toggle_toggle(&tgl[2]);
+        we_toggle_toggle(&tgl_dark);
     }
 
     snap = _snap();

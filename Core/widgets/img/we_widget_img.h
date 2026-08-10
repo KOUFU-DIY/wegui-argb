@@ -8,6 +8,7 @@ typedef struct {
     we_obj_t base;
     const uint8_t *img_src;
     uint8_t opacity;
+    colour_t color; // A1/A2/A4/A8 透明位图的前景色（其余格式忽略），初始化默认白色
 } we_img_obj_t;
 
 /**
@@ -72,6 +73,38 @@ static inline void we_img_obj_set_opacity(we_img_obj_t *obj, uint8_t new_opacity
 
     obj->opacity = new_opacity;
 we_obj_invalidate((we_obj_t *)obj);
+}
+
+/**
+ * @brief 设置 A1/A2/A4/A8 透明位图的前景色并按需重绘（其余图片格式忽略该颜色）。
+ * @param obj 目标控件对象指针。
+ * @param new_color 新的前景色。
+ * @return 无。
+ */
+static inline void we_img_obj_set_color(we_img_obj_t *obj, colour_t new_color)
+{
+    if (obj == NULL || obj->base.lcd == NULL)
+    {
+        return;
+    }
+#if (LCD_DEEP == DEEP_RGB565)
+    if (obj->color.dat16 == new_color.dat16)
+    {
+        return;
+    }
+#elif (LCD_DEEP == DEEP_RGB888)
+    if (obj->color.rgb.r == new_color.rgb.r && obj->color.rgb.g == new_color.rgb.g &&
+        obj->color.rgb.b == new_color.rgb.b)
+    {
+        return;
+    }
+#endif
+
+    obj->color = new_color;
+    if (obj->opacity > 0)
+    {
+        we_obj_invalidate((we_obj_t *)obj);
+    }
 }
 
 /* --------------------------------------------------------------------------

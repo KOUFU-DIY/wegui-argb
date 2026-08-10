@@ -1,4 +1,12 @@
 #include "we_widget_logview.h"
+#include "we_scroll.h"
+
+/* 滚动物理参数：无惯性无过冲档。scroll_px 语义为"距底偏移"（下拉看历史
+ * 时增大），与组件"pos = press_pos - 位移"的常规方向相反，因此喂入的
+ * 主轴坐标取负（-y），等效 pos = press_pos + dy。 */
+static const we_scroll_cfg_t _lv_scroll_cfg = {
+    WE_LOGVIEW_DRAG_THRESHOLD, 0, 1, 1, 1, 1, 128,
+};
 #include "we_render.h"
 
 /* --------------------------------------------------------------------------
@@ -259,8 +267,17 @@ static void _lv_draw_cb(void *ptr)
  * @param data 传入：输入数据。
  * @return 恒返回 1（交互控件，消费事件）。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LOGVIEW_USE_KEY == 1)
+static uint8_t _lv_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _lv_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LOGVIEW_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _lv_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_logview_obj_t *obj = (we_logview_obj_t *)ptr;
 
     if (obj == NULL || data == NULL)
@@ -268,37 +285,30 @@ static uint8_t _lv_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 
     if (event == WE_EVENT_PRESSED)
     {
-        obj->tracking = 1U;
-        obj->dragging = 0U;
-        obj->press_y = data->y;
-        obj->press_scroll = obj->scroll_px;
+        obj->sc.pos = obj->scroll_px;              /* 会话开始：载入当前位置 */
+        we_scroll_press(&obj->sc, (int16_t)-data->y); /* 距底偏移语义：坐标取负 */
         return 1U;
     }
 
-    if (!obj->tracking)
+    if (!obj->sc.tracking)
         return 1U; /* 无有效按压序列，仅消费 */
 
     if (event == WE_EVENT_STAY)
     {
-        int16_t dy = (int16_t)(data->y - obj->press_y);
-        int16_t ady = (dy >= 0) ? dy : (int16_t)(-dy);
-
-        if (!obj->dragging && ady >= WE_LOGVIEW_DRAG_THRESHOLD)
-            obj->dragging = 1U;
-
-        if (obj->dragging)
-        {
-            /* 内容跟手：手指下移(dy>0) -> 内容下移 -> 看到更早历史 ->
-             * scroll_px（距底偏移）增大 */
-            _lv_apply_scroll(obj, obj->press_scroll + (int32_t)dy, 1U);
-        }
+        /* 内容跟手：手指下移 -> 看到更早历史 -> scroll_px（距底偏移）增大；
+         * 坐标取负喂入使组件的 press_pos - 位移 等效为 press_pos + dy */
+        if (we_scroll_stay(&obj->sc, &_lv_scroll_cfg, (int16_t)-data->y,
+                           _lv_max_scroll(obj)) != 0U)
+            _lv_apply_scroll(obj, obj->sc.pos, 1U);
         return 1U;
     }
 
     if (event == WE_EVENT_RELEASED)
     {
-        obj->tracking = 0U;
-        obj->dragging = 0U;
+        /* 无惯性档：不调 we_scroll_release（避免按速度误启动动画） */
+        obj->sc.tracking = 0U;
+        obj->sc.dragging = 0U;
+        obj->sc.vel = 0;
         return 1U;
     }
 
@@ -356,7 +366,7 @@ static const we_class_t _logview_class = {
     .event_cb = _lv_event_cb,
     .set_pos_cb = NULL, /* 几何全部由 base.x/y 推导，默认移动逻辑即正确 */
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LOGVIEW_USE_KEY == 1)
-    .key_cb = _lv_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -411,6 +421,7 @@ void we_logview_obj_init(we_logview_obj_t *obj, we_lcd_t *lcd,
 
     obj->radius = WE_LOGVIEW_DEF_RADIUS;
     obj->scroll_px = 0;
+    we_scroll_reset(&obj->sc);
     obj->follow = 1U;
     obj->opacity = 255U;
 
@@ -418,10 +429,6 @@ void we_logview_obj_init(we_logview_obj_t *obj, we_lcd_t *lcd,
     obj->text_color = RGB888TODEV(178, 218, 190);  /* 淡绿日志字 */
     obj->sb_color = RGB888TODEV(200, 210, 226);
 
-    obj->tracking = 0U;
-    obj->dragging = 0U;
-    obj->press_y = 0;
-    obj->press_scroll = 0;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     we_obj_invalidate((we_obj_t *)obj);
@@ -458,6 +465,7 @@ void we_logview_push(we_logview_obj_t *obj, const char *str)
     if (obj->follow)
     {
         obj->scroll_px = 0;
+    we_scroll_reset(&obj->sc);
     }
     else
     {
@@ -466,8 +474,8 @@ void we_logview_push(we_logview_obj_t *obj, const char *str)
         if (obj->scroll_px > max_scroll)
             obj->scroll_px = max_scroll;
         /* 拖拽进行中：同步补偿拖拽基准，避免下一次 STAY 回跳一行 */
-        if (obj->tracking)
-            obj->press_scroll += (int32_t)obj->row_h;
+        if (obj->sc.tracking)
+            obj->sc.press_pos += (int32_t)obj->row_h;
     }
 
     we_obj_invalidate((we_obj_t *)obj);
@@ -488,8 +496,7 @@ void we_logview_clear(we_logview_obj_t *obj)
     obj->head = 0U;
     obj->used = 0U;
     obj->scroll_px = 0;
-    obj->tracking = 0U;
-    obj->dragging = 0U;
+    we_scroll_reset(&obj->sc); /* 清空日志即结束当前触摸会话 */
     we_obj_invalidate((we_obj_t *)obj);
 }
 

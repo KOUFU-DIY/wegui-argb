@@ -62,7 +62,7 @@ static const we_class_t _indicator_class = {
     .event_cb = _indicator_event_cb,
     .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
-    .key_cb = _indicator_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -173,9 +173,18 @@ static void _indicator_draw_cb(void *ptr)
  * @param data 输入设备事件数据指针。
  * @return 返回状态标志（1 有效，0 未处理）。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
+static uint8_t _indicator_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
                                    we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _indicator_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_indicator_obj_t *obj = (we_indicator_obj_t *)ptr;
 
     if (obj == NULL)

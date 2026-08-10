@@ -25,7 +25,15 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
  */
 static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
-static const we_class_t _slideshow_class = { .draw_cb = _slideshow_draw_cb, .event_cb = _slideshow_event_cb, .set_pos_cb = NULL};
+static const we_class_t _slideshow_class = {
+    .draw_cb = _slideshow_draw_cb,
+    .event_cb = _slideshow_event_cb,
+    .set_pos_cb = NULL,
+    /* 仅结构位：内嵌 we_group_obj_t，删除/改挂需要走 children_head。
+     * 暂不给行为位——分页作用域尚未实现，焦点下钻会停到非当前页的
+     * 子控件上（光标画到屏幕外）。做出分页作用域后再补 FOCUS_ENTER。 */
+    .class_flags = WE_CLASS_FLAG_CHILD_OWNER
+};
 
 /**
  * @brief 根据当前位置计算最近的分页吸附目标 X 坐标。
@@ -202,6 +210,8 @@ static int16_t _slideshow_anim_step_complex_axis(int16_t diff, int16_t *velocity
 }
 #endif
 
+
+
 /**
  * @brief 由对齐后的 scroll_x 反查所属页索引。
  * @param obj 目标控件对象指针。
@@ -222,38 +232,6 @@ static uint16_t _slideshow_snap_to_page_index(const we_slideshow_obj_t *obj, int
     }
 
     return 0U;
-}
-
-static we_slideshow_child_slot_t *_slideshow_find_slot(we_slideshow_obj_t *obj, we_obj_t *child)
-{
-    uint16_t i;
-
-    if (obj == NULL || child == NULL)
-        return NULL;
-
-    for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
-    {
-        if (obj->child_slots[i].used && obj->child_slots[i].child == child)
-            return &obj->child_slots[i];
-    }
-
-    return NULL;
-}
-
-/**
- * @brief 根据页索引与滚动偏移更新子控件绝对坐标。
- * @param obj 目标控件对象指针。
- * @param slot 子控件槽位指针。
- * @return 无。
- */
-static void _slideshow_update_child_page_abs(we_slideshow_obj_t *obj, we_slideshow_child_slot_t *slot)
-{
-    if (obj == NULL || slot == NULL || !slot->used || slot->child == NULL)
-        return;
-
-    we_group_set_child_pos(&obj->group, slot->child,
-                           (int16_t)((int16_t)(slot->page_index * obj->group.base.w) + obj->scroll_x + slot->local_x),
-                           slot->local_y);
 }
 
 /**
@@ -454,89 +432,72 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
 {
     we_slideshow_obj_t *obj = (we_slideshow_obj_t *)ptr;
 
-    if (!data)
-        return 0;
+    if (obj == NULL || data == NULL)
+        return 0U;
+
+    /* 命中查询：整个画布都可命中，子控件由内核递归下钻。 */
+    if (event == WE_EVENT_HIT_TEST)
+        return 1U;
+
+    /* 拖拽接管询问：子控件按压中横向拖动即由本控件接管翻页
+     * （从按钮上起手也能拖动翻页）。 */
+    if (event == WE_EVENT_DRAG_BEGIN)
+    {
+        int16_t dx = (int16_t)(data->x - obj->group.base.lcd->gesture_press_x);
+        int16_t dy = (int16_t)(data->y - obj->group.base.lcd->gesture_press_y);
+
+        if (WE_ABS(dx) < WE_ABS(dy))
+            return 0U; /* 纵向手势不接管，留给外层/子控件 */
+
+        _slideshow_clear_snap_state(obj);
+        obj->is_dragging = 1U;
+        obj->last_touch_x = data->x;
+        obj->last_touch_y = data->y;
+        return 1U;
+    }
 
     if (event == WE_EVENT_PRESSED)
     {
-        we_obj_t *target_child = NULL;
-        we_obj_t *curr = obj->group.children_head;
-
+        /* 没有子控件消费（空白区）：本控件接手，直接进入拖拽跟手。 */
         _slideshow_clear_snap_state(obj);
-
-        while (curr != NULL)
-        {
-            if (curr->class_p && curr->class_p->event_cb)
-            {
-                if (data->x >= curr->x && data->x < (curr->x + curr->w) && data->y >= curr->y &&
-                    data->y < (curr->y + curr->h))
-                {
-                    if (curr->class_p->event_cb(curr, event, data) == 1)
-                    {
-                        target_child = curr;
-                        break;
-                    }
-                }
-            }
-            curr = curr->next;
-        }
-
-        if (target_child)
-        {
-            obj->last_pressed_child = target_child;
-            obj->is_dragging = 0;
-            return 1;
-        }
-
-        obj->last_pressed_child = NULL;
-        obj->is_dragging = 1;
+        obj->is_dragging = 1U;
         obj->last_touch_x = data->x;
         obj->last_touch_y = data->y;
-        return 1;
+        return 1U;
     }
 
-    if (obj->last_pressed_child != NULL)
+    if (event == WE_EVENT_STAY)
     {
-        if (event == WE_EVENT_CLICKED)
+        if (obj->is_dragging)
         {
-            we_obj_t *child = obj->last_pressed_child;
-            if (!(data->x >= child->x && data->x < (child->x + child->w) && data->y >= child->y &&
-                  data->y < (child->y + child->h)))
+            int16_t dx = (int16_t)(data->x - obj->last_touch_x);
+
+            if (dx != 0)
             {
-                obj->last_pressed_child = NULL;
-                return 1;
+                _slideshow_set_scroll(obj, dx);
+                obj->last_touch_x = data->x;
+                obj->last_touch_y = data->y;
             }
         }
-
-        obj->last_pressed_child->class_p->event_cb(obj->last_pressed_child, event, data);
-        if (event == WE_EVENT_CLICKED)
-            obj->last_pressed_child = NULL;
-        return 1;
+        return 1U;
     }
 
-    if (event == WE_EVENT_STAY && obj->is_dragging)
-    {
-        int16_t dx = data->x - obj->last_touch_x;
-        if (dx != 0)
-        {
-            _slideshow_set_scroll(obj, dx);
-            obj->last_touch_x = data->x;
-            obj->last_touch_y = data->y;
-        }
-    }
-    else if (event == WE_EVENT_RELEASED)
+    if (event == WE_EVENT_RELEASED)
     {
         if (obj->is_dragging)
             _slideshow_begin_snap(obj);
-        obj->is_dragging = 0;
-    }
-    else if (obj->swipe_enabled && (event == WE_EVENT_SWIPE_LEFT || event == WE_EVENT_SWIPE_RIGHT))
-    {
-        _slideshow_handle_swipe(obj, event);
-        obj->is_dragging = 0;
+        obj->is_dragging = 0U;
+        return 1U;
     }
 
-    return 1;
+    if (obj->swipe_enabled && (event == WE_EVENT_SWIPE_LEFT || event == WE_EVENT_SWIPE_RIGHT))
+    {
+        _slideshow_handle_swipe(obj, event);
+        obj->is_dragging = 0U;
+        return 1U;
+    }
+
+    return 0U;
 }
 
 /**
@@ -554,14 +515,12 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
 void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int16_t w, int16_t h,
                            colour_t bg_color, uint8_t opacity)
 {
-    uint16_t i;
 
     if (obj == NULL || lcd == NULL)
         return;
 
     we_group_obj_init(&obj->group, lcd, x, y, w, h, bg_color, opacity);
     obj->group.base.class_p = &_slideshow_class;
-    obj->last_pressed_child = NULL;
     obj->scroll_x = 0;
     obj->last_touch_x = 0;
     obj->last_touch_y = 0;
@@ -575,8 +534,6 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
     obj->is_dragging = 0U;
     obj->snap_animating = 0U;
 
-    for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
 
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;
@@ -590,14 +547,8 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
  */
 void we_slideshow_obj_delete(we_slideshow_obj_t *obj)
 {
-    uint16_t i;
-
     if (obj == NULL || obj->group.base.lcd == NULL)
         return;
-
-    obj->last_pressed_child = NULL;
-    for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
-        obj->child_slots[i].used = 0U;
 
     /* 节点归控件所有，删除前必须摘链 */
     we_anim_stop(obj->group.base.lcd, &obj->anim);
@@ -646,8 +597,6 @@ uint16_t we_slideshow_get_current_page(const we_slideshow_obj_t *obj)
  */
 void we_slideshow_add_child(we_slideshow_obj_t *obj, uint16_t page_index, we_obj_t *child)
 {
-    uint16_t i;
-
     if (obj == NULL || child == NULL)
         return;
     if (child == (we_obj_t *)obj)
@@ -656,23 +605,14 @@ void we_slideshow_add_child(we_slideshow_obj_t *obj, uint16_t page_index, we_obj
         return;
     if (page_index >= obj->page_count)
         return;
-    if (_slideshow_find_slot(obj, child) != NULL)
-        return;
+    if (child->parent == (we_obj_t *)&obj->group)
+        return; /* 已挂载 */
 
-    for (i = 0; i < WE_SLIDESHOW_CHILD_MAX; i++)
-    {
-        if (!obj->child_slots[i].used)
-        {
-            we_group_add_child(&obj->group, child);
-            obj->child_slots[i].child = child;
-            obj->child_slots[i].page_index = page_index;
-            obj->child_slots[i].local_x = 0;
-            obj->child_slots[i].local_y = 0;
-            obj->child_slots[i].used = 1U;
-            _slideshow_update_child_page_abs(obj, &obj->child_slots[i]);
-            return;
-        }
-    }
+    we_group_add_child(&obj->group, child);
+    /* 页内局部 (0,0)：组局部 = 页偏移 + 当前滚动 */
+    we_group_set_child_pos(&obj->group, child,
+                           (int16_t)((int16_t)(page_index * obj->group.base.w) + obj->scroll_x),
+                           0);
 }
 
 /**
@@ -685,14 +625,24 @@ void we_slideshow_add_child(we_slideshow_obj_t *obj, uint16_t page_index, we_obj
  */
 void we_slideshow_set_child_pos(we_slideshow_obj_t *obj, we_obj_t *child, int16_t local_x, int16_t local_y)
 {
-    we_slideshow_child_slot_t *slot = _slideshow_find_slot(obj, child);
+    int16_t group_local_x;
+    int16_t page_index;
 
-    if (slot == NULL)
+    if (obj == NULL || child == NULL || obj->group.base.w <= 0)
+        return;
+    if (child->parent != (we_obj_t *)&obj->group)
         return;
 
-    slot->local_x = local_x;
-    slot->local_y = local_y;
-    _slideshow_update_child_page_abs(obj, slot);
+    /* 所属页由当前位置反推（局部坐标无槽位存储；冷路径允许除法）：
+     * 组局部X - scroll_x = 页索引*页宽 + 页内局部X，页内局部X ∈ [0, 页宽) */
+    group_local_x = (int16_t)(child->x - obj->group.base.x);
+    page_index = (int16_t)((group_local_x - obj->scroll_x) / obj->group.base.w);
+    if (page_index < 0)
+        page_index = 0;
+
+    we_group_set_child_pos(&obj->group, child,
+                           (int16_t)((int16_t)(page_index * obj->group.base.w) + obj->scroll_x + local_x),
+                           local_y);
 }
 
 /**

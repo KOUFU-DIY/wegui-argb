@@ -110,23 +110,26 @@ colour_t c = RGB888TODEV(r, g, b);  // converts 8-bit RGB to device colour_t
 Demo animations and periodic logic use GUI timers:
 
 ```c
-// Create a 16ms periodic timer (≈60fps)
-int8_t id = we_gui_timer_create(&mylcd, my_callback, 16U, 1U);
+// 节点由调用方持有（静态或生命周期覆盖使用期）——零槽位、数量无上限、不会失败
+static we_gui_timer_t anim_timer;
+we_gui_timer_create(&mylcd, &anim_timer, my_callback, 16U, 1U); // 16ms 周期 ≈ 60fps
 
 // Timer callback signature:
 void my_callback(we_lcd_t *lcd, uint16_t elapsed_ms);
 
 // Control:
-we_gui_timer_stop(&mylcd, id);     // pause (clears accumulator)
-we_gui_timer_start(&mylcd, id);    // resume
-we_gui_timer_restart(&mylcd, id);  // reset + reactivate
-we_gui_timer_delete(&mylcd, id);   // free the slot
+we_gui_timer_stop(&mylcd, &anim_timer);     // pause (clears accumulator)
+we_gui_timer_start(&mylcd, &anim_timer);    // resume
+we_gui_timer_restart(&mylcd, &anim_timer);  // reset + reactivate
+we_gui_timer_delete(&mylcd, &anim_timer);   // unlink（节点可复用）
 
 // One-shot timer (fires once then auto-stops):
-int8_t hide_id = we_gui_timer_create(&mylcd, hide_cb, 2000U, 0U);
+static we_gui_timer_t hide_timer;
+we_gui_timer_create(&mylcd, &hide_timer, hide_cb, 2000U, 0U);
 ```
 
-Slots are limited by `WE_CFG_GUI_TIMER_MAX_NUM` (default 8).
+定时器与中央动画引擎同构：侵入式链表节点，create 幂等（已挂链仅刷新参数），
+无 `WE_CFG_GUI_TIMER_MAX_NUM` 上限（该宏已移除）。
 
 ### 3.1 中央动画引擎 (we_anim_t)
 
@@ -243,16 +246,19 @@ we_btn_obj_init(&my_btn, &mylcd, x, y, w, h, "text", font, my_event_cb);
 
 static we_img_obj_t my_img;
 
-// img_t is: { width, height, dat_type, *dat }
-// Use pre-generated image arrays (e.g. img_RGB153)
-we_img_obj_init(&my_img, &mylcd, 10, 50, &img_RGB153, 255);
+// 资源为 image_res.h v2 格式数组，由 tool/2.img2c 例程生成（res_img.h）
+we_img_obj_init(&my_img, &mylcd, 10, 50, demo_rgb565_raw_be_64x80, 255);
 
 we_img_obj_set_opacity(&my_img, 128);
 we_img_obj_set_pos(&my_img, 20, 60);
+
+// A1/A2/A4/A8 透明位图专用：前景色上色（默认白色，其余格式忽略）
+we_img_obj_set_color(&my_img, RGB888TODEV(120, 230, 205));
+
 we_img_obj_delete(&my_img);
 ```
 
-Supported formats: RGB565/888/555/444/332, ARGB8888/6666/4444, RLE, QOI, indexed QOI.
+Supported formats: RGB565 raw, ARGB8565 raw, RGB565/ARGB8565 indexed QOI (`WE_CFG_ENABLE_INDEXED_QOI` trims), A1/A2/A4/A8 alpha bitmaps (tinted via `we_img_obj_set_color`). Unsupported formats are rejected at `we_img_obj_init`.
 
 ### 4.4 Image Ex (Rotation/Scale)
 
@@ -345,7 +351,7 @@ Notable rendering notes:
 - `toggle` track and thumb are drawn via the shared analytic round-rect fill renderer.
 - `checkbox` box geometry is drawn via the shared analytic round-rect fill.
 - `chart` waveform-body / feathering ideas reference Arm-2D, but the implementation has been rewritten for WeGui's ring-buffer, dirty-rectangle, PFB clipping and integer coordinate pipeline.
-- `dropdown` expanded list uses pixel-level free scrolling; the scrollbar auto-fades to a residual minimum opacity (`WE_DROPDOWN_SB_IDLE_ALPHA`) after idle, driven by the central animation engine (no timer slot). Its overlay popup draws through the single LCD-level `popup_layer`, so only one popup is open screen-wide.
+- `dropdown` expanded list uses pixel-level free scrolling; the scrollbar auto-fades to a residual minimum opacity (`WE_DROPDOWN_SB_IDLE_ALPHA`) after idle, driven by the central animation engine (no timer slot). Its expanded list is an embedded top-layer object registered as the modal (`we_modal_open`), so only one modal popup is open screen-wide.
 - `stepper` stores its value as fixed-point `int32` (real value = `value / 10^decimals`); hold-to-repeat reuses the `STAY` event and consumes no timer slot.
 - `indicator` animates its on/off color transition (optional glow) via the central animation engine (see 3.1, no timer slot); default is read-only, opt into click-toggle with `we_indicator_set_clickable()`.
 - All widget animations (`toggle`/`progress`/`indicator`/`msgbox`/`slideshow`/`scroll_panel`/`dropdown`) run on the central animation engine — none of them consume timer slots.
@@ -356,7 +362,7 @@ Notable rendering notes:
 - `list` injects inertia from both drag release and no-STAY fast swipes, allows ±24px rubber-band overscroll with rebound, and fades its scrollbar after 600ms idle to a resident low alpha (dropdown idiom). Dirty marking is per-interaction: one row strip on press/release, the content clip rect on scroll, the scrollbar strip on fade.
 - `roller` snaps to the nearest row on slow release and flings on fast release (velocity-projected landing row, release velocity seeds the snap animation). Scrolling dirty-marks only the centered text column band, and text measurement is fully cached (font-constant y-bbox + row-width cache) — zero measurement calls in the draw loop.
 - `marquee` scrolls as a seamless two-segment loop on one central anim node and draws through a windowed glyph loop: glyphs left of the window only advance the cursor (no bitmap fetch), and drawing stops past the right edge. Static (non-scrolling) when the text fits; input passes through (`event_cb` NULL).
-- `toast` is a non-modal slide-in/stay/slide-out banner on one central anim node; it never blocks input and does not occupy the LCD `popup_layer`. Each animation step submits a single union of old + new bboxes; over-wide text is tail-truncated with "..." (prefix drawn zero-copy via PFB right-edge narrowing).
+- `toast` is a non-modal slide-in/stay/slide-out banner on one central anim node; it never blocks input and does not take the modal slot (a toast can float above an open keyboard). Each animation step submits a single union of old + new bboxes; over-wide text is tail-truncated with "..." (prefix drawn zero-copy via PFB right-edge narrowing).
 - (preview zone) `mask_group` — incubating in `Core/widgets_preview/mask_group/` — is an effect container: children draw at full speed through the normal narrowed-PFB pass (same idiom as group/scroll_panel), then the container runs a per-stripe post-pass in order gradient → border strips → corner compositing toward a solid backdrop color. Corners are **per-corner independently configurable** round/chamfer/square (`we_mask_group_set_corner(idx, style, r)`, geometry identical to box: K×K corner squares, single-pass `we_mask_quarter_ring_alpha` outer+inner coverage for bordered round corners, chamfer per-row spans with alpha 0/128/255 and 0.586·bw inner inset). A border (`we_mask_group_set_border(color, width)`) clips content at its inner edge (CSS-box-like picture frame); the gradient fades content only — the border stays solid, and container opacity converges it toward the backdrop via a once-per-frame `bd_eff`. Rotated linear gradient uses the 512-step angle system (`0` = +X, `128` = +Y); the inner loop is one int32 add per pixel (Q16 DDA, per-stripe setup uses 3 int64 divisions). All-square corners with no border and no gradient degenerates to a zero-cost rect-clip group. Solid-backdrop semantics: masked-out pixels are restored to `backdrop` (defaults to the LCD bg color), so stacking the container on top of images/other widgets will reveal the backdrop color in masked areas (true backdrop capture would need a snapshot buffer — not in v1). Conic/sweep gradients are intentionally not offered (per-pixel atan2 is not viable on M0).
 
 ---
@@ -615,8 +621,9 @@ void we_xxx_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 Register in main:
 ```c
+static we_gui_timer_t demo_timer;
 we_xxx_simple_demo_init(&mylcd);
-we_gui_timer_create(&mylcd, we_xxx_simple_demo_tick, 16U, 1U);
+we_gui_timer_create(&mylcd, &demo_timer, we_xxx_simple_demo_tick, 16U, 1U);
 ```
 
 ### Demo Scale Helpers
@@ -730,8 +737,9 @@ int main(void) {
     we_btn_obj_init(&my_btn, &mylcd, 50, 50, 100, 36,
                     "Press", we_font_consolas_18, NULL);
 
-    // 4. Register animation timer
-    we_gui_timer_create(&mylcd, anim_tick, 16U, 1U);
+    // 4. Register animation timer（节点调用方持有）
+    static we_gui_timer_t anim_timer;
+    we_gui_timer_create(&mylcd, &anim_timer, anim_tick, 16U, 1U);
 
     // 5. Main loop
     while (1) {
@@ -744,3 +752,66 @@ int main(void) {
     }
 }
 ```
+
+## 16. Focus & Key Navigation (V0.2.2+)
+
+按键导航子系统完整说明见 `CLAUDE.md` 的 "Focus and Key Navigation" 章节与
+`Core/we_gui_driver.h` 注释；此处为 API 速查。总开关 `WE_CFG_ENABLE_KEY_INPUT`
+（共享配置=1；内核默认 0，纯触摸工程零成本剔除）。
+
+### 端口注入（唯一入口，禁止轮询）
+
+```c
+we_gui_key_press(&mylcd, WE_KEY_OK);    // 按下沿（双沿端口；OK 按住保持按压态）
+we_gui_key_release(&mylcd, WE_KEY_OK);  // 松开沿（仅 OK 消费，其余键可不上报）
+we_gui_key_inject(&mylcd, WE_KEY_NEXT); // 完整 tap（简单端口；OK 经最短按压窗口）
+```
+
+语义键：`WE_KEY_UP/DOWN/LEFT/RIGHT/PREV/NEXT/OK/BACK`（并入 `we_event_t` 的
+0x10 段）。注入 ISR 安全（SPSC 环形队列，深度 `WE_CFG_KEY_QUEUE_LEN`=8）。
+`WE_KEY_EVT_*`（0x20 段）为内核→控件通知，端口禁止注入。
+
+### 焦点管理
+
+```c
+we_focus_set(&mylcd, (we_obj_t *)&my_btn); // NULL = 清除焦点
+we_obj_t *cur = we_focus_get(&mylcd);
+uint8_t ok = we_focus_candidate(obj);      // 结构性候选判定（容器空子树拒停靠）
+we_focus_edit_enter/exit/active(&mylcd);   // 编辑态（WE_CFG_FOCUS_EDIT=0 时为空 stub）
+```
+
+可聚焦性 = 类描述符 `class_flags` 带 `WE_CLASS_FLAG_FOCUSABLE`（2C 起 key_cb
+已并入统一 `event_cb`：0x10/0x20 两段事件码只发给 FOCUSABLE 类）。裁剪宏：
+`WE_CFG_FOCUS_EDIT` / `WE_CFG_FOCUS_NESTED` / 各控件 `WE_<NAME>_USE_KEY`。
+光标外观：`WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B`、`WE_CFG_FOCUS_FLASH_MS`。
+光标显隐随输入来源：按键活动或 `we_focus_set`/`we_focus_edit_enter` 亮出，
+触摸按下收起（触摸的焦点跟随仍生效，只是不画环）。
+
+## 17. Kernel Object & Layer API (refactor additions)
+
+```c
+/* 对象树（内核唯一持链人——控件不得手工摘挂链表） */
+void we_obj_detach(we_obj_t *obj);                    /* 摘链保活（lcd/class_p 保留） */
+void we_obj_set_parent(we_obj_t *obj, we_obj_t *p);   /* 改挂父子（非容器父=回顶层） */
+void we_obj_delete(we_obj_t *obj);                    /* 唯一删除入口：delete_cb →
+                                                         CHILD_OWNER 后序递归删子 →
+                                                         内核回收按压/焦点/弹层/动画引用 */
+void we_obj_attach_to_top(we_lcd_t *lcd, we_obj_t *o);/* 顶层链：保证置顶（toast/msgbox），
+                                                         不打乱普通层 Z 序 */
+
+/* 输入（内核统一派发） */
+void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj);     /* 祖先容器接管手势（原按压对象
+                                                         收 RELEASED 回弹，不触发点击） */
+/* 容器只需应答 WE_EVENT_HIT_TEST（0=连子树跳过）与 WE_EVENT_DRAG_BEGIN
+ * （拖拽接管询问，越 WE_CFG_DRAG_THRESHOLD=8 时沿祖先链询问一轮） */
+
+/* 滚动物理组件（Core/we_scroll.h，list 已迁移为样板） */
+void    we_scroll_press(we_scroll_t *sc, int16_t c);
+uint8_t we_scroll_stay(we_scroll_t *sc, const we_scroll_cfg_t *cfg, int16_t c, int32_t max);
+uint8_t we_scroll_release(we_scroll_t *sc, int32_t max);      /* 非0=需启动惯性/回弹动画 */
+uint8_t we_scroll_swipe(we_scroll_t *sc, const we_scroll_cfg_t *cfg, int16_t c, int32_t max);
+uint8_t we_scroll_anim_step(we_scroll_t *sc, const we_scroll_cfg_t *cfg, uint16_t ms, int32_t max);
+uint8_t we_scroll_set(we_scroll_t *sc, int32_t pos, int32_t max);
+```
+
+断言钩子：`WE_ASSERT(expr)`（`we_gui_config.h` 默认空实现，用户配置可覆盖）。

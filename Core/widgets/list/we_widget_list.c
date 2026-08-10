@@ -1,8 +1,16 @@
 #include "we_widget_list.h"
+#include "we_scroll.h"
+
+/* 滚动物理参数（沿用本控件既有宏值，交给 we_scroll_t 状态机执行） */
+static const we_scroll_cfg_t _list_scroll_cfg = {
+    WE_LIST_DRAG_THRESHOLD,   WE_LIST_OVERSCROLL_LIMIT, WE_LIST_INERTIA_NUM,
+    WE_LIST_INERTIA_DEN,      WE_LIST_REBOUND_PULL_DIV, WE_LIST_REBOUND_MAX_STEP,
+    WE_LIST_SWIPE_SLICE_MS,
+};
 #include "we_render.h"
 
 /* --------------------------------------------------------------------------
- * list —— 数据驱动列表菜单（preview 孵化区，毕业级打磨版）
+ * list —— 数据驱动列表菜单
  *
  * 结构：面板背景（圆角可选）+ PFB 收窄裁剪的行内容（按压高亮条 /
  * 左对齐文字 / 行底 1px 分隔线）+ 右缘空闲淡出滚动条。
@@ -79,7 +87,7 @@ static void _list_invalidate_content(we_list_obj_t *obj)
  */
 static void _list_invalidate_row(we_list_obj_t *obj, int16_t row)
 {
-    int32_t ry0 = (int32_t)obj->base.y + (int32_t)row * (int32_t)obj->row_h - obj->scroll_px;
+    int32_t ry0 = (int32_t)obj->base.y + (int32_t)row * (int32_t)obj->row_h - obj->sc.pos;
     int32_t ry1 = ry0 + (int32_t)obj->row_h - 1;
     int32_t py0 = obj->base.y;
     int32_t py1 = (int32_t)obj->base.y + obj->base.h - 1;
@@ -162,7 +170,7 @@ static void _list_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
     }
 
     /* 拖拽中保持完全显示，不累计空闲 */
-    if (obj->dragging)
+    if (obj->sc.dragging)
     {
         obj->sb_idle_ms = 0U;
         return;
@@ -196,20 +204,6 @@ static void _list_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
  * 滚动提交与夹紧
  * -------------------------------------------------------------------------- */
 
-/**
- * @brief 提交滚动值：值变化时唤醒滚动条并标脏内容裁剪矩形。
- * @param obj 传入：控件对象指针。
- * @param new_scroll 传入：新滚动像素（调用方已按各自策略夹紧）。
- * @return 无。
- */
-static void _list_scroll_commit(we_list_obj_t *obj, int32_t new_scroll)
-{
-    if (new_scroll == obj->scroll_px)
-        return;
-    obj->scroll_px = new_scroll;
-    _list_sb_wake(obj); /* 滚动即唤醒滚动条（空闲计时清零） */
-    _list_invalidate_content(obj);
-}
 
 /**
  * @brief 将 scroll_px 硬夹紧到 [0, max] 后提交（程序化定位/参数变更用）。
@@ -219,32 +213,13 @@ static void _list_scroll_commit(we_list_obj_t *obj, int32_t new_scroll)
  */
 static void _list_apply_scroll(we_list_obj_t *obj, int32_t new_scroll)
 {
-    int32_t max_scroll = _list_max_scroll(obj);
-
-    if (new_scroll < 0)
-        new_scroll = 0;
-    if (new_scroll > max_scroll)
-        new_scroll = max_scroll;
-    _list_scroll_commit(obj, new_scroll);
+    if (we_scroll_set(&obj->sc, new_scroll, _list_max_scroll(obj)))
+    {
+        _list_sb_wake(obj); /* 滚动即唤醒滚动条（空闲计时清零） */
+        _list_invalidate_content(obj);
+    }
 }
 
-/**
- * @brief 将 scroll_px 软夹紧到 [-过冲上限, max+过冲上限] 后提交
- *        （拖拽跟手 / 惯性动画用，允许橡皮筋越界）。
- * @param obj 传入：控件对象指针。
- * @param new_scroll 传入：目标滚动像素。
- * @return 无。
- */
-static void _list_apply_scroll_over(we_list_obj_t *obj, int32_t new_scroll)
-{
-    int32_t max_scroll = _list_max_scroll(obj);
-
-    if (new_scroll < -WE_LIST_OVERSCROLL_LIMIT)
-        new_scroll = -WE_LIST_OVERSCROLL_LIMIT;
-    if (new_scroll > max_scroll + WE_LIST_OVERSCROLL_LIMIT)
-        new_scroll = max_scroll + WE_LIST_OVERSCROLL_LIMIT;
-    _list_scroll_commit(obj, new_scroll);
-}
 
 /* --------------------------------------------------------------------------
  * 惯性 + 回弹动画（单个中央动画节点）
@@ -257,8 +232,6 @@ static void _list_apply_scroll_over(we_list_obj_t *obj, int32_t new_scroll)
  */
 static void _list_stop_anim(we_list_obj_t *obj)
 {
-    obj->inertia_animating = 0U;
-    obj->vel = 0;
     we_anim_stop(obj->base.lcd, &obj->anim);
 }
 
@@ -274,72 +247,23 @@ static void _list_stop_anim(we_list_obj_t *obj)
 static void _list_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
     we_list_obj_t *obj = (we_list_obj_t *)owner;
-    int32_t max_scroll;
-    int32_t pos;
-    uint16_t step_ms;
 
     if (obj == NULL || elapsed_ms == 0U)
         return;
-    if (!obj->inertia_animating)
+    if (!obj->sc.animating)
     {
         _list_stop_anim(obj);
         return;
     }
 
-    step_ms = (elapsed_ms > 64U) ? 64U : elapsed_ms;
-    max_scroll = _list_max_scroll(obj);
-    pos = obj->scroll_px;
-
-    /* 1. 惯性段：本帧位移 = 速度（像素/16ms）按帧时长折算，至少 1px 防停滞 */
-    if (obj->vel != 0)
+    if (we_scroll_anim_step(&obj->sc, &_list_scroll_cfg, elapsed_ms, _list_max_scroll(obj)))
     {
-        int32_t move = ((int32_t)obj->vel * (int32_t)step_ms) / 16;
-
-        if (move == 0)
-            move = (obj->vel > 0) ? 1 : -1;
-        pos += move;
-        if (pos < -WE_LIST_OVERSCROLL_LIMIT)
-            pos = -WE_LIST_OVERSCROLL_LIMIT;
-        if (pos > max_scroll + WE_LIST_OVERSCROLL_LIMIT)
-            pos = max_scroll + WE_LIST_OVERSCROLL_LIMIT;
-
-        /* 速度衰减 7/8（整数截断向零收敛，最终必然归零） */
-        obj->vel = (int16_t)(((int32_t)obj->vel * WE_LIST_INERTIA_NUM) / WE_LIST_INERTIA_DEN);
-        /* 越界段再减半：小幅过冲后尽快把控制权交给回弹 */
-        if (pos < 0 || pos > max_scroll)
-            obj->vel = (int16_t)(obj->vel / 2);
+        _list_sb_wake(obj);
+        _list_invalidate_content(obj);
     }
 
-    /* 2. 回弹段：越界时按"过冲/PULL_DIV"拉回边界（对齐 scroll_panel 参数风格） */
-    if (pos < 0)
-    {
-        int32_t pull = (-pos) / WE_LIST_REBOUND_PULL_DIV;
-
-        if (pull < 1)
-            pull = 1;
-        if (pull > WE_LIST_REBOUND_MAX_STEP)
-            pull = WE_LIST_REBOUND_MAX_STEP;
-        pos += pull;
-        if (pos > 0)
-            pos = 0;
-    }
-    else if (pos > max_scroll)
-    {
-        int32_t pull = (pos - max_scroll) / WE_LIST_REBOUND_PULL_DIV;
-
-        if (pull < 1)
-            pull = 1;
-        if (pull > WE_LIST_REBOUND_MAX_STEP)
-            pull = WE_LIST_REBOUND_MAX_STEP;
-        pos -= pull;
-        if (pos < max_scroll)
-            pos = max_scroll;
-    }
-
-    _list_apply_scroll_over(obj, pos);
-
-    /* 3. 收敛判定：速度归零且回到边界内 → 摘链停表 */
-    if (obj->vel == 0 && obj->scroll_px >= 0 && obj->scroll_px <= max_scroll)
+    /* 收敛（速度归零且回到边界内）→ 摘链停表 */
+    if (!obj->sc.animating)
         _list_stop_anim(obj);
 }
 
@@ -367,7 +291,7 @@ static int16_t _list_hit_row(const we_list_obj_t *obj, int16_t px, int16_t py)
         py < obj->base.y || py >= (int16_t)(obj->base.y + obj->base.h))
         return -1;
 
-    content_y = (int32_t)(py - obj->base.y) + obj->scroll_px;
+    content_y = (int32_t)(py - obj->base.y) + obj->sc.pos;
     if (content_y < 0)
         return -1;
     row = content_y / (int32_t)obj->row_h;
@@ -417,7 +341,7 @@ static void _list_draw_scrollbar(we_list_obj_t *obj)
     if (thumb_h > track_h)
         thumb_h = track_h;
 
-    sc = obj->scroll_px;
+    sc = obj->sc.pos;
     if (sc < 0)
         sc = 0;
     if (sc > max_scroll)
@@ -480,13 +404,13 @@ static void _list_draw_cb(void *ptr)
     {
         /* 首个（可能半露）可见行：负向过冲时 first 会算成负/零，统一
          * 夹到 0 并由"行号反推屏幕 Y"公式覆盖过冲露出的顶部空隙。 */
-        int32_t first = obj->scroll_px / (int32_t)obj->row_h;
+        int32_t first = obj->sc.pos / (int32_t)obj->row_h;
         int16_t iy;
         int32_t idx;
 
         if (first < 0)
             first = 0;
-        iy = (int16_t)((int32_t)obj->base.y + first * (int32_t)obj->row_h - obj->scroll_px);
+        iy = (int16_t)((int32_t)obj->base.y + first * (int32_t)obj->row_h - obj->sc.pos);
 
         lcd->pfb_area.x0 = clip_x0;
         lcd->pfb_area.x1 = clip_x1;
@@ -585,8 +509,17 @@ static void _list_draw_cb(void *ptr)
  * @param data 传入：输入数据。
  * @return 1 表示消费事件，0 表示穿透。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
+static uint8_t _list_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _list_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_list_obj_t *obj = (we_list_obj_t *)ptr;
 
     if (obj == NULL || data == NULL)
@@ -595,11 +528,7 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
     if (event == WE_EVENT_PRESSED)
     {
         _list_stop_anim(obj); /* 按住即停惯性/回弹（越界时定格，松手再回弹） */
-        obj->tracking = 1U;
-        obj->dragging = 0U;
-        obj->press_y = data->y;
-        obj->last_y = data->y;
-        obj->press_scroll = obj->scroll_px;
+        we_scroll_press(&obj->sc, data->y);
         obj->pressed_row = _list_hit_row(obj, data->x, data->y);
         if (obj->pressed_row >= 0)
             _list_invalidate_row(obj, obj->pressed_row); /* 只标脏按压行条带 */
@@ -613,64 +542,39 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
          * 与 RELEASED 分支的拖拽惯性互斥，不会叠加）。初速度按
          * "总位移 / 固定时间片"估算，方向与内容运动一致（增量 = -dy）。
          * 注意：RELEASED 已清 tracking，本分支必须放在 tracking 闸门之前。 */
-        int32_t dy_total = (int32_t)data->y - (int32_t)obj->press_y;
-        int16_t v = (int16_t)((-dy_total * 16) / WE_LIST_SWIPE_SLICE_MS);
-
-        if (v != 0 && _list_max_scroll(obj) > 0)
-        {
-            obj->vel = v;
-            obj->inertia_animating = 1U;
+        if (we_scroll_swipe(&obj->sc, &_list_scroll_cfg, data->y, _list_max_scroll(obj)))
             we_anim_start(obj->base.lcd, &obj->anim, _list_anim_step_cb, obj);
-        }
         return 1U;
     }
 
-    if (!obj->tracking)
+    if (!obj->sc.tracking)
         return 1U; /* 无有效按压序列，仅消费 */
 
     if (event == WE_EVENT_STAY)
     {
-        int16_t dy_total = (int16_t)(data->y - obj->press_y);
-        int16_t ady = (dy_total >= 0) ? dy_total : (int16_t)(-dy_total);
+        int32_t old_pos = obj->sc.pos;
+        uint8_t r = we_scroll_stay(&obj->sc, &_list_scroll_cfg, data->y, _list_max_scroll(obj));
 
-        if (!obj->dragging && ady >= WE_LIST_DRAG_THRESHOLD)
+        if (r == 1U && obj->pressed_row >= 0)
         {
-            obj->dragging = 1U;
-            if (obj->pressed_row >= 0)
-            {
-                int16_t row = obj->pressed_row;
-                obj->pressed_row = -1; /* 进入拖拽即取消行按压态 */
-                _list_invalidate_row(obj, row);
-            }
+            int16_t row = obj->pressed_row;
+
+            obj->pressed_row = -1; /* 进入拖拽即取消行按压态 */
+            _list_invalidate_row(obj, row);
         }
-
-        if (obj->dragging)
+        if (r != 0U && obj->sc.pos != old_pos)
         {
-            int16_t dy_step = (int16_t)(data->y - obj->last_y);
-
-            /* 内容跟手：手指下移 → 内容下移 → scroll_px 减小；
-             * 软夹紧允许橡皮筋越界过冲（松手后回弹） */
-            _list_apply_scroll_over(obj, obj->press_scroll - (int32_t)dy_total);
-
-            /* 测速：以最近一次 STAY 步进为速度（像素/16ms 量级），
-             * 惯性方向与内容运动方向一致（scroll 增量 = -dy） */
-            if (dy_step != 0)
-                obj->vel = (int16_t)(-dy_step);
-            obj->last_y = data->y;
+            _list_sb_wake(obj);
+            _list_invalidate_content(obj);
         }
         return 1U;
     }
 
     if (event == WE_EVENT_RELEASED)
     {
-        uint8_t was_drag = obj->dragging;
+        uint8_t was_drag = obj->sc.dragging;
         int16_t row = obj->pressed_row;
         int32_t max_scroll = _list_max_scroll(obj);
-        uint8_t out_of_bounds =
-            (obj->scroll_px < 0 || obj->scroll_px > max_scroll) ? 1U : 0U;
-
-        obj->tracking = 0U;
-        obj->dragging = 0U;
 
         if (!was_drag && row >= 0)
         {
@@ -686,11 +590,8 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
 
         /* 拖拽松手带速度 → 惯性（回弹并入同一动画）；
          * 越界（含按住定格后轻点松开）→ 纯回弹 */
-        if ((was_drag && obj->vel != 0) || out_of_bounds)
-        {
-            obj->inertia_animating = 1U;
+        if (we_scroll_release(&obj->sc, max_scroll))
             we_anim_start(obj->base.lcd, &obj->anim, _list_anim_step_cb, obj);
-        }
         return 1U;
     }
 
@@ -726,7 +627,7 @@ static uint8_t _list_key_cb(void *ptr, uint8_t key_evt)
             /* 进入编辑态：无有效高亮行时落到当前可见首行 */
             if (obj->pressed_row < 0 || obj->pressed_row >= (int16_t)obj->item_cnt)
             {
-                int16_t row = (obj->row_h != 0U) ? (int16_t)(obj->scroll_px / (int32_t)obj->row_h) : 0;
+                int16_t row = (obj->row_h != 0U) ? (int16_t)(obj->sc.pos / (int32_t)obj->row_h) : 0;
                 if (row < 0)
                     row = 0;
                 if (row >= (int16_t)obj->item_cnt)
@@ -766,9 +667,9 @@ static uint8_t _list_key_cb(void *ptr, uint8_t key_evt)
             {
                 int32_t row_top = (int32_t)row * (int32_t)obj->row_h;
                 int32_t view_h = (int32_t)obj->base.h;
-                if (row_top < obj->scroll_px)
+                if (row_top < obj->sc.pos)
                     we_list_set_scroll(obj, row_top);
-                else if (row_top + (int32_t)obj->row_h > obj->scroll_px + view_h)
+                else if (row_top + (int32_t)obj->row_h > obj->sc.pos + view_h)
                     we_list_set_scroll(obj, row_top + (int32_t)obj->row_h - view_h);
             }
         }
@@ -784,7 +685,7 @@ static const we_class_t _list_class = {
     .event_cb = _list_event_cb,
     .set_pos_cb = NULL, /* 通用移动逻辑（旧区标脏 + 新区标脏）已足够 */
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
-    .key_cb = _list_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -831,7 +732,7 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
 
     obj->radius = WE_LIST_DEF_RADIUS;
     obj->opacity = 255U;
-    obj->scroll_px = 0;
+    we_scroll_reset(&obj->sc);
 
     obj->bg_color = RGB888TODEV(32, 38, 50);
     obj->text_color = RGB888TODEV(214, 221, 233);
@@ -841,17 +742,12 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
     obj->clicked_cb = NULL;
 
     obj->pressed_row = -1;
-    obj->tracking = 0U;
-    obj->dragging = 0U;
-    obj->press_y = 0;
-    obj->last_y = 0;
-    obj->press_scroll = 0;
 
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;
     obj->anim.owner = NULL;
-    obj->inertia_animating = 0U;
-    obj->vel = 0;
+    obj->sc.animating = 0U;
+    obj->sc.vel = 0;
 
     obj->sb_alpha = 0U;   /* 未绑定条目前不显示滚动条 */
     obj->sb_idle_ms = 0U;
@@ -881,10 +777,10 @@ void we_list_set_options(we_list_obj_t *obj,
     _list_stop_anim(obj);
     obj->items = items;
     obj->item_cnt = (items != NULL) ? count : 0U;
-    obj->scroll_px = 0;
+    we_scroll_reset(&obj->sc);
     obj->pressed_row = -1;
-    obj->tracking = 0U;
-    obj->dragging = 0U;
+    obj->sc.tracking = 0U;
+    obj->sc.dragging = 0U;
     we_obj_invalidate((we_obj_t *)obj);
     /* 内容溢出时让滚动条短暂全显提示"此处可滚动"，随后自动渐隐；
      * 不溢出时 wake 内部直接返回，保持隐藏 */
@@ -923,10 +819,10 @@ void we_list_set_row_height(we_list_obj_t *obj, uint16_t row_h)
     obj->row_h = row_h;
 
     max_scroll = _list_max_scroll(obj);
-    if (obj->scroll_px > max_scroll)
-        obj->scroll_px = max_scroll;
-    if (obj->scroll_px < 0)
-        obj->scroll_px = 0;
+    if (obj->sc.pos > max_scroll)
+        obj->sc.pos = max_scroll;
+    if (obj->sc.pos < 0)
+        obj->sc.pos = 0;
 
     we_obj_invalidate((we_obj_t *)obj);
 }
@@ -956,10 +852,10 @@ void we_list_set_font(we_list_obj_t *obj, const unsigned char *font)
     obj->row_h = (uint16_t)(line_h + 2U * WE_LIST_ROW_PAD);
 
     max_scroll = _list_max_scroll(obj);
-    if (obj->scroll_px > max_scroll)
-        obj->scroll_px = max_scroll;
-    if (obj->scroll_px < 0)
-        obj->scroll_px = 0;
+    if (obj->sc.pos > max_scroll)
+        obj->sc.pos = max_scroll;
+    if (obj->sc.pos < 0)
+        obj->sc.pos = 0;
 
     we_obj_invalidate((we_obj_t *)obj);
 }

@@ -11,7 +11,7 @@
  * 用法：
  *   以 280x240 为参考布局，坐标为固定像素；仅 FPS 标签用 we_demo_fps_x 做右对齐。
  *   we_label_simple_demo_init(&mylcd);
- *   we_gui_timer_create(&mylcd, we_label_simple_demo_tick, 16U, 1U);
+ *   we_gui_timer_create(&mylcd, &timer_node, we_label_simple_demo_tick, 16U, 1U);
  */
 
 #include "simple_widget_demos.h"

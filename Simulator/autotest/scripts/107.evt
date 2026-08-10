@@ -1,0 +1,12 @@
+# table: drag scroll -> reverse drag -> tap a row
+10 down 140 190
+12 move 140 170
+14 move 140 150
+16 move 140 130
+18 up
+70 down 140 110
+72 move 140 150
+74 move 140 190
+76 up
+120 down 140 100
+122 up

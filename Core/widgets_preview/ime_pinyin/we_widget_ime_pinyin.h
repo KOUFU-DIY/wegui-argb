@@ -158,7 +158,7 @@ void we_ime_pinyin_popup_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
  * @param target_textarea 绑定的目标输入框（we_textarea_obj_t*，可 NULL）。
  * @return 无。
  * @note 收回途径：点面板上方区域 / BACK 键 / 本 API 的 hide；
- *       键盘按键聚焦经弹层键通道转发 we_keyboard_key_nav。
+ *       键盘按键聚焦经模态键通道转发 we_keyboard_key_nav。
  */
 void we_ime_pinyin_popup_show(we_ime_pinyin_obj_t *obj, void *target_textarea);
 

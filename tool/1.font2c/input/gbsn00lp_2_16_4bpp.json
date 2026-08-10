@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "symbol": "gbsn00lp_2_16_4bpp",
+  "font": {
+    "file": "gbsn00lp-2.ttf",
+    "size": 16
+  },
+  "render": {
+    "bpp": 4,
+    "missing_glyph": "box"
+  },
+  "charset": {
+    "ranges": [
+      [
+        "U+0020",
+        "U+007E"
+      ],
+      [
+        "U+4E00",
+        "U+9FA5"
+      ]
+    ]
+  },
+  "deploy": {
+    "mode": "external"
+  }
+}

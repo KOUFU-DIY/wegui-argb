@@ -1,0 +1,9 @@
+# textarea: tap field -> popup keyboard -> two key taps -> tap outside
+10 down 90 56
+12 up
+70 down 60 170
+72 up
+90 down 140 170
+92 up
+130 down 250 20
+132 up

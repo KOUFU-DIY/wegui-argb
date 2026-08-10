@@ -14,6 +14,11 @@
 #include "we_render.h"
 #include <string.h>
 
+#define _KB_SLIDE_HIDDEN 0U /* 完全隐藏（弹层已释放） */
+#define _KB_SLIDE_IN     1U /* 滑入中 */
+#define _KB_SLIDE_SHOWN  2U /* 完全展开停留 */
+#define _KB_SLIDE_OUT    3U /* 滑出中 */
+
 /* 固定 4 行布局：3 行字符键 + 底行功能键 */
 #define WE_KEYBOARD_ROWS  4
 /* 每行总宽度份数（所有页共用） */
@@ -262,6 +267,26 @@ static void _kb_invalidate_echo(we_keyboard_obj_t *obj)
 }
 
 /**
+ * @brief 取当前绑定的目标输入框，目标已被删除时自动解绑并返回 NULL
+ * @param obj 传入：本控件对象指针
+ * @return 有效目标指针；未绑定或目标已被删除返回 NULL
+ * @note 跨控件裸指针绑定的防悬空口径：we_obj_delete 会把被删对象的
+ *       class_p 清空，这里据此识别失效绑定并自动置空（与
+ *       we_gui_indev_handler 对 pressed_obj 的防御同源）。
+ */
+static void *_kb_target(we_keyboard_obj_t *obj)
+{
+    we_obj_t *t = (we_obj_t *)obj->target;
+
+    if (t != NULL && t->class_p == NULL)
+    {
+        obj->target = NULL;
+        t = NULL;
+    }
+    return (void *)t;
+}
+
+/**
  * @brief 处理一次已确认的按键点击：功能键内部消化，普通键注入/回调。
  * @param obj 传入：控件对象指针。
  * @param label 传入：键面字符串。
@@ -291,7 +316,7 @@ static void _kb_handle_key(we_keyboard_obj_t *obj, const char *label)
     }
     if (strcmp(label, "OK") == 0)
     {
-        void *tgt = obj->target;
+        void *tgt = _kb_target(obj);
 
         if (obj->popup_mode)
             we_keyboard_popup_hide(obj);
@@ -301,7 +326,7 @@ static void _kb_handle_key(we_keyboard_obj_t *obj, const char *label)
     }
     if (strcmp(label, "<-") == 0)
     {
-        if (obj->popup_mode && obj->target != NULL)
+        if (obj->popup_mode && _kb_target(obj) != NULL)
         {
             we_textarea_input((we_textarea_obj_t *)obj->target, "\b");
             _kb_invalidate_echo(obj); /* 回显条同步刷新 */
@@ -311,7 +336,7 @@ static void _kb_handle_key(we_keyboard_obj_t *obj, const char *label)
         return;
     }
 
-    if (obj->popup_mode && obj->target != NULL)
+    if (obj->popup_mode && _kb_target(obj) != NULL)
     {
         we_textarea_input((we_textarea_obj_t *)obj->target, label);
         _kb_invalidate_echo(obj); /* 回显条同步刷新 */
@@ -361,7 +386,7 @@ static void _keyboard_draw_cb(void *ptr)
         we_fill_rect(lcd, obj->base.x, eb_y, (uint16_t)obj->base.w,
                      (uint16_t)WE_KEYBOARD_ECHO_H, obj->fn_color, obj->opacity);
 
-        if (obj->target != NULL && obj->font != NULL && avail_w > 0)
+        if (_kb_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
             const char *text = we_textarea_get_text((const we_textarea_obj_t *)obj->target);
             we_area_t old_pfb_area = lcd->pfb_area;
@@ -440,7 +465,7 @@ static void _keyboard_draw_cb(void *ptr)
         we_draw_round_rect_analytic_fill(lcd, kx, ky, (uint16_t)kw, (uint16_t)kh,
                                          draw_r, bg, obj->opacity);
 
-        /* 键名文字（水平按测宽、垂直按墨迹 bbox 居中）；空格键面为空白 */
+        /* 键名文字（水平按测宽、垂直按有效像素区 bbox 居中）；空格键面为空白 */
         if (obj->font != NULL && label[0] != ' ')
         {
             uint16_t txt_w = we_get_text_width(obj->font, label);
@@ -496,6 +521,12 @@ static void _keyboard_draw_cb(void *ptr)
  * @note 键盘是不透明停靠面板：面板矩形内的触摸（含键间距）一律消费，
  *       避免误触穿透到下层控件；完全透明（opacity==0）时不拦截。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
+static uint8_t _kb_popup_key_cb(void *owner, uint8_t code);
+#endif
+static void _kb_popup_close_cb(void *owner);
+void we_keyboard_popup_hide(we_keyboard_obj_t *obj);
+
 static uint8_t _keyboard_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_keyboard_obj_t *obj = (we_keyboard_obj_t *)ptr;
@@ -504,6 +535,31 @@ static uint8_t _keyboard_event_cb(void *ptr, we_event_t event, we_indev_data_t *
 
     if (obj->opacity == 0U)
         return 0U;
+
+    if (obj->popup_mode)
+    {
+        /* 弹层态语义（全部走统一事件通道）：
+         * 被新模态替换 -> 复位并关闭；模态键直送（松开沿带 RELEASE_FLAG）；
+         * 收回中拒输入；点击键盘上方 = 收回。 */
+        if (event == WE_EVENT_MODAL_CLOSE)
+        {
+            we_obj_invalidate((we_obj_t *)obj);
+            we_obj_detach((we_obj_t *)obj);
+            _kb_popup_close_cb(obj);
+            return 1U;
+        }
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
+        if ((uint8_t)event >= WE_KEY_UP)
+            return _kb_popup_key_cb(obj, (uint8_t)event);
+#endif
+        if (obj->slide_state == _KB_SLIDE_OUT || obj->slide_state == _KB_SLIDE_HIDDEN)
+            return 1U;
+        if (event == WE_EVENT_PRESSED && data != NULL && data->y < obj->base.y)
+        {
+            we_keyboard_popup_hide(obj); /* 点击键盘外部 = 收回 */
+            return 1U;
+        }
+    }
 
     switch (event)
     {
@@ -580,26 +636,7 @@ static const we_class_t _keyboard_class = {
  * 可中途反向。每步把弹层 area 与 base.y 同步（set_area 负责新旧区标脏）。
  * -------------------------------------------------------------------------- */
 
-#define _KB_SLIDE_HIDDEN 0U /* 完全隐藏（弹层已释放） */
-#define _KB_SLIDE_IN     1U /* 滑入中 */
-#define _KB_SLIDE_SHOWN  2U /* 完全展开停留 */
-#define _KB_SLIDE_OUT    3U /* 滑出中 */
 
-/**
- * @brief 按当前 base 矩形同步弹层 area（set_area 内部标脏旧/新区域）。
- * @param obj 传入：控件对象指针。
- * @return 无。
- */
-static void _kb_popup_sync_area(we_keyboard_obj_t *obj)
-{
-    we_area_t a;
-
-    a.x0 = obj->base.x;
-    a.y0 = obj->base.y;
-    a.x1 = (int16_t)(obj->base.x + obj->base.w - 1);
-    a.y1 = (int16_t)(obj->base.y + obj->base.h - 1);
-    we_popup_layer_set_area(obj->base.lcd, obj, &a);
-}
 
 /**
  * @brief 按 slide_q8 计算 base.y（自屏底升起）并同步弹层区域。
@@ -609,10 +646,11 @@ static void _kb_popup_sync_area(we_keyboard_obj_t *obj)
 static void _kb_slide_apply(we_keyboard_obj_t *obj)
 {
     we_lcd_t *lcd = obj->base.lcd;
+    int16_t ny = (int16_t)((int32_t)lcd->height -
+                           ((int32_t)obj->base.h * (int32_t)obj->slide_q8) / 256);
 
-    obj->base.y = (int16_t)((int32_t)lcd->height -
-                            ((int32_t)obj->base.h * (int32_t)obj->slide_q8) / 256);
-    _kb_popup_sync_area(obj);
+    /* 顶层对象：位移经 we_obj_set_pos，旧/新区标脏由内核默认路径完成 */
+    we_obj_set_pos((we_obj_t *)obj, obj->base.x, ny);
 }
 
 /**
@@ -620,7 +658,7 @@ static void _kb_slide_apply(we_keyboard_obj_t *obj)
  * @param owner 传入：控件对象指针（we_anim_t.owner 透传）。
  * @param elapsed_ms 传入：本次步进经过的毫秒数。
  * @return 无。
- * @note 滑出到底后释放弹层（close_cb 里统一复位状态）。
+ * @note 滑出到底后解除模态、摘离顶层链并复位状态。
  */
 static void _kb_slide_step_cb(void *owner, uint16_t elapsed_ms)
 {
@@ -656,7 +694,9 @@ static void _kb_slide_step_cb(void *owner, uint16_t elapsed_ms)
             obj->slide_q8 = 0U;
             _kb_slide_apply(obj); /* 最后一条可见带标脏 */
             we_anim_stop(obj->base.lcd, &obj->anim);
-            we_popup_layer_close(obj->base.lcd, obj); /* close_cb 复位为 HIDDEN */
+            we_modal_close(obj->base.lcd, (we_obj_t *)obj);
+            we_obj_detach((we_obj_t *)obj); /* 已滑至屏外，摘链无需再标脏 */
+            _kb_popup_close_cb(obj);        /* 复位为 HIDDEN */
             return;
         }
         obj->slide_q8 = (uint16_t)q;
@@ -669,7 +709,7 @@ static void _kb_slide_step_cb(void *owner, uint16_t elapsed_ms)
 }
 
 /**
- * @brief 弹层关闭回调：无论正常滑出收尾还是被其他弹层顶掉，都复位状态。
+ * @brief 弹层关闭复位：正常滑出收尾与被新模态替换（MODAL_CLOSE）共用。
  * @param owner 传入：控件对象指针。
  * @return 无。
  */
@@ -683,30 +723,10 @@ static void _kb_popup_close_cb(void *owner)
     obj->base.y = (int16_t)obj->base.lcd->height; /* 归位屏外 */
     obj->pressed = 0U;
     obj->press_idx = -1;
-    if (obj->target != NULL) /* 弹层关闭 = 目标退出编辑态（光标熄灭停表） */
+    if (_kb_target(obj) != NULL) /* 弹层关闭 = 目标退出编辑态（光标熄灭停表） */
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
 }
 
-/**
- * @brief 弹层事件回调：键盘上方区域按下 = 收回；面板内转交控件事件机。
- * @param owner 传入：控件对象指针。
- * @param event 输入事件类型。
- * @param data 输入设备事件数据指针。
- * @return 恒为 1（模态弹层吞掉全部输入）。
- */
-static uint8_t _kb_popup_event(void *owner, we_event_t event, we_indev_data_t *data)
-{
-    we_keyboard_obj_t *obj = (we_keyboard_obj_t *)owner;
-
-    if (obj->slide_state == _KB_SLIDE_OUT || obj->slide_state == _KB_SLIDE_HIDDEN)
-        return 1U; /* 收回中不再接受输入 */
-    if (event == WE_EVENT_PRESSED && data != NULL && data->y < obj->base.y)
-    {
-        we_keyboard_popup_hide(obj); /* 点击键盘外部 = 收回 */
-        return 1U;
-    }
-    return _keyboard_event_cb(obj, event, data);
-}
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
 /**
@@ -928,7 +948,7 @@ int16_t we_keyboard_focus_row(we_keyboard_obj_t *obj)
 }
 
 /**
- * @brief 弹层键通道回调：方向键移键光标，OK 双沿击键，BACK 收回。
+ * @brief 模态键通道回调：方向键移键光标，OK 双沿击键，BACK 收回。
  * @param owner 传入：控件对象指针。
  * @param code 传入：语义键编码（松开沿带 WE_KEY_RELEASE_FLAG）。
  * @return 恒为 1（模态弹层吞掉全部按键）。
@@ -1052,11 +1072,11 @@ void we_keyboard_popup_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
     obj->focus_idx = -1;
 #endif
-    /* 弹层承载：不 attach 普通对象链表，不预标脏（屏外不可见） */
+    /* 隐藏态不挂任何链表；popup_show 时挂 LCD 顶层链并声明模态 */
 }
 
 /**
- * @brief 弹出软键盘：占用 LCD 弹层并从屏底滑入。
+ * @brief 弹出软键盘：挂 LCD 顶层链、声明模态，并从屏底滑入。
  * @param obj 控件对象指针（须为 popup_init 创建）。
  * @param target_textarea 绑定的目标输入框（we_textarea_obj_t*，可 NULL）。
  * @return 无。
@@ -1070,7 +1090,7 @@ void we_keyboard_popup_show(we_keyboard_obj_t *obj, void *target_textarea)
     lcd = obj->base.lcd;
 
     /* 编辑态交接：旧目标熄灭光标，新目标进入编辑态开始闪烁 */
-    if (obj->target != NULL && obj->target != target_textarea)
+    if (_kb_target(obj) != NULL && obj->target != target_textarea)
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
     obj->target = target_textarea;
     if (target_textarea != NULL)
@@ -1079,19 +1099,12 @@ void we_keyboard_popup_show(we_keyboard_obj_t *obj, void *target_textarea)
     if (obj->slide_state == _KB_SLIDE_SHOWN)
         return; /* 已完全展开：仅更新绑定目标 */
 
-    if (!we_popup_layer_is_owner(lcd, obj))
+    if (obj->slide_state == _KB_SLIDE_HIDDEN)
     {
-        we_area_t a;
-
-        a.x0 = obj->base.x;
-        a.y0 = obj->base.y;
-        a.x1 = (int16_t)(obj->base.x + obj->base.w - 1);
-        a.y1 = (int16_t)(obj->base.y + obj->base.h - 1);
-        we_popup_layer_open(lcd, WE_POPUP_TYPE_KEYBOARD, obj, &a,
-                            _keyboard_draw_cb, _kb_popup_event, _kb_popup_close_cb);
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_KEYBOARD_USE_KEY == 1)
-        we_popup_layer_set_key_cb(lcd, obj, _kb_popup_key_cb);
-#endif
+        /* 首次弹出：挂顶层链并声明模态（键盘对象自身即弹层）。
+         * 滑出中反向 re-show 时仍在链上/仍是模态，无需重复挂接。 */
+        we_obj_attach_to_top(lcd, (we_obj_t *)obj);
+        we_modal_open(lcd, (we_obj_t *)obj);
     }
 
     obj->slide_state = _KB_SLIDE_IN; /* 滑出中调用则自当前位置反向 */
@@ -1099,7 +1112,7 @@ void we_keyboard_popup_show(we_keyboard_obj_t *obj, void *target_textarea)
 }
 
 /**
- * @brief 收回软键盘：滑出到屏外后释放 LCD 弹层。
+ * @brief 收回软键盘：滑出到屏外后解除模态并摘离顶层链。
  * @param obj 控件对象指针。
  * @return 无。
  */
@@ -1109,14 +1122,8 @@ void we_keyboard_popup_hide(we_keyboard_obj_t *obj)
         return;
     if (obj->slide_state == _KB_SLIDE_HIDDEN || obj->slide_state == _KB_SLIDE_OUT)
         return;
-    if (obj->target != NULL) /* 收回即退出编辑态（光标立即熄灭） */
+    if (_kb_target(obj) != NULL) /* 收回即退出编辑态（光标立即熄灭） */
         we_textarea_set_editing((we_textarea_obj_t *)obj->target, 0U);
-    if (!we_popup_layer_is_owner(obj->base.lcd, obj))
-    {
-        _kb_popup_close_cb(obj); /* 弹层已被顶掉：直接复位状态兜底 */
-        return;
-    }
-
     obj->slide_state = _KB_SLIDE_OUT;
     we_anim_start(obj->base.lcd, &obj->anim, _kb_slide_step_cb, obj);
 }
@@ -1221,10 +1228,7 @@ void we_keyboard_obj_delete(we_keyboard_obj_t *obj)
     if (obj == NULL)
         return;
     if (obj->base.lcd != NULL)
-    {
         we_anim_stop(obj->base.lcd, &obj->anim);
-        if (obj->popup_mode)
-            we_popup_layer_close(obj->base.lcd, obj); /* 非拥有者时为空操作 */
-    }
-    we_obj_delete((we_obj_t *)obj); /* 弹层键盘不在链表上，摘链自然落空 */
+    /* 弹层态的模态引用与顶层摘链由 we_obj_delete 的内核回收统一完成 */
+    we_obj_delete((we_obj_t *)obj);
 }

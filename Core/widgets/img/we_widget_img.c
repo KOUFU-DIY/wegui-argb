@@ -9,7 +9,7 @@
  * 实现思路：
  * 1. 控件层只关心当前资源属于哪一种图片格式
  * 2. 根据 dat_type 选择对应的渲染内核
- * 3. we_gui_driver.c 不再承担“图片控件该怎么分发”的职责
+ * 3. we_gui_driver.c 不承担“图片控件该怎么分发”的职责
  *
  * 这样后面查看图片控件时，只看 we_widget_img.c 就能知道：
  * - 当前支持哪些图片类型
@@ -35,6 +35,17 @@ static void _img_draw_cb(void *ptr)
     {
     case IMG_RGB565:
         we_img_render_rgb565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
+        break;
+
+    case IMG_ARGB8565:
+        we_img_render_argb8565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
+        break;
+
+    case IMG_A1:
+    case IMG_A2:
+    case IMG_A4:
+    case IMG_A8:
+        we_img_render_alpha(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->color, obj->opacity);
         break;
 
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
@@ -69,6 +80,15 @@ static uint8_t _img_type_supported(imgarry_type_t dat_type)
     switch (dat_type)
     {
     case IMG_RGB565:
+        return 1U;
+
+    case IMG_ARGB8565:
+        return 1U;
+
+    case IMG_A1:
+    case IMG_A2:
+    case IMG_A4:
+    case IMG_A8:
         return 1U;
 
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
@@ -113,11 +133,12 @@ void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, con
 
     obj->img_src = img;
     obj->opacity = opacity;
+    obj->color = RGB888TODEV(255, 255, 255); // A 位图默认白色前景，可用 we_img_obj_set_color 修改
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0 && obj->base.class_p != NULL)
     {
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
     }
 }

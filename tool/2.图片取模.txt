@@ -1,0 +1,37 @@
+工具路径./img2c
+支持图片像素格式：alpha、rgb565、rgb888
+支持图片压缩格式：raw 无压缩、indexqoi压缩
+支持图片输出格式：bin/h用于外置储存、c/h用于单片机内置
+
+使用步骤:
+1.在./input文件夹对应像素/压缩/输出的文件夹中放入需要图片（TIP 1.1）
+2.双击运行./img2c_rgbxxx.bat后输出结果放到output（TIP 2.1）
+
+TIP 1.1:
+input目录
+./input/alpha/ #透明位图待取模文件夹
+./input/alpha/a1_raw_2bin #外置储存1位精度透明位图图片存放路径
+./input/alpha/a1_raw_2c #内置储存1位精度透明位图图片存放路径
+./input/alpha/a2_raw_2bin #外置储存2位精度透明位图图片存放路径
+./input/alpha/a2_raw_2c #内置储存2位精度透明位图图片存放路径
+./input/alpha/a4_raw_2bin #外置储存4位精度透明位图图片存放路径
+./input/alpha/a4_raw_2c #内置储存4位精度透明位图图片存放路径
+./input/alpha/a8_raw_2bin #外置储存8位精度透明位图图片存放路径
+./input/alpha/a8_raw_2c #内置储存8位精度透明位图图片存放路径
+
+./input/rgb565/ #rgb565像素格式待取模文件夹
+./input/rgb888/ #rgb888像素格式待取模文件夹
+./input/rgbxxx/argb8xxx_indexqoi_2bin #外置indexqoi压缩带A8透明度图片存放路径
+./input/rgbxxx/argb8xxx_indexqoi_2c #内置indexqoi压缩带A8透明度图片存放路径
+./input/rgbxxx/argb8xxx_raw_2bin #外置无压缩带A8透明度图片存放路径
+./input/rgbxxx/argb8xxx_raw_2c #内置无压缩带A8透明度图片存放路径
+./input/rgbxxx/rgbxxx_indexqoi_2bin #外置indexqoi压缩图片存放路径
+./input/rgbxxx/rgbxxx_indexqoi_2c #内置indexqoi压缩图片存放路径
+./input/rgbxxx/rgbxxx_raw_2bin #外置无压缩图片存放路径
+./input/rgbxxx/rgbxxx_raw_2c #内置无压缩图片存放路径
+
+TIP 2.1:
+运行img2c_rgb565.bat后，./output将清空，重新从路径./input/rgb565下读取所有图片取模至./output
+运行img2c_rgb888.bat后，./output将清空，重新从路径./input/rgb888下读取所有图片取模至./output
+以"2bin"尾缀的文件夹内的图片，取模结果放至./output/bin，默认bin不合并
+以"2c"尾缀的文件夹内的图片，取模结果放至./output/c，默认合并成单个.c/.h

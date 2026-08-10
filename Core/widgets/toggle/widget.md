@@ -36,7 +36,6 @@ iOS 风格拨动开关控件，支持按压态、开关态和可选平滑动画�
 ## 注意事项
 - `we_toggle_set_checked(...)` 是立即跳变，用于初始化或程序同步状态
 - `we_toggle_toggle(...)` 更接近用户点击效果
-- `we_toggle_update_anim(...)` 现在只是兼容旧代码的空接口，动画已自动推进
 
 ## 对应 demo
 - `Demo/demo_toggle.c`

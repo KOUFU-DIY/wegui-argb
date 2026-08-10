@@ -158,8 +158,17 @@ static void _checkbox_draw_cb(void *ptr)
  * @param data 输入设备事件数据指针。
  * @return 返回状态标志（1 有效，0 无效）。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CHECKBOX_USE_KEY == 1)
+static uint8_t _checkbox_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _checkbox_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CHECKBOX_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _checkbox_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_checkbox_obj_t *cb = (we_checkbox_obj_t *)ptr;
 
     /* 叠加语义：默认按压视觉始终执行；业务（CLICKED 是否勾选）
@@ -272,7 +281,7 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
         .event_cb = _checkbox_event_cb,
         .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CHECKBOX_USE_KEY == 1)
-        .key_cb = _checkbox_key_cb,
+        .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 

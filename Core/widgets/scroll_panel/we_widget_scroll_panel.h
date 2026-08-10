@@ -8,14 +8,6 @@ extern "C"
 {
 #endif
 
-#ifndef WE_SCROLL_PANEL_CHILD_MAX
-#define WE_SCROLL_PANEL_CHILD_MAX 24
-#endif
-
-#if WE_SCROLL_PANEL_CHILD_MAX > 32
-#error "WE_SCROLL_PANEL_CHILD_MAX must be <= 32: slot occupancy is a uint32 bitmask (slot_used_mask)."
-#endif
-
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 开启后面板成为焦点停靠点：OK 下钻进入子控件、BACK 退回面板本体，
  * 子控件获得焦点时面板自动滚动跟随（连光标环一起滚进可视区）。
@@ -71,18 +63,9 @@ extern "C"
 
 typedef struct
 {
-    we_obj_t *child;
-    int16_t local_x;
-    int16_t local_y;
-} we_scroll_panel_child_slot_t;
-
-typedef struct
-{
     we_obj_t base;  /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
     we_anim_t anim; /* 中央动画引擎节点（惯性/回弹动画，不占 GUI task 槽） */
-    we_obj_t *last_pressed_child;
-    uint32_t slot_used_mask; /* 槽位占用位图（bit i = child_slots[i] 在用） */
     int16_t scroll_y;
     int16_t content_h;
     uint16_t radius;
@@ -90,7 +73,6 @@ typedef struct
     int16_t inner_y;
     int16_t inner_w;
     int16_t inner_h;
-    int16_t press_start_y;
     int16_t last_touch_y;
     int16_t drag_vy;
     int16_t anim_scroll_y;
@@ -101,10 +83,8 @@ typedef struct
     uint8_t scrollbar_w;
     uint8_t scrollbar_opacity;
     uint8_t show_scrollbar : 1;
-    uint8_t tracking_press : 1;
     uint8_t dragging : 1;
     uint8_t animating : 1;
-    we_scroll_panel_child_slot_t child_slots[WE_SCROLL_PANEL_CHILD_MAX];
 } we_scroll_panel_obj_t;
 
 void we_scroll_panel_obj_init(we_scroll_panel_obj_t *obj, we_lcd_t *lcd,

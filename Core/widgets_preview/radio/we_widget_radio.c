@@ -139,7 +139,7 @@ static void _radio_draw_cb(void *ptr)
                                              obj->sel_color, obj->opacity);
         }
 
-        /* 3. 右侧文字（垂直按墨迹 bbox 对行居中） */
+        /* 3. 右侧文字（垂直按有效像素区 bbox 对行居中） */
         label = obj->labels[i];
         if (label != NULL && obj->font != NULL)
         {
@@ -190,8 +190,17 @@ static void _radio_select(we_radio_obj_t *obj, uint8_t row, uint8_t fire_cb)
  * @param data 输入设备事件数据指针。
  * @return 1 = 事件已消费，0 = 穿透。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_RADIO_USE_KEY == 1)
+static uint8_t _radio_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _radio_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_RADIO_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _radio_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_radio_obj_t *obj = (we_radio_obj_t *)ptr;
     int16_t row;
 
@@ -304,7 +313,7 @@ static const we_class_t _radio_class = {
     .event_cb = _radio_event_cb,
     .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_RADIO_USE_KEY == 1)
-    .key_cb = _radio_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 

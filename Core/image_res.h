@@ -20,7 +20,10 @@
  *   0x0 = RGB565    0x1 = RGB888    0x2 = RGB555    0x3 = RGB444
  *   0x4 = RGB332    0x5 = ARGB8888  0x6 = ARGB6666  0x7 = ARGB4444
  *   0x8 = ARGB8565  0x9 = ARGB2222  0xA = RAGB5155  0xF = OLED点阵
+ *   0xB = A8        0xC = A4        0xD = A2        0xE = A1
  *   (0x9/0xA 为 img2bin 工具族预留，Core 暂未实现解码)
+ *   (A 系列为纯 alpha 透明位图：不含颜色，绘制时由控件前景色上色；
+ *    取模数据每行按字节对齐、行末补零，位序高位在前)
  */
 
 /* 信息头偏移 */
@@ -58,6 +61,10 @@ typedef enum
     IMG_ARGB6666        = 0x06,
     IMG_ARGB4444        = 0x07,
     IMG_ARGB8565        = 0x08,
+    IMG_A8              = 0x0B,
+    IMG_A4              = 0x0C,
+    IMG_A2              = 0x0D,
+    IMG_A1              = 0x0E,
     IMG_OLED            = 0x0F,
 
     IMG_RGB565_ORIRLE   = 0x10,
@@ -103,7 +110,7 @@ typedef enum
     IMG_ARGB8565_INDEXQOI = 0x48,
 } imgarry_type_t;
 
-/* demo 图片数组已迁至资源工作区自动生成（tool/res/out/res_images.c/.h，
- * 由 tool/res/update_resources.cmd 一键更新）；本头文件只保留 v2 信息头契约。 */
+/* demo 图片数组已迁至资源工作区自动生成（tool/2.img2c/output/c/res_img.c/.h，
+ * 由 tool/2.img2c/img2c_rgb565.bat 一键更新）；本头文件只保留 v2 信息头契约。 */
 
 #endif

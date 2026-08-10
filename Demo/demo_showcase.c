@@ -22,9 +22,9 @@
 #include "simple_widget_demos.h"
 
 #include "demo_common.h"
-#include "res_images.h"
+#include "res_img.h"
 #include "merged_bin.h"
-#include "demo_cjk_16.h"
+#include "gbsn00lp_2_16_4bpp.h"
 #include "widgets/btn/we_widget_btn.h"
 #include "widgets/toggle/we_widget_toggle.h"
 #include "widgets/checkbox/we_widget_checkbox.h"
@@ -450,8 +450,8 @@ void we_showcase_simple_demo_init(we_lcd_t *lcd)
     we_slideshow_set_child_pos(&sc_mini, (we_obj_t *)&sc_mini_p1, 52, 44);
 
     /* ================= C 列 x=405 ================= */
-    we_img_obj_init(&sc_img, lcd, 405, 40, demo_sprite, 255U);
-    we_img_ex_obj_init(&sc_img_ex, lcd, 540, 80, demo_sprite, 255U);
+    we_img_obj_init(&sc_img, lcd, 405, 40, demo_rgb565_raw_be_64x80, 255U);
+    we_img_ex_obj_init(&sc_img_ex, lcd, 540, 80, demo_rgb565_raw_be_64x80, 255U);
 
     /* 注意：arc 的 (cx,cy) 是圆心坐标，外接框为 ±(r+thickness)。
      * 圆心 (443,180) → 包围盒约 (405..481, 142..218)，避开上方 img 与左侧 B 列。 */
@@ -460,16 +460,16 @@ void we_showcase_simple_demo_init(we_lcd_t *lcd)
                     RGB888TODEV(120, 230, 205), RGB888TODEV(28, 40, 58), 255);
     we_arc_set_value(&sc_arc, 128U);
 
-    /* 外挂 flash 图片（模拟器存储口由 merged_bin 提供）。
+    /* 外挂 flash 图片（模拟器存储口直读 merged_bin.bin）。
      * 注意：flash 资源的宽高来自资源头（此图实测 128×64），布局必须按
      * 真实尺寸摆放——放 (405,330) 占 405..533 × 330..394，
      * 上方 MSGBOX 按钮(止于322)、下方说明行(434)、右侧 D 列(605)均留余量。 */
     (void)we_flash_img_obj_init(&sc_fimg, lcd, 405, 330,
-                                bin_addr_table[DEMO_RAW_ID], 255U);
+                                bin_addr_table[DEMO_RGB565_RAW_BE_64X80_ID], 255U);
 
     /* 外挂 flash 中文字库 */
-    sc_ff_handle.font = &demo_cjk_16;
-    sc_ff_handle.blob_addr = DEMO_CJK_16_ADDR;
+    sc_ff_handle.font = &gbsn00lp_2_16_4bpp;
+    sc_ff_handle.blob_addr = GBSN00LP_2_16_4BPP_ADDR;
     if (we_flash_font_face_init(&sc_ff_face, lcd, &sc_ff_handle,
                                 sc_ff_scratch, (uint32_t)sizeof(sc_ff_scratch)))
     {

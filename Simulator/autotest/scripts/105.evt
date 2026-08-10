@@ -1,0 +1,10 @@
+# frames=400
+# logview: wait for overflow (400ms per log line), drag up to pause follow, hold, drag back
+200 down 140 180
+202 move 140 160
+204 move 140 140
+206 move 140 120
+240 up
+320 down 140 120
+322 move 140 190
+324 up

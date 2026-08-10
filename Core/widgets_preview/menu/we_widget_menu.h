@@ -2,6 +2,7 @@
 #define __WE_WIDGET_MENU_H
 
 #include "we_gui_driver.h"
+#include "we_scroll.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -191,7 +192,6 @@ typedef struct we_menu_obj_t
     we_menu_frame_t stack[WE_MENU_STACK_MAX]; /* 页面栈，stack[0] = 根页 */
     const unsigned char *font;  /* 字体资源（init 必传） */
     we_menu_action_cb_t action_cb; /* 叶子行动作回调（可为 NULL） */
-    int32_t press_scroll;       /* 按下时当前页 scroll_px */
     we_anim_t anim;             /* 惯性节点（归控件所有，删除前必须摘链） */
     we_anim_t trans_anim;       /* 过渡节点（归控件所有，删除前必须摘链） */
     const we_menu_page_t *trans_prev_page; /* 过渡期间滑出的旧页 */
@@ -202,10 +202,9 @@ typedef struct we_menu_obj_t
     uint16_t title_h;           /* 标题栏高（像素） */
     uint16_t radius;            /* 面板圆角半径（0 = 直角） */
     int16_t pressed_row;        /* 当前按压高亮行索引，-1 = 无 */
+    we_scroll_t sc;             /* 滚动物理状态机（工作副本；持久位置在页栈 scroll_px，
+                                 * 按下/步进时载入、变化时写回） */
     int16_t press_x;            /* 按下时触摸 X */
-    int16_t press_y;            /* 按下时触摸 Y */
-    int16_t last_y;             /* 上一次 STAY 的触摸 Y（测速用） */
-    int16_t vel;                /* 惯性速度（像素 / 16ms，带符号） */
     uint16_t trans_t;           /* 过渡已累计毫秒 */
     int16_t trans_from;         /* 新页起始 X 偏移（+w 进子页 / -w 返回） */
     colour_t bg_color;          /* 行区面板背景色 */
@@ -222,9 +221,6 @@ typedef struct we_menu_obj_t
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
     uint8_t pressed_back : 1;   /* 返回箭头按压中标志 */
     uint8_t press_in_rows : 1;  /* 本次按压起点是否落在行区 */
-    uint8_t tracking : 1;       /* 本次触摸序列是否有效 */
-    uint8_t dragging : 1;       /* 是否已进入拖拽滚动 */
-    uint8_t inertia_animating : 1; /* 惯性动画进行中标志 */
     uint8_t transitioning : 1;  /* 过渡进行中标志 */
 } we_menu_obj_t;
 

@@ -1,0 +1,8 @@
+# scroll_panel: drag from content -> inertia -> tap content
+10 down 140 170
+12 move 140 150
+14 move 140 130
+16 move 140 110
+18 up
+80 down 140 110
+82 up

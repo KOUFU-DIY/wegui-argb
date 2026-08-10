@@ -5,9 +5,9 @@
 
 /* demo 层统一字体：与 simple_widget_demos.h 同款定义（资源头只在
  * demo 层包含，Core 零资源感知，控件字体一律经 init 显式传入）。 */
-#include "demo_ascii_16.h"
+#include "simli_16_2bpp.h"
 #ifndef we_font_consolas_18
-#define we_font_consolas_18 ((const unsigned char *)&demo_ascii_16)
+#define we_font_consolas_18 ((const unsigned char *)&simli_16_2bpp)
 #endif
 
 /* ============================ preview 孵化区 ============================

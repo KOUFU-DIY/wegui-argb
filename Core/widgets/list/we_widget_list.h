@@ -2,6 +2,7 @@
 #define __WE_WIDGET_LIST_H
 
 #include "we_gui_driver.h"
+#include "we_scroll.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -16,7 +17,7 @@ extern "C"
 #endif
 
 /* --------------------------------------------------------------------------
- * 数据驱动列表（list）—— preview 孵化区实验控件
+ * 数据驱动列表（list）
  *
  * 垂直菜单列表：背景面板（圆角可选）+ 逐行左对齐文字 + 行底 1px 低透明度
  * 分隔线 + 按压行高亮背景；内容超出控件高度时右缘细滚动条
@@ -41,14 +42,14 @@ extern "C"
  *   - 快速轻扫（无 STAY，内核 SWIPE_UP/DOWN）按"总位移 / 固定时间片"
  *     估算初速度注入同一惯性动画，快扫与拖拽手感统一。
  *
- * 标脏粒度（毕业级）：
+ * 标脏粒度：
  *   - 行按压/释放高亮只标脏该行条带（与面板矩形求交，半露行不外扩）；
  *   - 滚动位移标脏内容裁剪矩形（= 面板矩形，不越过面板边界）；
  *   - 滚动条淡出只标脏右缘滚动条条带。
  *
  * 行内容经 PFB 窗口收窄裁剪在控件矩形内（scroll_panel 同款
  * save/restore 套路），半露行不会渗出控件边界。首/末行按压高亮在
- * 面板圆角带内改用同心半径（面板半径 - 内缩），不再溢出直角。
+ * 面板圆角带内改用同心半径（面板半径 - 内缩），不溢出直角。
  *
  * 零 malloc、渲染内环零浮点。删除前必须 we_list_obj_delete
  * （内部先摘除惯性与滚动条淡出两个动画节点再 we_obj_delete）。
@@ -156,8 +157,7 @@ typedef struct we_list_obj_t
     const char *const *items;   /* 条目字符串数组（调用方持有，只存指针） */
     const unsigned char *font;  /* 字体资源（init 传入，可 set_font） */
     we_list_clicked_cb_t clicked_cb; /* 行点击回调（可为 NULL） */
-    int32_t scroll_px;          /* 像素级滚动偏移（0 = 顶部对齐，可短暂越界过冲） */
-    int32_t press_scroll;       /* 按下时 scroll_px */
+    we_scroll_t sc;             /* 滚动物理状态机（拖拽/惯性/回弹；sc.pos 即滚动偏移） */
     we_anim_t anim;             /* 惯性/回弹动画节点（归控件所有，删除前必须摘链） */
     we_anim_t sb_anim;          /* 滚动条淡出动画节点（归控件所有，删除前必须摘链） */
 
@@ -166,9 +166,6 @@ typedef struct we_list_obj_t
     uint16_t row_h;             /* 行高（像素） */
     uint16_t radius;            /* 面板圆角半径（0 = 直角） */
     int16_t pressed_row;        /* 当前按压高亮行索引，-1 = 无 */
-    int16_t press_y;            /* 按下时触摸 Y */
-    int16_t last_y;             /* 上一次 STAY 的触摸 Y（测速用） */
-    int16_t vel;                /* 惯性速度（像素 / 16ms，带符号） */
     uint16_t sb_idle_ms;        /* 自上次滚动以来累计的空闲毫秒 */
     colour_t bg_color;          /* 面板背景色 */
     colour_t text_color;        /* 行文字色 */
@@ -179,9 +176,6 @@ typedef struct we_list_obj_t
     /* 1 字节成员与状态位域 */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
     uint8_t sb_alpha;           /* 滚动条当前透明度（0~255），0 = 完全隐藏 */
-    uint8_t tracking : 1;       /* 本次触摸序列是否有效 */
-    uint8_t dragging : 1;       /* 是否已进入拖拽滚动 */
-    uint8_t inertia_animating : 1; /* 惯性/回弹动画进行中标志 */
 } we_list_obj_t;
 
 /**

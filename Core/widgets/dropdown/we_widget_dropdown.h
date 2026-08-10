@@ -2,10 +2,11 @@
 #define __WE_WIDGET_DROPDOWN_H
 
 #include "we_gui_driver.h"
+#include "we_scroll.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 闭合态：OK 按下沿主框进入按压态，松开沿展开列表；
- * 展开态经弹层键通道导航：上/下（或前/后）移动高亮行并滚动跟随、
+ * 展开态经模态键通道导航：上/下（或前/后）移动高亮行并滚动跟随、
  * OK 选中当前行并收起、BACK 直接收起。
  * 置 0 单独裁剪本控件的按键支持，其余控件不受影响。 */
 #ifndef WE_DROPDOWN_USE_KEY
@@ -17,9 +18,9 @@
  *
  * 数据驱动的轻量下拉框，适合 MCU：
  *   - 闭合态只显示当前选中项 + 箭头；
- *   - 展开态借助 LCD 级 overlay popup 绘制选项列表，
+ *   - 展开态由内嵌的顶层模态对象绘制选项列表，
  *     不会被 group / scroll_panel / slideshow 等父容器裁剪；
- *   - 同一时刻全屏只允许一个 popup（由 driver 的 popup_layer 保证）。
+ *   - 同一时刻全屏只允许一个模态弹层（由 driver 的 modal_obj 互斥保证）。
  *
  * 选项数组由调用者持有（通常是 const 静态数组），控件只保存指针，
  * 不复制文本，省 RAM。
@@ -83,10 +84,13 @@ typedef struct we_dropdown_obj_t
     const we_dropdown_option_t *options;
     const unsigned char *font;
     we_dropdown_changed_cb_t changed_cb;
+    we_scroll_t sc;             /* 滚动物理状态机（无惯性档：拖拽跟手+过冲回弹；
+                                 * 持久位置在 scroll_px，会话/步进时载入并写回） */
     int32_t scroll_px;          /* popup 内容向上滚动的像素偏移（无级，0=顶部对齐） */
-    int32_t drag_start_scroll;  /* 按下时的 scroll_px */
     we_anim_t sb_anim;          /* 淡出动画节点（不占 GUI task 槽，收敛即摘链） */
     we_anim_t rb_anim;          /* 回弹动画节点（收敛即摘链，list 同款口径） */
+    we_obj_t overlay;           /* 展开列表内嵌弹层对象：展开时挂 LCD 顶层链并声明模态，
+                                 * 收起时摘链；几何即弹层区域 */
 
     /* 2 字节成员 */
     uint16_t option_cnt;
@@ -94,7 +98,6 @@ typedef struct we_dropdown_obj_t
     int16_t hover_idx;        /* popup 中当前按下高亮项，-1 表示无 */
     uint16_t item_h;          /* 单项高度（含主框/列表项） */
     uint16_t radius;
-    int16_t drag_start_y;     /* 按下时的 Y 坐标 */
     uint16_t sb_idle_ms;      /* 自上次滚动以来累计的空闲毫秒 */
 
     /* 1 字节成员与状态位域 */
@@ -103,8 +106,6 @@ typedef struct we_dropdown_obj_t
     uint8_t opened : 1;       /* 是否已展开 */
     uint8_t pressed : 1;      /* 主框是否处于按下态 */
     uint8_t enabled : 1;      /* 是否可交互 */
-    uint8_t dragging : 1;     /* 本次触摸是否已判定为拖拽滚动 */
-    uint8_t rebounding : 1;   /* 回弹动画进行中标志 */
 } we_dropdown_obj_t;
 
 /**

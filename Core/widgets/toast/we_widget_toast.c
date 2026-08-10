@@ -1,12 +1,12 @@
 /**
  * @file  we_widget_toast.c
- * @brief 轻提示横幅控件（preview）：顶部滑入 → 停留 → 滑出的非模态提示
+ * @brief 轻提示横幅控件（toast）：顶部滑入 → 停留 → 滑出的非模态提示
  *
  * 单个中央动画节点驱动三阶段状态机（ENTER/STAY/EXIT）：
  * Q8 进度 + we_ease_out_quad，每步同时更新 base.y 与 opacity，
  * 滑动步进把旧/新包围盒合并成一个 union 矩形单次标脏。
  * 非模态：class 的 event_cb 为 NULL，输入完全穿透；
- * 不占用 LCD 级 popup_layer 单槽资源。
+ * 非模态：不占用模态弹层语义（modal_obj）。
  * 超宽文本尾部截断加 "..."（零拷贝：前缀经 PFB 右界收窄绘制）。
  */
 
@@ -289,7 +289,7 @@ static void _toast_draw_cb(void *ptr)
         return;
 
     {
-        /* PFB 窗口收窄到面板矩形：任何文字墨迹都不会画出横幅之外 */
+        /* PFB 窗口收窄到面板矩形：任何文字像素都不会画出横幅之外 */
         we_area_t old_pfb_area = lcd->pfb_area;
         uint16_t old_y_start = lcd->pfb_y_start;
         uint16_t old_y_end = lcd->pfb_y_end;
@@ -446,7 +446,7 @@ void we_toast_show(we_toast_obj_t *obj, const char *text, uint16_t duration_ms)
     if (obj == NULL || obj->base.lcd == NULL || text == NULL)
         return;
 
-    we_obj_bring_to_front((we_obj_t *)obj); /* 确保横幅位于最上层 */
+    we_obj_attach_to_top(obj->base.lcd, (we_obj_t *)obj); /* 顶层：保证置顶且不打乱普通层 Z 序 */
 
     obj->text = text;
     obj->duration_ms = (duration_ms == 0U) ? WE_TOAST_DEF_DURATION : duration_ms;

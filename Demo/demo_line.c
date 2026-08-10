@@ -19,28 +19,38 @@
 
 static we_label_obj_t ln_title;
 static we_label_obj_t ln_fps_label;
-static we_label_obj_t ln_lbl[4];
-static we_line_obj_t  ln[4];           /* 0=ease 1=move 2=color 3=fade */
+static we_label_obj_t ln_ease_lbl;   /* ease 行标签（内容随缓动名切换） */
+static we_label_obj_t ln_move_lbl;
+static we_label_obj_t ln_color_lbl;
+static we_label_obj_t ln_fade_lbl;
+static we_line_obj_t  ln_ease;
+static we_line_obj_t  ln_move;
+static we_line_obj_t  ln_color;
+static we_line_obj_t  ln_fade;
 
 static uint32_t ln_fps_timer;
 static uint32_t ln_last_frames;
-static uint32_t ln_t[4];               /* 各效果计时器 */
+static uint32_t ln_ease_t;           /* 各效果计时器 */
+static uint32_t ln_move_t;
+static uint32_t ln_color_t;
+static uint32_t ln_fade_t;
 static char     ln_fps_buf[16];
 
-/* 各效果各自的状态（含义不同，故分开具名而非数组） */
-static uint8_t  ln_ease_idx;           /* ease 行：当前缓动序号 0..5 */
-static uint8_t  ln_move_dir;           /* move 行：平移方向 0/1 */
-static uint8_t  ln_color_idx;          /* color 行：当前颜色序号 0..4 */
-static uint8_t  ln_fade_dim;           /* fade 行：0=亮 1=暗 */
+/* 各效果各自的状态 */
+static uint8_t  ln_ease_idx;         /* ease 行：当前缓动序号 0..5 */
+static uint8_t  ln_move_dir;         /* move 行：平移方向 0/1 */
+static uint8_t  ln_color_idx;        /* color 行：当前颜色序号 0..4 */
+static uint8_t  ln_fade_dim;         /* fade 行：0=亮 1=暗 */
 
 /* 每个效果的循环周期与动画时长（毫秒） */
 #define LN_PERIOD 1200U
 #define LN_DUR    800U
 
 /* 各行垂直中心 */
-static const int16_t ln_cy[4] = { 72, 114, 156, 198 };
-/* 行标签（row0 之后会被替换为当前缓动名） */
-static const char *const ln_name[4] = { "ease", "move", "color", "fade" };
+#define LN_EASE_CY  72
+#define LN_MOVE_CY  114
+#define LN_COLOR_CY 156
+#define LN_FADE_CY  198
 
 /* 线段左右 X、sweep 摆幅、move 位移幅度、fade 暗态透明度 */
 #define LN_LX    78
@@ -49,11 +59,31 @@ static const char *const ln_name[4] = { "ease", "move", "color", "fade" };
 #define LN_SHIFT 40
 #define LN_DIM   40
 
-/* 颜色调色板（color 行循环用） */
+/* 颜色调色板（color 行按序号循环取用，保留为数据表） */
 static const uint8_t ln_pal[5][3] = {
     {  88, 166, 240 }, {  90, 210, 130 }, { 250, 160,  60 },
     { 240, 110, 170 }, {  80, 210, 220 }
 };
+
+/**
+ * @brief 在指定行中心垂直居中放置行标签
+ * @param lbl 传入：目标标签对象指针
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param x 传入：标签 X 坐标
+ * @param cy 传入：行垂直中心 Y 坐标
+ * @param text 传入：标签文本
+ * @return 无
+ */
+static void _ln_row_label_init(we_label_obj_t *lbl, we_lcd_t *lcd, int16_t x, int16_t cy, const char *text)
+{
+    int8_t  yt, yb;
+    int16_t ly;
+
+    we_get_text_bbox(we_font_consolas_18, text, &yt, &yb);
+    ly = (int16_t)(cy - (yt + yb) / 2);
+    we_label_obj_init(lbl, lcd, x, ly, text, we_font_consolas_18,
+                      RGB888TODEV(170, 180, 196), 255);
+}
 
 /**
  * @brief 初始化 line demo
@@ -64,7 +94,6 @@ void we_line_simple_demo_init(we_lcd_t *lcd)
 {
     int16_t mx    = 14;
     int16_t fps_x = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
-    int16_t i;
 
     ln_fps_timer   = 0U;
     ln_last_frames = 0U;
@@ -74,10 +103,10 @@ void we_line_simple_demo_init(we_lcd_t *lcd)
     ln_fade_dim    = 0U;
     memset(ln_fps_buf, 0, sizeof(ln_fps_buf));
     /* 错相位起始：4 个效果各每 LN_PERIOD 循环，画面持续有动作 */
-    ln_t[0] = LN_PERIOD;
-    ln_t[1] = LN_PERIOD * 3U / 4U;
-    ln_t[2] = LN_PERIOD / 2U;
-    ln_t[3] = LN_PERIOD / 4U;
+    ln_ease_t  = LN_PERIOD;
+    ln_move_t  = LN_PERIOD * 3U / 4U;
+    ln_color_t = LN_PERIOD / 2U;
+    ln_fade_t  = LN_PERIOD / 4U;
 
     we_label_obj_init(&ln_title, lcd, mx, 10,
                       "LINE", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
@@ -85,36 +114,30 @@ void we_line_simple_demo_init(we_lcd_t *lcd)
                       "FPS", we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
 
     /* 四行标签（按各行中心垂直居中） */
-    for (i = 0; i < 4; i++)
-    {
-        int8_t  yt, yb;
-        int16_t ly;
-        we_get_text_bbox(we_font_consolas_18, ln_name[i], &yt, &yb);
-        ly = (int16_t)(ln_cy[i] - (yt + yb) / 2);
-        we_label_obj_init(&ln_lbl[i], lcd, mx, ly,
-                          ln_name[i], we_font_consolas_18,
-                          RGB888TODEV(170, 180, 196), 255);
-    }
+    _ln_row_label_init(&ln_ease_lbl, lcd, mx, LN_EASE_CY, "ease");
+    _ln_row_label_init(&ln_move_lbl, lcd, mx, LN_MOVE_CY, "move");
+    _ln_row_label_init(&ln_color_lbl, lcd, mx, LN_COLOR_CY, "color");
+    _ln_row_label_init(&ln_fade_lbl, lcd, mx, LN_FADE_CY, "fade");
 
-    /* 0 ease：左端固定，右端钟摆扫动（缓动每次换） */
-    we_line_obj_init(&ln[0], lcd, LN_LX, ln_cy[0], LN_RX, ln_cy[0]);
-    we_line_set_width(&ln[0], 5U);
-    we_line_set_color(&ln[0], RGB888TODEV(88, 166, 240));
+    /* ease：左端固定，右端钟摆扫动（缓动每次换） */
+    we_line_obj_init(&ln_ease, lcd, LN_LX, LN_EASE_CY, LN_RX, LN_EASE_CY);
+    we_line_set_width(&ln_ease, 5U);
+    we_line_set_color(&ln_ease, RGB888TODEV(88, 166, 240));
 
-    /* 1 move：整体左右滑动（带回弹） */
-    we_line_obj_init(&ln[1], lcd, 84, ln_cy[1], 204, ln_cy[1]);
-    we_line_set_width(&ln[1], 5U);
-    we_line_set_color(&ln[1], RGB888TODEV(90, 210, 130));
+    /* move：整体左右滑动（带回弹） */
+    we_line_obj_init(&ln_move, lcd, 84, LN_MOVE_CY, 204, LN_MOVE_CY);
+    we_line_set_width(&ln_move, 5U);
+    we_line_set_color(&ln_move, RGB888TODEV(90, 210, 130));
 
-    /* 2 color：循环换色 */
-    we_line_obj_init(&ln[2], lcd, LN_LX, ln_cy[2], LN_RX, ln_cy[2]);
-    we_line_set_width(&ln[2], 5U);
-    we_line_set_color(&ln[2], RGB888TODEV(ln_pal[0][0], ln_pal[0][1], ln_pal[0][2]));
+    /* color：循环换色 */
+    we_line_obj_init(&ln_color, lcd, LN_LX, LN_COLOR_CY, LN_RX, LN_COLOR_CY);
+    we_line_set_width(&ln_color, 5U);
+    we_line_set_color(&ln_color, RGB888TODEV(ln_pal[0][0], ln_pal[0][1], ln_pal[0][2]));
 
-    /* 3 fade：透明度呼吸 */
-    we_line_obj_init(&ln[3], lcd, LN_LX, ln_cy[3], LN_RX, ln_cy[3]);
-    we_line_set_width(&ln[3], 5U);
-    we_line_set_color(&ln[3], RGB888TODEV(250, 160, 60));
+    /* fade：透明度呼吸 */
+    we_line_obj_init(&ln_fade, lcd, LN_LX, LN_FADE_CY, LN_RX, LN_FADE_CY);
+    we_line_set_width(&ln_fade, 5U);
+    we_line_set_color(&ln_fade, RGB888TODEV(250, 160, 60));
 }
 
 /**
@@ -125,22 +148,22 @@ void we_line_simple_demo_init(we_lcd_t *lcd)
  */
 void we_line_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
 {
-    int16_t i;
-
     if (lcd == NULL || ms_tick == 0U)
         return;
 
-    for (i = 0; i < 4; i++)
-        ln_t[i] += ms_tick;
+    ln_ease_t += ms_tick;
+    ln_move_t += ms_tick;
+    ln_color_t += ms_tick;
+    ln_fade_t += ms_tick;
 
     /* ease：每个周期换一种缓动——直接列出，函数与显示名一眼对照 */
-    if (ln_t[0] >= LN_PERIOD)
+    if (ln_ease_t >= LN_PERIOD)
     {
         we_ease_fn_t ease;
         const char  *name;
         int16_t      ty;
 
-        ln_t[0] = 0U;
+        ln_ease_t = 0U;
         switch (ln_ease_idx)
         {
         case 0:  ease = we_ease_linear;      name = "linear"; break;
@@ -151,40 +174,40 @@ void we_line_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
         default: ease = we_ease_out_bounce;  name = "bounce"; break;
         }
         /* 序号奇偶决定摆向（上/下） */
-        ty = (int16_t)(ln_cy[0] + ((ln_ease_idx & 1U) ? -LN_SWING : LN_SWING));
+        ty = (int16_t)(LN_EASE_CY + ((ln_ease_idx & 1U) ? -LN_SWING : LN_SWING));
 
-        we_label_set_text(&ln_lbl[0], name);
-        we_line_anim_points(&ln[0], LN_LX, ln_cy[0], LN_RX, ty, LN_DUR, ease);
+        we_label_set_text(&ln_ease_lbl, name);
+        we_line_anim_points(&ln_ease, LN_LX, LN_EASE_CY, LN_RX, ty, LN_DUR, ease);
         ln_ease_idx = (uint8_t)((ln_ease_idx + 1U) % 6U);
     }
 
     /* move：每个周期反向平移（平移动画，out_back 回弹） */
-    if (ln_t[1] >= LN_PERIOD)
+    if (ln_move_t >= LN_PERIOD)
     {
         int16_t dx;
-        ln_t[1] = 0U;
+        ln_move_t = 0U;
         ln_move_dir ^= 1U;
         dx = (int16_t)(ln_move_dir ? LN_SHIFT : -LN_SHIFT);
-        we_line_anim_move(&ln[1], dx, 0, LN_DUR, we_ease_out_back);
+        we_line_anim_move(&ln_move, dx, 0, LN_DUR, we_ease_out_back);
     }
 
     /* color：每个周期换下一个颜色（颜色动画，in_out_quad） */
-    if (ln_t[2] >= LN_PERIOD)
+    if (ln_color_t >= LN_PERIOD)
     {
-        ln_t[2] = 0U;
+        ln_color_t = 0U;
         ln_color_idx = (uint8_t)((ln_color_idx + 1U) % 5U);
-        we_line_anim_color(&ln[2],
+        we_line_anim_color(&ln_color,
                            RGB888TODEV(ln_pal[ln_color_idx][0], ln_pal[ln_color_idx][1],
                                        ln_pal[ln_color_idx][2]),
                            LN_DUR, we_ease_in_out_quad);
     }
 
     /* fade：每个周期在明/暗之间过渡（透明度动画，in_out_sine） */
-    if (ln_t[3] >= LN_PERIOD)
+    if (ln_fade_t >= LN_PERIOD)
     {
-        ln_t[3] = 0U;
+        ln_fade_t = 0U;
         ln_fade_dim ^= 1U;
-        we_line_anim_opacity(&ln[3], (uint8_t)(ln_fade_dim ? LN_DIM : 255U), LN_DUR,
+        we_line_anim_opacity(&ln_fade, (uint8_t)(ln_fade_dim ? LN_DIM : 255U), LN_DUR,
                              we_ease_in_out_sine);
     }
 

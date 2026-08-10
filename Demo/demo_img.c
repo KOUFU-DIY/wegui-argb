@@ -11,7 +11,7 @@
 #include "simple_widget_demos.h"
 
 #include "demo_common.h"
-#include "res_images.h"
+#include "res_img.h"
 #include "widgets/img/we_widget_img.h"
 #include <stdio.h>
 #include <string.h>
@@ -61,9 +61,9 @@ void we_img_simple_demo_init(we_lcd_t *lcd)
                       "IMG OP 255", we_font_consolas_18,
                       RGB888TODEV(255, 154, 102), 255);
 
-    we_img_obj_init(&img_main, lcd, 16, 100, demo_qoi, 255);
-    we_img_obj_init(&img_overlay, lcd, 64, 112, demo_overlay, 200);
-    we_img_obj_init(&img_float, lcd, 180, 74, demo_alpha, 200);
+    we_img_obj_init(&img_main, lcd, 16, 100, demo_rgb565_indexqoi_be_128x64, 255);
+    we_img_obj_init(&img_overlay, lcd, 64, 112, demo_argb8565_indexqoi_be_80x80, 200);
+    we_img_obj_init(&img_float, lcd, 180, 74, demo_argb8565_raw_be_80x80, 200);
 }
 
 /**

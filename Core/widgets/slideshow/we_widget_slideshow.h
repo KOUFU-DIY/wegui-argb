@@ -47,23 +47,9 @@ extern "C"
 #endif
 
 /* 幻灯片内最多挂载的子控件数量（所有页面合计）。 */
-#ifndef WE_SLIDESHOW_CHILD_MAX
-#define WE_SLIDESHOW_CHILD_MAX 24
-#endif
-
-typedef struct
-{
-    we_obj_t *child;
-    uint16_t page_index;
-    int16_t local_x;
-    int16_t local_y;
-    uint8_t used;
-} we_slideshow_child_slot_t;
-
 typedef struct
 {
     we_group_obj_t group;
-    we_obj_t *last_pressed_child;
     we_anim_t anim; /* 中央动画引擎节点（页吸附动画，不占 GUI task 槽） */
     int16_t scroll_x;
     int16_t last_touch_x;
@@ -77,7 +63,6 @@ typedef struct
     uint8_t swipe_enabled : 1;
     uint8_t is_dragging : 1;
     uint8_t snap_animating : 1;
-    we_slideshow_child_slot_t child_slots[WE_SLIDESHOW_CHILD_MAX];
 } we_slideshow_obj_t;
 
 /**

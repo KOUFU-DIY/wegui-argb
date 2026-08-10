@@ -3,7 +3,7 @@
  * @brief 图片按钮（imgbtn）preview demo —— DEMO_ID 120
  *
  * 演示内容：
- * 1. 两个图片按钮复用同一张内置 RGB565 未压缩图（demo_sprite），
+ * 1. 两个图片按钮复用同一张内置 RGB565 未压缩图（demo_rgb565_raw_be_64x80），
  *    均走 img_pressed = NULL 的"按压叠黑变暗"路径
  * 2. 右侧按钮 set_opacity(150) 演示整体透明度（变暗遮罩随之等比衰减）
  * 3. 点击分别累加 L / R 计数，下方 label 实时显示
@@ -13,7 +13,7 @@
 #include "preview_demos.h"
 
 #include "demo_common.h"
-#include "res_images.h"
+#include "res_img.h"
 #include "widgets_preview/imgbtn/we_widget_imgbtn.h"
 #include <stdio.h>
 #include <string.h>
@@ -95,10 +95,10 @@ void we_imgbtn_preview_demo_init(we_lcd_t *lcd)
                       RGB888TODEV(120, 230, 205), 255);
 
     /* 两个按钮共用同一张 64x80 内置图，均走按压叠黑变暗路径 */
-    we_imgbtn_obj_init(&ib_btn_l, lcd, 56, 78, demo_sprite, NULL);
+    we_imgbtn_obj_init(&ib_btn_l, lcd, 56, 78, demo_rgb565_raw_be_64x80, NULL);
     we_imgbtn_set_clicked_cb(&ib_btn_l, _ib_demo_click_l);
 
-    we_imgbtn_obj_init(&ib_btn_r, lcd, 160, 78, demo_sprite, NULL);
+    we_imgbtn_obj_init(&ib_btn_r, lcd, 160, 78, demo_rgb565_raw_be_64x80, NULL);
     we_imgbtn_set_clicked_cb(&ib_btn_r, _ib_demo_click_r);
     we_imgbtn_set_opacity(&ib_btn_r, 150U); /* 演示整体透明度 */
 

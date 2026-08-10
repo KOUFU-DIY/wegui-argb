@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "symbol": "simli_16_2bpp",
+  "font": {
+    "file": "SIMLI.TTF",
+    "size": 16
+  },
+  "render": {
+    "bpp": 2,
+    "missing_glyph": "box"
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"]
+    ]
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}

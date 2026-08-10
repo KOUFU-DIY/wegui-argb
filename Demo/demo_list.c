@@ -3,7 +3,7 @@
  * @brief 数据驱动列表（list）控件功能 demo —— 10 项设置菜单（DEMO_ID 25）
  *
  * 一块 200x160 列表面板承载 10 项设置菜单（static const 字符串数组，
- * 调用方持有，控件只存指针）。内容超出面板高度，可体验毕业级交互：
+ * 调用方持有，控件只存指针）。内容超出面板高度，可体验完整交互：
  * 拖拽跟手 + 松手惯性、快速轻扫（无停顿快甩）同样带惯性、拖过头
  * 橡皮筋过冲后回弹、右缘滚动条活动全显 / 空闲自动渐隐到常驻低透明；
  * 点击某行把该项名称回显到顶部 label。FPS 照常显示。
@@ -33,7 +33,7 @@ static char ls_sel_buf[24];
 #define LS_PANEL_H 160
 
 /* 10 项设置菜单（调用方持有的静态数组，控件只存指针） */
-static const char *const ls_items[10] = {
+static const char *const ls_items[] = {
     "Display",
     "Sound",
     "Network",
@@ -90,7 +90,7 @@ void we_list_simple_demo_init(we_lcd_t *lcd)
      * 会短暂全显提示"此处可滚动"，随后自动渐隐（空闲淡出默认开启） */
     we_list_obj_init(&ls_menu, lcd, LS_PANEL_X, LS_PANEL_Y, LS_PANEL_W, LS_PANEL_H,
                      we_font_consolas_18);
-    we_list_set_options(&ls_menu, ls_items, 10U);
+    we_list_set_options(&ls_menu, ls_items, (uint16_t)(sizeof(ls_items) / sizeof(ls_items[0])));
     we_list_set_clicked_cb(&ls_menu, ls_on_clicked);
 }
 

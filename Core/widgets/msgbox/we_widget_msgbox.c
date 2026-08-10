@@ -518,44 +518,6 @@ static void _popup_set_panel_y(we_popup_obj_t *obj, int16_t new_y)
     _popup_invalidate_panel(obj);
 }
 
-/**
- * @brief 将弹窗从对象链表摘下并重挂到链尾，使其最后绘制（Z 序置顶）。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static void _popup_bring_to_front(we_popup_obj_t *obj)
-{
-    we_obj_t *curr;
-    we_obj_t *prev;
-    we_obj_t *tail;
-    we_lcd_t *lcd;
-
-    if (obj == NULL || obj->base.lcd == NULL)
-        return;
-
-    lcd = obj->base.lcd;
-    curr = lcd->obj_list_head;
-    prev = NULL;
-    while (curr != NULL && curr != (we_obj_t *)obj)
-    {
-        prev = curr;
-        curr = curr->next;
-    }
-
-    if (curr == NULL || curr->next == NULL)
-        return;
-
-    if (prev == NULL)
-        lcd->obj_list_head = curr->next;
-    else
-        prev->next = curr->next;
-
-    tail = lcd->obj_list_head;
-    while (tail->next != NULL)
-        tail = tail->next;
-    tail->next = curr;
-    curr->next = NULL;
-}
 
 /**
  * @brief 计算确认按钮的矩形（动作区底部，单按钮居中／双按钮位于右侧）。
@@ -1246,7 +1208,7 @@ void we_popup_show(we_popup_obj_t *obj)
     if (obj == NULL || obj->base.lcd == NULL)
         return;
 
-    _popup_bring_to_front(obj);
+    we_obj_attach_to_top(obj->base.lcd, (we_obj_t *)obj); /* 顶层：保证置顶且不打乱普通层 Z 序 */
     obj->visible = 1U;
     _popup_sync_hit_area(obj); /* 显示：命中区铺满全屏（模态拦截） */
     obj->pressed_btn = WE_POPUP_BTN_NONE;

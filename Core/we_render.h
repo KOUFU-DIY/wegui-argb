@@ -279,6 +279,31 @@ static __inline colour_t we_color_from_rgb565(uint16_t pixel)
  */
 void we_img_render_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
 
+/**
+ * @brief 渲染 ARGB8565 原始图片到屏幕（逐像素 [alpha][RGB565 大端] 3 字节）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x0 传入：目标左上角 X 坐标
+ * @param y0 传入：目标左上角 Y 坐标
+ * @param img 传入：图片数据指针（ARGB8565 格式）
+ * @param opacity 传入：整体透明度（0~255）
+ * @return 无
+ */
+void we_img_render_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
+
+/**
+ * @brief 渲染 A1/A2/A4/A8 透明位图到屏幕（仅 alpha 通道，以前景色混合）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x0 传入：目标左上角 X 坐标
+ * @param y0 传入：目标左上角 Y 坐标
+ * @param img 传入：透明位图数据指针（IMG_A1/A2/A4/A8 格式）
+ * @param fg_color 传入：前景色（位图 alpha 以该颜色对背景混合）
+ * @param opacity 传入：整体透明度（0~255）
+ * @return 无
+ * @note 取模数据每行按字节对齐（行末补零）、位序高位在前；
+ *       与 we_draw_alpha_mask 的连续位流布局不同，不能混用
+ */
+void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, colour_t fg_color, uint8_t opacity);
+
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 /**
  * @brief 渲染 indexed QOI（RGB565 调色板）图片到屏幕

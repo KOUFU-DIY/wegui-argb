@@ -128,7 +128,6 @@ void we_group_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     panel_x = (int16_t)(14 + ((we_sin((int16_t)((group_ticks_ms * 32U) / 100U) & 0x1FF) * 14) >> 15));
 
     we_obj_set_pos((we_obj_t *)&group_panel, panel_x, 84);
-    we_group_relayout(&group_panel);
 
     snprintf(group_stat_buf, sizeof(group_stat_buf), "GROUP X %03d", (int)panel_x);
     we_label_set_text(&group_stat, group_stat_buf);

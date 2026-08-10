@@ -4,7 +4,7 @@
 #include "we_gui_driver.h"
 
 /* --------------------------------------------------------------------------
- * 跑马灯标签控件（marquee）—— preview 孵化区实验控件
+ * 跑马灯标签控件（marquee）
  *
  * 一条固定宽度的单行文本框：
  *   - 文本宽 <= 控件宽：静止左对齐显示，不滚动、不占动画链；
@@ -22,9 +22,9 @@
  * font2c internal 字库）；控件高度 = 字体行高 + 2*WE_MARQUEE_PAD_Y。
  * 装饰性控件：class 的 event_cb 为 NULL，完全不拦截输入。
  *
- * 毕业级优化（做法详见 widget.md"已完成的毕业优化"）：
+ * 实现要点（做法详见 widget.md）：
  *   - 自建窗口化字形绘制循环（we_font_get_glyph_info +
- *     we_font_get_bitmap_info + 行对齐 alpha blit），不再走 we_draw_string
+ *     we_font_get_bitmap_info + 行对齐 alpha blit），不走 we_draw_string
  *     全量遍历：窗口左侧完全裁掉的字形按 adv_w 游标快进跳过（零像素访问、
  *     零位图取址），越过窗口右缘立即 break，逐帧成本只与可见字形数相关；
  *   - 单行截断语义明确：绘制与测宽同口径，遇 '\n' 即止（只显示第一行）；

@@ -2,13 +2,13 @@
 #include "we_render.h"
 
 /* --------------------------------------------------------------------------
- * roller —— 滚轮选值器（preview 孵化区，毕业级优化版）
+ * roller —— 滚轮选值器
  *
  * 结构：面板背景（圆角矩形）+ 中心高亮条 + 逐行文字。
  * 行文字统一经 PFB 窗口收窄裁剪在控件矩形内（scroll_panel 同款套路），
  * 半露行不会渗出控件边界。滚动为像素级 scroll_px（int32 累计）。
  *
- * 本轮毕业优化（相对首版 preview）：
+ * 实现要点：
  *   1. 惯性甩动：STAY 步进测速（scroll_panel 同款约定），松手速度超阈值
  *      时按几何衰减级数外推落点取整到行，速度作为吸附动画初速种子；
  *   2. 点击直达：轻点上/下可见行经吸附动画滚到该行，点中心行不动作；
@@ -109,7 +109,7 @@ static uint16_t _roller_text_width_cached(we_roller_obj_t *obj, int32_t idx)
  * @param obj 传入：控件对象指针。
  * @return 无。
  * @note y bbox 对同一字体 + 同一选项集是常量：扫描前 WE_ROLLER_BBOX_SCAN_MAX
- *       个选项取墨迹纵向并集，缓存 y_top / y_bot 与派生的行内垂直居中偏移
+ *       个选项取有效像素区纵向并集，缓存 y_top / y_bot 与派生的行内垂直居中偏移
  *       text_dy。所有行共用同一垂直基准，滚动中不会因逐行独立 bbox 产生
  *       基线抖动。row_h 或字体或选项变化后必须调用本函数。
  */
@@ -146,8 +146,8 @@ static void _roller_refresh_text_metrics(we_roller_obj_t *obj)
 
     if (top > bot)
     {
-        /* 未扫到任何墨迹（无选项/全空串）：回退整行高，
-         * 与 we_get_text_bbox 的空墨迹回退语义一致 */
+        /* 未扫到任何有效像素（无选项/全空串）：回退整行高，
+         * 与 we_get_text_bbox 的无有效像素回退语义一致 */
         uint16_t lh = (obj->font != NULL) ? we_font_get_line_height(obj->font) : 0U;
 
         if (lh > 127U)
@@ -625,8 +625,17 @@ static void _roller_draw_cb(void *ptr)
  * @param data 传入：输入数据。
  * @return 1 表示消费事件，0 表示穿透。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
+static uint8_t _roller_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _roller_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _roller_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_roller_obj_t *obj = (we_roller_obj_t *)ptr;
 
     if (obj == NULL || data == NULL)
@@ -868,7 +877,7 @@ static const we_class_t _roller_class = {
     .event_cb = _roller_event_dispatch,
     .set_pos_cb = NULL, /* 通用移动逻辑（旧区标脏 + 新区标脏）已足够 */
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
-    .key_cb = _roller_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 

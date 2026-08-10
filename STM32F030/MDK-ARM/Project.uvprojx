@@ -340,7 +340,7 @@
               <MiscControls>--no-multibyte-chars</MiscControls>
               <Define>USE_STDPERIPH_DRIVER,STM32F030,WE_PLATFORM_STM32F030,USE_DEFAULT_TIMEOUT_CALLBACK</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..;..\;..\Libraries\CMSIS\Device\ST\STM32F0xx\Include;..\Libraries\STM32F0xx_StdPeriph_Driver\inc;..\Libraries\CMSIS\Include;..\Lcd_Port;..\..\Core;..\..\Core\widgets;..\..\Demo;..\..\Demo\preview;..\..\tool\res\out\font;..\..\tool\res\out</IncludePath>
+              <IncludePath>..\..;..\;..\Libraries\CMSIS\Device\ST\STM32F0xx\Include;..\Libraries\STM32F0xx_StdPeriph_Driver\inc;..\Libraries\CMSIS\Include;..\Lcd_Port;..\..\Core;..\..\Core\widgets;..\..\Demo;..\..\Demo\preview;..\..\tool\1.font2c\output;..\..\tool\2.img2c\output\c;..\..\tool\3.bin2c\output</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -982,9 +982,9 @@
               <FilePath>..\..\Core\dirty_driver.c</FilePath>
             </File>
             <File>
-              <FileName>res_images.c</FileName>
+              <FileName>res_img.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\res_images.c</FilePath>
+              <FilePath>..\..\tool\2.img2c\output\c\res_img.c</FilePath>
             </File>
             <File>
               <FileName>we_font_text.c</FileName>
@@ -1000,6 +1000,16 @@
               <FileName>we_motion.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\we_motion.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_scroll.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_scroll.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_render.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_render.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -1197,6 +1207,11 @@
               <FilePath>..\..\Demo\demo_img.c</FilePath>
             </File>
             <File>
+              <FileName>demo_img_alpha.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_img_alpha.c</FilePath>
+            </File>
+            <File>
               <FileName>demo_img_ex.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_img_ex.c</FilePath>
@@ -1307,100 +1322,39 @@
           <GroupName>we_tool_bin</GroupName>
           <Files>
             <File>
-              <FileName>demo_ascii_16.h</FileName>
+              <FileName>simli_16_2bpp.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_ascii_16.h</FilePath>
+              <FilePath>..\..\tool\1.font2c\output\simli_16_2bpp.h</FilePath>
             </File>
             <File>
-              <FileName>demo_ascii_16.c</FileName>
+              <FileName>simli_16_2bpp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_ascii_16.c</FilePath>
+              <FilePath>..\..\tool\1.font2c\output\simli_16_2bpp.c</FilePath>
             </File>
             <File>
-              <FileName>demo_ime_16.c</FileName>
+              <FileName>msyh_16_4bpp_ime.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_ime_16.c</FilePath>
-            </File>
-            <File>
-              <FileName>demo_cjk_24.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_cjk_24.h</FilePath>
-            </File>
-            <File>
-              <FileName>demo_cjk_24.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_cjk_24.c</FilePath>
+              <FilePath>..\..\tool\1.font2c\output\msyh_16_4bpp_ime.c</FilePath>
             </File>
             <File>
               <FileName>merged_bin.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\res\out\merged_bin.h</FilePath>
+              <FilePath>..\..\tool\3.bin2c\output\merged_bin.h</FilePath>
             </File>
             <File>
               <FileName>merged_bin.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\merged_bin.c</FilePath>
-              <FileOption>
-                <CommonProperty>
-                  <UseCPPCompiler>2</UseCPPCompiler>
-                  <RVCTCodeConst>0</RVCTCodeConst>
-                  <RVCTZI>0</RVCTZI>
-                  <RVCTOtherData>0</RVCTOtherData>
-                  <ModuleSelection>0</ModuleSelection>
-                  <IncludeInBuild>0</IncludeInBuild>
-                  <AlwaysBuild>2</AlwaysBuild>
-                  <GenerateAssemblyFile>2</GenerateAssemblyFile>
-                  <AssembleAssemblyFile>2</AssembleAssemblyFile>
-                  <PublicsOnly>2</PublicsOnly>
-                  <StopOnExitCode>11</StopOnExitCode>
-                  <CustomArgument></CustomArgument>
-                  <IncludeLibraryModules></IncludeLibraryModules>
-                  <ComprImg>1</ComprImg>
-                </CommonProperty>
-                <FileArmAds>
-                  <Cads>
-                    <interw>2</interw>
-                    <Optim>0</Optim>
-                    <oTime>2</oTime>
-                    <SplitLS>2</SplitLS>
-                    <OneElfS>2</OneElfS>
-                    <Strict>2</Strict>
-                    <EnumInt>2</EnumInt>
-                    <PlainCh>2</PlainCh>
-                    <Ropi>2</Ropi>
-                    <Rwpi>2</Rwpi>
-                    <wLevel>0</wLevel>
-                    <uThumb>2</uThumb>
-                    <uSurpInc>2</uSurpInc>
-                    <uC99>2</uC99>
-                    <uGnu>2</uGnu>
-                    <useXO>2</useXO>
-                    <v6Lang>0</v6Lang>
-                    <v6LangP>0</v6LangP>
-                    <vShortEn>2</vShortEn>
-                    <vShortWch>2</vShortWch>
-                    <v6Lto>2</v6Lto>
-                    <v6WtE>2</v6WtE>
-                    <v6Rtti>2</v6Rtti>
-                    <VariousControls>
-                      <MiscControls></MiscControls>
-                      <Define></Define>
-                      <Undefine></Undefine>
-                      <IncludePath></IncludePath>
-                    </VariousControls>
-                  </Cads>
-                </FileArmAds>
-              </FileOption>
+              <FilePath>..\..\tool\3.bin2c\output\merged_bin.c</FilePath>
             </File>
             <File>
-              <FileName>demo_cjk_16.h</FileName>
+              <FileName>gbsn00lp_2_16_4bpp.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_cjk_16.h</FilePath>
+              <FilePath>..\..\tool\1.font2c\output\gbsn00lp_2_16_4bpp.h</FilePath>
             </File>
             <File>
-              <FileName>demo_cjk_16.c</FileName>
+              <FileName>gbsn00lp_2_16_4bpp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\tool\res\out\font\demo_cjk_16.c</FilePath>
+              <FilePath>..\..\tool\1.font2c\output\gbsn00lp_2_16_4bpp.c</FilePath>
             </File>
           </Files>
         </Group>

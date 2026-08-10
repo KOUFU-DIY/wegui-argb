@@ -160,7 +160,7 @@ void we_textarea_bind_keyboard(we_textarea_obj_t *obj, void *kb);
  * @param obj 控件对象指针。
  * @param on 1 = 编辑中，0 = 空闲（值未变时直接返回）。
  * @return 无。
- * @note 弹层键盘/输入法在 show/hide/被顶掉时自动调用（目标切换也会
+ * @note 弹层键盘/输入法在 show/hide/被替换时自动调用（目标切换也会
  *       同步交接），应用层一般无需手动管理；静态常显键盘的回显框
  *       可手动置 1 保持旧"常聚焦"观感。
  */

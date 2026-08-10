@@ -1,0 +1,11 @@
+# menu: drag scroll with inertia -> fast swipe -> tap a row (enter submenu) -> tap row (back path exercised by demo)
+10 down 140 190
+12 move 140 170
+14 move 140 150
+16 move 140 130
+18 up
+70 down 140 100
+71 move 140 160
+71 up
+120 down 140 90
+122 up

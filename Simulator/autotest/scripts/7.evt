@@ -1,0 +1,9 @@
+# slideshow: horizontal drag page -> fast swipe back
+10 down 200 150
+12 move 170 150
+14 move 140 150
+16 move 110 150
+18 up
+90 down 80 150
+91 move 200 150
+91 up

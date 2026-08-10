@@ -14,23 +14,22 @@
 - `we_group_add_child(...)`
 - `we_group_remove_child(...)`
 - `we_group_set_child_pos(...)`
-- `we_group_relayout(...)`
 - `we_group_shift_children(...)`
 - `we_group_set_opacity(...)`
 
 ## 可调宏
 在 `we_user_config.h` 中可覆盖：
-- `WE_GROUP_CHILD_MAX`
+- （子控件数量无上限，槽位表已移除）
 
 ## 事件与行为
-- group 会把触摸事件**命中转发**给子控件（按压锁定 + CLICKED 释放点复核），组内的 btn/checkbox 等可正常交互
+- 子控件命中/按压锁定/CLICKED 复核由**内核统一派发**（group 只应答 HIT_TEST：全透明时连子树一起跳过），组内的 btn/checkbox 等可正常交互
 - `we_group_set_opacity(...)` 会**级联到全部子控件**（经 lcd 级 `opa_scale` 乘子在原语入口生效，无淡入淡出时零开销；嵌套容器自动链乘）
 - 完全透明（opacity=0）的 group 不拦截输入
 - `we_group_shift_children(...)` 可选择是否给子控件派发 `WE_EVENT_SCROLLED`
 
 ## 注意事项
 - 子控件使用的是“相对 group 左上角”的局部坐标
-- 修改 group 位置后，通常需要 `we_group_relayout(...)` 同步子控件绝对位置
+- 移动 group（`we_obj_set_pos`）时子控件自动跟随平移，无需手工同步
 - 这是 `slideshow` 的基础承载层之一
 
 ## 对应 demo

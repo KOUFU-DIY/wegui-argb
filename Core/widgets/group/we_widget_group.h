@@ -8,31 +8,12 @@ extern "C"
 {
 #endif
 
-/* 控件组最多挂载的子控件数量。 */
-#ifndef WE_GROUP_CHILD_MAX
-#define WE_GROUP_CHILD_MAX 24
-#endif
-
-#if WE_GROUP_CHILD_MAX > 32
-#error "WE_GROUP_CHILD_MAX must be <= 32: slot occupancy is a uint32 bitmask (slot_used_mask)."
-#endif
-
-typedef struct
-{
-    we_obj_t *child;
-    int16_t local_x;
-    int16_t local_y;
-} we_group_child_slot_t;
-
 typedef struct
 {
     we_obj_t base;                /* 前缀契约：与 we_child_owner_t 保持 base、children_head 顺序 */
     we_obj_t *children_head;
-    we_obj_t *last_pressed_child; /* 命中转发：本次触摸序列按到的子控件 */
-    uint32_t slot_used_mask;      /* 槽位占用位图（bit i = child_slots[i] 在用） */
     colour_t bg_color;
     uint8_t opacity;
-    we_group_child_slot_t child_slots[WE_GROUP_CHILD_MAX];
 } we_group_obj_t;
 
 /**
@@ -82,13 +63,6 @@ void we_group_remove_child(we_group_obj_t *obj, we_obj_t *child);
  * @return 无。
  */
 void we_group_set_child_pos(we_group_obj_t *obj, we_obj_t *child, int16_t local_x, int16_t local_y);
-
-/**
- * @brief 按当前局部坐标重新布局全部子控件。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-void we_group_relayout(we_group_obj_t *obj);
 
 /**
  * @brief 按给定位移整体平移子控件，并可派发滚动事件。

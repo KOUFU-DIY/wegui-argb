@@ -2,6 +2,7 @@
 #define __WE_WIDGET_TABLE_H
 
 #include "we_gui_driver.h"
+#include "we_scroll.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -87,13 +88,12 @@ typedef struct we_table_obj_t
     /* 4 字节对齐成员在前，消 padding */
     const char *const *cells;   /* 行优先单元格文本数组（调用方持有，含表头行） */
     const unsigned char *font;  /* 字体资源（init 必传） */
+    we_scroll_t sc;             /* 滚动物理状态机（无惯性档：仅拖拽跟手） */
     int32_t scroll_px;          /* 数据行区像素级滚动偏移（0 = 顶部对齐） */
-    int32_t press_scroll;       /* 按下时 scroll_px */
 
     /* 2 字节成员 */
     uint16_t row_cnt;           /* 总行数（含表头行 = 第 0 行） */
     uint16_t row_h;             /* 行高（像素，表头与数据行同高） */
-    int16_t press_y;            /* 按下时触摸 Y */
     int16_t col_edge[WE_TABLE_COL_MAX + 1]; /* 缓存：列边界相对 X（0..w） */
     colour_t head_bg_color;     /* 表头行底色 */
     colour_t head_text_color;   /* 表头文字色 */
@@ -107,8 +107,6 @@ typedef struct we_table_obj_t
     uint8_t col_cnt;            /* 列数（1..WE_TABLE_COL_MAX） */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
     uint8_t zebra : 1;          /* 斑马纹隔行着色开关 */
-    uint8_t tracking : 1;       /* 本次触摸序列是否有效 */
-    uint8_t dragging : 1;       /* 是否已进入拖拽滚动 */
 } we_table_obj_t;
 
 /**

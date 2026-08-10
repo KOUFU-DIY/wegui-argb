@@ -71,19 +71,6 @@
             "problemMatcher": []
         },
         {
-            "label": "res: update resources",
-            "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/tool/res/update_resources.ps1\"",
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            },
-            "problemMatcher": []
-        },
-        {
             "label": "stm32: build (AC5)",
             "type": "shell",
             "command": "& { $log = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.build_log.htm'; $axf = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.axf'; $null = Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '-j0','-b','${config:wegui.stm32ProjectFile}','-t','${config:wegui.stm32TargetName}' -PassThru -Wait; if (!(Test-Path $log) -or !(Test-Path $axf)) { Write-Error 'Keil did not generate Project.axf or build log.'; exit 1 }; $txt = Get-Content -Raw $log; if ($txt -match ' - 0 Error\\(s\\),') { exit 0 } else { Write-Error 'Keil build log contains errors.'; exit 1 } }",

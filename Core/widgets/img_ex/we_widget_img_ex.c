@@ -53,8 +53,7 @@ static inline uint16_t lerp_rgb565(uint16_t c00, uint16_t c10, uint16_t c01, uin
  * 这时如果还把通用混色常驻，会白白占一段代码空间。
  */
 #if (LCD_DEEP != DEEP_RGB565) || (WE_IMG_EX_ENABLE_EDGE_AA)
-/* _blend_fast 现在直接委托给 we_render.h 中的 we_colour_blend，
- * 统一精度（255 分母），消除原先 256 分母带来的微小偏色。 */
+/* _blend_fast 直接委托给 we_render.h 中的 we_colour_blend，统一按 255 分母混色。 */
 
 /**
  * @brief 按 255 分母混合前景/背景色，委托 we_colour_blend 统一精度。
@@ -602,7 +601,7 @@ pixel_color = _blend_fast(fg, *p_dst, eff_op);
  * 容器平移（group/scroll_panel/slideshow 经 we_obj_set_pos）时，
  * 包围盒 base.x/y 与采样锚点 cx/cy 必须按同一位移差整体移动，
  * 否则采样锚点与裁剪/标脏窗口失配，表现为位置漂移、拖影、被错误裁剪。
- * 统一收口在 set_pos_cb 里，不再依赖 WE_EVENT_SCROLLED 同步锚点
+ * 统一收口在 set_pos_cb 里，不经 WE_EVENT_SCROLLED 同步锚点
  * （we_group_shift_children 已先调 we_obj_set_pos，再发 SCROLLED 会双重位移）。
  * 本控件不消费点击。
  * -------------------------------------------------------------------------- */

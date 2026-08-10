@@ -1,4 +1,11 @@
 #include "we_widget_table.h"
+#include "we_scroll.h"
+
+/* 滚动物理参数：无惯性无过冲档（overscroll=0 时组件即硬跟手；
+ * 惯性/回弹参数占位不使用——RELEASED 不启动动画） */
+static const we_scroll_cfg_t _table_scroll_cfg = {
+    WE_TABLE_DRAG_THRESHOLD, 0, 1, 1, 1, 1, 128,
+};
 #include "we_render.h"
 
 /* --------------------------------------------------------------------------
@@ -408,8 +415,17 @@ static void _table_draw_cb(void *ptr)
  * @param data 传入：输入数据。
  * @return 1 表示消费事件，0 表示穿透。
  */
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_TABLE_USE_KEY == 1)
+static uint8_t _table_key_cb(void *ptr, uint8_t key_evt);
+#endif
 static uint8_t _table_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_TABLE_USE_KEY == 1)
+    /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
+    if ((uint8_t)event >= WE_KEY_UP)
+        return _table_key_cb(ptr, (uint8_t)event);
+#endif
+
     we_table_obj_t *obj = (we_table_obj_t *)ptr;
 
     if (obj == NULL || data == NULL)
@@ -417,36 +433,29 @@ static uint8_t _table_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
 
     if (event == WE_EVENT_PRESSED)
     {
-        obj->tracking = 1U;
-        obj->dragging = 0U;
-        obj->press_y = data->y;
-        obj->press_scroll = obj->scroll_px;
+        obj->sc.pos = obj->scroll_px; /* 会话开始：载入当前位置 */
+        we_scroll_press(&obj->sc, data->y);
         return 1U;
     }
 
-    if (!obj->tracking)
+    if (!obj->sc.tracking)
         return 1U; /* 无有效按压序列，仅消费防穿透 */
 
     if (event == WE_EVENT_STAY)
     {
-        int16_t dy_total = (int16_t)(data->y - obj->press_y);
-        int16_t ady = (dy_total >= 0) ? dy_total : (int16_t)(-dy_total);
-
-        if (!obj->dragging && ady >= WE_TABLE_DRAG_THRESHOLD)
-            obj->dragging = 1U;
-
-        if (obj->dragging)
-        {
-            /* 内容跟手：手指下移 → 内容下移 → scroll_px 减小 */
-            _table_apply_scroll(obj, obj->press_scroll - (int32_t)dy_total);
-        }
+        /* 内容跟手（overscroll=0：组件内即硬夹紧到 [0, max]） */
+        if (we_scroll_stay(&obj->sc, &_table_scroll_cfg, data->y,
+                           _table_max_scroll(obj)) != 0U)
+            _table_apply_scroll(obj, obj->sc.pos);
         return 1U;
     }
 
     if (event == WE_EVENT_RELEASED)
     {
-        obj->tracking = 0U;
-        obj->dragging = 0U;
+        /* 无惯性档：不调 we_scroll_release（避免按速度误启动动画） */
+        obj->sc.tracking = 0U;
+        obj->sc.dragging = 0U;
+        obj->sc.vel = 0;
         return 1U;
     }
 
@@ -503,7 +512,7 @@ static const we_class_t _table_class = {
     .event_cb = _table_event_cb,
     .set_pos_cb = NULL, /* 通用移动逻辑（旧区标脏 + 新区标脏）已足够 */
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_TABLE_USE_KEY == 1)
-    .key_cb = _table_key_cb,
+    .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
 };
 
@@ -571,10 +580,7 @@ void we_table_obj_init(we_table_obj_t *obj, we_lcd_t *lcd,
     obj->opacity = 255U;
 
     obj->scroll_px = 0;
-    obj->tracking = 0U;
-    obj->dragging = 0U;
-    obj->press_y = 0;
-    obj->press_scroll = 0;
+    we_scroll_reset(&obj->sc);
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     we_obj_invalidate((we_obj_t *)obj);
@@ -597,8 +603,7 @@ void we_table_set_cells(we_table_obj_t *obj, const char *const *cells, uint16_t 
     obj->cells = cells;
     obj->row_cnt = (cells != NULL) ? row_cnt : 0U;
     obj->scroll_px = 0;
-    obj->tracking = 0U;
-    obj->dragging = 0U;
+    we_scroll_reset(&obj->sc); /* 重绑数据即结束当前触摸会话 */
     we_obj_invalidate((we_obj_t *)obj);
 }
 

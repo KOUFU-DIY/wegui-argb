@@ -5,15 +5,15 @@
 
 /* demo 层统一字体：资源头只在 demo 层包含（Core 无任何资源感知，
  * 控件字体一律经 init 显式传入）；历史别名 we_font_consolas_18
- * 供全部 demo 书写，指向 demo_ascii_16 字库。 */
-#include "demo_ascii_16.h"
+ * 供全部 demo 书写，指向 simli_16_2bpp 字库。 */
+#include "simli_16_2bpp.h"
 #ifndef we_font_consolas_18
-#define we_font_consolas_18 ((const unsigned char *)&demo_ascii_16)
+#define we_font_consolas_18 ((const unsigned char *)&simli_16_2bpp)
 #endif
 
 /* 所有 simple demo 统一按固定 280x240 样式组织：
  * 1. 先调用对应 init(...) 创建控件并完成固定布局；
- * 2. 再用 we_gui_timer_create(lcd, 对应 tick, 16U, 1U) 注册周期定时器；
+ * 2. 再用 we_gui_timer_create(lcd, &节点, 对应 tick, 16U, 1U) 注册周期定时器；
  * 3. 主循环里继续调用 we_gui_tick_inc(...) 和 we_gui_task_handler(...)。 */
 
 /* label demo：init 创建并布局控件，tick 每帧推进（ms_tick 为毫秒增量）。 */
@@ -137,6 +137,10 @@ void we_focus_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
  * WE_CFG_ENABLE_KEY_INPUT == 0 时降级为提示桩。 */
 void we_focus2_simple_demo_init(we_lcd_t *lcd);
 void we_focus2_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* img alpha demo（A1/A2/A4/A8 透明位图：位深阶梯对比 + 前景色上色/循环变色）。 */
+void we_img_alpha_simple_demo_init(we_lcd_t *lcd);
+void we_img_alpha_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 /* 汇总 demo（仅模拟器：4 页 slideshow 串联主要控件与子系统）。 */
 void we_showcase_simple_demo_init(we_lcd_t *lcd);

@@ -31,12 +31,6 @@
 
 #include "we_widget_mask_group.h"
 #include "we_render.h"
-/* 槽位占用位图：used 标志抽为容器级 uint32 位图后槽体 12B->8B 零填充，
- * WE_MASK_GROUP_CHILD_MAX(<=32) 个槽共省 4*N+4 字节 RAM。 */
-#define _MG_SLOT_USED(o, i) ((((o)->slot_used_mask >> (i)) & 1U) != 0U)
-#define _MG_SLOT_SET(o, i) ((o)->slot_used_mask |= ((uint32_t)1U << (i)))
-#define _MG_SLOT_CLR(o, i) ((o)->slot_used_mask &= ~((uint32_t)1U << (i)))
-
 
 /* 切角边框的内轮廓收缩系数（与 box 保持一致）：
  * 45° 切角若同样减 bw，对角段的垂直厚度只有 bw/√2（视觉偏细）。
@@ -63,98 +57,23 @@ static __inline uint8_t _mg_colour_eq(colour_t a, colour_t b)
 }
 
 /**
- * @brief 在容器 slot 表中查找指定子控件的记录。
- * @param obj 控件对象指针。
- * @param child 目标子控件对象指针。
- * @return 对应 slot 指针；未找到返回 NULL。
- */
-static we_mask_group_child_slot_t *_mask_group_find_slot(we_mask_group_obj_t *obj, we_obj_t *child)
-{
-    uint16_t i;
-
-    if (obj == NULL || child == NULL)
-        return NULL;
-
-    for (i = 0; i < WE_MASK_GROUP_CHILD_MAX; i++)
-    {
-        if (_MG_SLOT_USED(obj, i) && obj->child_slots[i].child == child)
-            return &obj->child_slots[i];
-    }
-
-    return NULL;
-}
-
-/**
- * @brief 把对象从其当前所属链表（父容器 children_head 或顶层 obj_list_head）摘除。
+ * @brief 按位移整体平移全部子控件（容器移动/滚动时调用）。
  * @param obj 目标控件对象指针。
+ * @param dx X 方向位移（像素）。
+ * @param dy Y 方向位移（像素）。
  * @return 无。
- * @note 与 group 的实现保持一致，供改挂父子关系前使用。
+ * @note 子控件绝对坐标是唯一事实源：局部坐标 = 子绝对 - 容器绝对，
+ *       按需推导，无槽位表、子控件数量无上限。
  */
-static void _mask_group_detach_obj(we_obj_t *obj)
+static void _mask_group_move_children(we_mask_group_obj_t *obj, int16_t dx, int16_t dy)
 {
-    we_obj_t *curr;
-    we_obj_t *prev;
+    we_obj_t *child = obj->children_head;
 
-    if (obj == NULL || obj->lcd == NULL)
-        return;
-
-    if (obj->parent != NULL)
+    while (child != NULL)
     {
-        we_child_owner_t *parent = (we_child_owner_t *)obj->parent;
-        curr = parent->children_head;
-        prev = NULL;
-        while (curr != NULL)
-        {
-            if (curr == obj)
-            {
-                if (prev == NULL)
-                    parent->children_head = curr->next;
-                else
-                    prev->next = curr->next;
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
-        }
+        we_obj_set_pos(child, (int16_t)(child->x + dx), (int16_t)(child->y + dy));
+        child = child->next;
     }
-    else
-    {
-        curr = obj->lcd->obj_list_head;
-        prev = NULL;
-        while (curr != NULL)
-        {
-            if (curr == obj)
-            {
-                if (prev == NULL)
-                    obj->lcd->obj_list_head = curr->next;
-                else
-                    prev->next = curr->next;
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
-        }
-    }
-
-    obj->next = NULL;
-    obj->parent = NULL;
-}
-
-/**
- * @brief 按 slot 局部坐标叠加容器绝对坐标，刷新该子控件的屏幕绝对位置。
- * @param obj 控件对象指针。
- * @param slot 子控件槽位记录指针。
- * @return 无。
- */
-static void _mask_group_update_child_abs(we_mask_group_obj_t *obj, we_mask_group_child_slot_t *slot)
-{
-    if (obj == NULL || slot == NULL ||
-        !_MG_SLOT_USED(obj, (uint16_t)(slot - obj->child_slots)) || slot->child == NULL)
-        return;
-
-    we_obj_set_pos(slot->child,
-                   (int16_t)(obj->base.x + slot->local_x),
-                   (int16_t)(obj->base.y + slot->local_y));
 }
 
 /* --------------------------------------------------------------------------
@@ -744,30 +663,6 @@ static void _mask_group_draw_cb(void *ptr)
     _mask_group_apply_mask(obj);
 }
 
-/**
- * @brief 在容器内查找命中坐标的可交互子控件（后挂者层级更高，取最后命中者）。
- * @param obj 控件对象指针。
- * @param x 屏幕绝对 X 坐标。
- * @param y 屏幕绝对 Y 坐标。
- * @return 命中的子控件指针；无命中返回 NULL。
- */
-static we_obj_t *_mask_group_hit_child(we_mask_group_obj_t *obj, int16_t x, int16_t y)
-{
-    we_obj_t *child = obj->children_head;
-    we_obj_t *target = NULL;
-
-    while (child != NULL)
-    {
-        if (child->class_p != NULL && child->class_p->event_cb != NULL &&
-            x >= child->x && x < (child->x + child->w) &&
-            y >= child->y && y < (child->y + child->h))
-        {
-            target = child;
-        }
-        child = child->next;
-    }
-    return target;
-}
 
 /**
  * @brief 容器事件回调：按压时锁定子控件，后续触摸序列事件按序转发（同 group）。
@@ -779,52 +674,12 @@ static we_obj_t *_mask_group_hit_child(we_mask_group_obj_t *obj, int16_t x, int1
 static uint8_t _mask_group_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_mask_group_obj_t *obj = (we_mask_group_obj_t *)ptr;
-    we_obj_t *child;
 
-    if (obj == NULL || data == NULL || obj->opacity == 0U)
-        return 0U; /* 完全透明（淡出隐藏）的容器不拦截输入 */
-
-    if (event == WE_EVENT_PRESSED)
-    {
-        child = _mask_group_hit_child(obj, data->x, data->y);
-        obj->last_pressed_child = child;
-        if (child != NULL)
-        {
-            child->class_p->event_cb(child, WE_EVENT_PRESSED, data);
-            return 1U;
-        }
-        /* 未命中交互子控件时返回 0：让外层容器把这次按压用于拖拽等手势 */
-        return 0U;
-    }
-
-    /* 仅转发触摸序列事件；SCROLLED 等广播事件不属于转发范围 */
-    if (event != WE_EVENT_RELEASED && event != WE_EVENT_STAY && event != WE_EVENT_CLICKED &&
-        event != WE_EVENT_SWIPE_LEFT && event != WE_EVENT_SWIPE_RIGHT &&
-        event != WE_EVENT_SWIPE_UP && event != WE_EVENT_SWIPE_DOWN)
-        return 0U;
-
-    child = obj->last_pressed_child;
-    if (child == NULL)
-        return 0U;
-    if (child->class_p == NULL || child->class_p->event_cb == NULL)
-    {
-        /* 子控件已在按压期间被删除/失效，丢弃引用 */
-        obj->last_pressed_child = NULL;
-        return 0U;
-    }
-
-    if (event == WE_EVENT_CLICKED)
-    {
-        /* 点击需复核释放点仍落在原子控件上，按下后拖出再松手不触发 */
-        if (data->x >= child->x && data->x < (child->x + child->w) &&
-            data->y >= child->y && data->y < (child->y + child->h))
-            child->class_p->event_cb(child, WE_EVENT_CLICKED, data);
-        obj->last_pressed_child = NULL;
-        return 1U;
-    }
-
-    child->class_p->event_cb(child, event, data);
-    return 1U;
+    (void)data;
+    /* 同 group：只答命中查询（全透明跳过整棵子树），其余交内核统一派发。 */
+    if (event == WE_EVENT_HIT_TEST)
+        return (uint8_t)(obj->opacity != 0U);
+    return 0U;
 }
 
 /**
@@ -837,11 +692,13 @@ static uint8_t _mask_group_event_cb(void *ptr, we_event_t event, we_indev_data_t
 static void _mask_group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 {
     we_mask_group_obj_t *obj = (we_mask_group_obj_t *)ptr;
+    int16_t dx = (int16_t)(new_x - obj->base.x);
+    int16_t dy = (int16_t)(new_y - obj->base.y);
 
     we_obj_invalidate((we_obj_t *)obj);
     obj->base.x = new_x;
     obj->base.y = new_y;
-    we_mask_group_relayout(obj); /* 按 slot 局部坐标刷新全部子控件绝对位置 */
+    _mask_group_move_children(obj, dx, dy);
     we_obj_invalidate((we_obj_t *)obj);
 }
 
@@ -855,9 +712,11 @@ void we_mask_group_obj_init(we_mask_group_obj_t *obj, we_lcd_t *lcd,
     static const we_class_t _mask_group_class = {
         .draw_cb = _mask_group_draw_cb,
         .event_cb = _mask_group_event_cb,
-        .set_pos_cb = _mask_group_set_pos_cb
+        .set_pos_cb = _mask_group_set_pos_cb,
+        /* 仅结构位：删除/改挂需要走 children_head；焦点暂不下钻蒙版容器
+         * （子控件可能被蒙版裁掉，光标会画到看不见的地方）。 */
+        .class_flags = WE_CLASS_FLAG_CHILD_OWNER
     };
-    uint16_t i;
 
     if (obj == NULL || lcd == NULL)
         return;
@@ -885,9 +744,6 @@ void we_mask_group_obj_init(we_mask_group_obj_t *obj, we_lcd_t *lcd,
     obj->grad_angle = 0;
     obj->grad_a0 = 255U;
     obj->grad_a1 = 255U;
-    obj->last_pressed_child = NULL;
-
-    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     we_obj_invalidate((we_obj_t *)obj);
@@ -895,102 +751,49 @@ void we_mask_group_obj_init(we_mask_group_obj_t *obj, we_lcd_t *lcd,
 
 void we_mask_group_obj_delete(we_mask_group_obj_t *obj)
 {
-    we_obj_t *child;
-    we_obj_t *next;
-    uint16_t i;
-
     if (obj == NULL || obj->base.lcd == NULL)
         return;
-
-    child = obj->children_head;
-    while (child != NULL)
-    {
-        next = child->next;
-        we_obj_delete(child);
-        child = next;
-    }
-
-    obj->children_head = NULL;
-    obj->last_pressed_child = NULL;
-    obj->slot_used_mask = 0U; /* 全部槽位空闲 */
 
     we_obj_delete((we_obj_t *)obj);
 }
 
 void we_mask_group_add_child(we_mask_group_obj_t *obj, we_obj_t *child)
 {
-    uint16_t i;
-
     if (obj == NULL || child == NULL)
         return;
     if (child == (we_obj_t *)obj)
         return;
     if (child->lcd != obj->base.lcd)
         return;
-    if (_mask_group_find_slot(obj, child) != NULL)
-        return;
+    if (child->parent == (we_obj_t *)obj)
+        return; /* 已挂载 */
 
-    for (i = 0; i < WE_MASK_GROUP_CHILD_MAX; i++)
-    {
-        if (!_MG_SLOT_USED(obj, i))
-        {
-            _mask_group_detach_obj(child);
-            child->next = NULL;
-            child->parent = (we_obj_t *)obj;
-
-            we_obj_append_to_list(&obj->children_head, child);
-
-            obj->child_slots[i].child = child;
-            obj->child_slots[i].local_x = 0;
-            obj->child_slots[i].local_y = 0;
-            _MG_SLOT_SET(obj, i);
-            _mask_group_update_child_abs(obj, &obj->child_slots[i]);
-            return;
-        }
-    }
+    we_obj_set_parent(child, (we_obj_t *)obj);
+    we_obj_set_pos(child, obj->base.x, obj->base.y);
 }
 
 void we_mask_group_remove_child(we_mask_group_obj_t *obj, we_obj_t *child)
 {
-    we_mask_group_child_slot_t *slot = _mask_group_find_slot(obj, child);
-
-    if (slot == NULL)
+    if (obj == NULL || child == NULL || child->parent != (we_obj_t *)obj)
         return;
 
-    _mask_group_detach_obj(child);
-    _MG_SLOT_CLR(obj, (uint16_t)(slot - obj->child_slots));
-    slot->child = NULL;
-
-    /* 被移除的子控件若正处于按压转发状态，同步丢弃引用 */
-    if (obj->last_pressed_child == child)
-        obj->last_pressed_child = NULL;
+    we_obj_detach(child);
 }
 
 void we_mask_group_set_child_pos(we_mask_group_obj_t *obj, we_obj_t *child,
                                  int16_t local_x, int16_t local_y)
 {
-    we_mask_group_child_slot_t *slot = _mask_group_find_slot(obj, child);
-
-    if (slot == NULL)
+    if (obj == NULL || child == NULL || child->parent != (we_obj_t *)obj)
         return;
 
-    slot->local_x = local_x;
-    slot->local_y = local_y;
-    _mask_group_update_child_abs(obj, slot);
+    we_obj_set_pos(child, (int16_t)(obj->base.x + local_x),
+                   (int16_t)(obj->base.y + local_y));
 }
 
 void we_mask_group_relayout(we_mask_group_obj_t *obj)
 {
-    uint16_t i;
-
-    if (obj == NULL)
-        return;
-
-    for (i = 0; i < WE_MASK_GROUP_CHILD_MAX; i++)
-    {
-        if (_MG_SLOT_USED(obj, i))
-            _mask_group_update_child_abs(obj, &obj->child_slots[i]);
-    }
+    /* 兼容空操作：子控件绝对坐标即唯一事实源，移动容器时由 set_pos_cb 平移 */
+    (void)obj;
 }
 
 void we_mask_group_set_opacity(we_mask_group_obj_t *obj, uint8_t opacity)

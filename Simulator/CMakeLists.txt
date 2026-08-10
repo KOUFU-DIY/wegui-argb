@@ -16,8 +16,9 @@ include_directories(
     "../Core/widgets"
     "../Demo"
     "../Demo/preview"
-    "../tool/res/out"
-    "../tool/res/out/font"
+    "../tool/1.font2c/output"
+    "../tool/2.img2c/output/c"
+    "../tool/3.bin2c/output"
     "."
 )
 
@@ -39,6 +40,7 @@ set(DEMO_SOURCES
     "../Demo/demo_label.c"
     "../Demo/demo_btn.c"
     "../Demo/demo_img.c"
+    "../Demo/demo_img_alpha.c"
     "../Demo/demo_img_ex.c"
     "../Demo/demo_arc.c"
     "../Demo/demo_concentric_arc.c"
@@ -67,12 +69,11 @@ set(DEMO_SOURCES
     "../Demo/demo_focus.c"
     "../Demo/demo_focus2.c"
     "../Demo/demo_showcase.c"
-    "../tool/res/out/font/demo_ascii_16.c"
-    "../tool/res/out/font/demo_cjk_16.c"
-    "../tool/res/out/font/demo_cjk_24.c"
-    "../tool/res/out/font/demo_ime_16.c"
-    "../tool/res/out/res_images.c"
-    "../tool/res/out/merged_bin.c"
+    "../tool/1.font2c/output/simli_16_2bpp.c"
+    "../tool/1.font2c/output/msyh_16_4bpp_ime.c"
+    "../tool/1.font2c/output/gbsn00lp_2_16_4bpp.c"
+    "../tool/2.img2c/output/c/res_img.c"
+    "../tool/3.bin2c/output/merged_bin.c"
 )
 file(GLOB SIMULATOR_SOURCES CONFIGURE_DEPENDS "*.c")
 
@@ -87,6 +88,18 @@ add_executable(wegui_sim
     ${PREVIEW_DEMO_SOURCES}
     ${SIMULATOR_SOURCES}
 )
+
+# autotest：允许命令行覆盖 DEMO_ID（main_sim.c 用 #ifndef 守卫），
+# autotest.ps1 借此逐 demo 重建并跑 headless 基准哈希比对。
+if(DEFINED WE_DEMO_ID)
+    target_compile_definitions(wegui_sim PRIVATE DEMO_ID=${WE_DEMO_ID})
+endif()
+
+# 回归脚手架编译开关（sim_autotest.h 默认 0，日常构建不含回归测试代码）：
+# autotest.ps1 配置时传 -DWE_SIM_AUTOTEST=1 打开。
+if(DEFINED WE_SIM_AUTOTEST)
+    target_compile_definitions(wegui_sim PRIVATE WE_SIM_AUTOTEST=${WE_SIM_AUTOTEST})
+endif()
 
 if(MSVC)
     target_link_libraries(wegui_sim ${SDL2_LIBS})
@@ -113,3 +126,10 @@ add_custom_command(TARGET wegui_sim POST_BUILD
     "${DLL_SRC}"
     $<TARGET_FILE_DIR:wegui_sim>
 )
+
+# 外挂 flash 镜像：拷到 exe 旁，运行时由 sdl_port 存储端口直接 fopen 读取
+# （硬件对应"烧录 W25Qxx"；改资产后重跑 tool/3.bin2c 再重启模拟器即可，无需重编译）
+add_custom_command(TARGET wegui_sim POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tool/3.bin2c/output/merged_bin.bin"
+    "$<TARGET_FILE_DIR:wegui_sim>")

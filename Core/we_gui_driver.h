@@ -138,7 +138,14 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
         uint16_t screen_h;   // 所属屏幕高度
     } we_dirty_mgr_t;
 
-    // 控件事件枚举
+    /* 控件事件枚举——统一事件码空间，分段编码（同一 event_cb 接收全部段）：
+     *   0x00..0x0F  触摸/手势/内核查询与通知（HIT_TEST/DRAG_BEGIN/MODAL_CLOSE 等）
+     *   0x10..0x17  语义键（端口注入；内核只发给 FOCUSABLE 类与模态对象）
+     *   0x20..0x2F  焦点通知（内核→控件；端口禁止注入）
+     *   0x40..0x7F  控件/应用自定义事件保留段（从 WE_EVENT_USER_BASE 起自行分配）
+     *   0x80        松开沿修饰位（WE_KEY_RELEASE_FLAG）——模态对象的 event_cb
+     *               会实际收到 0x90..0x97（键值|0x80，软键盘双沿击键手感依赖），
+     *               控件按 (uint8_t)event >= WE_KEY_UP 分流即可一并覆盖 */
     typedef enum
     {
         WE_EVENT_PRESSED,   // 按下
@@ -151,7 +158,39 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
         WE_EVENT_SWIPE_RIGHT,// 向右滑动
         WE_EVENT_SWIPE_UP,   // 向上滑动
         WE_EVENT_SWIPE_DOWN, // 向下滑动
+        /* --- 内核统一输入派发用（仅发给复合容器，叶子控件收不到） --- */
+        WE_EVENT_HIT_TEST,   // 命中查询：返回 0 = 跳过本容器及其整棵子树
+        WE_EVENT_DRAG_BEGIN, // 拖拽接管询问：位移越阈值时沿祖先链发起，返回非 0 = 接管手势
+        WE_EVENT_MODAL_CLOSE, // 模态被替换/关闭通知：收到后自行收起（新模态打开时发给旧模态）
+
+        /* ---- 语义键段 0x10..0x17（端口注入；内核只发给 FOCUSABLE 类）----
+         * 0x80 位保留作键队列松开沿标志 WE_KEY_RELEASE_FLAG，
+         * 故本段必须落在 0x10..0x7F。 */
+        WE_KEY_UP = 0x10,     /* 方向：上（导航态等效 PREV） */
+        WE_KEY_DOWN,          /* 方向：下（导航态等效 NEXT） */
+        WE_KEY_LEFT,          /* 方向：左（导航态等效 PREV） */
+        WE_KEY_RIGHT,         /* 方向：右（导航态等效 NEXT） */
+        WE_KEY_PREV,          /* 前一个（Shift+Tab 语义） */
+        WE_KEY_NEXT,          /* 后一个（Tab 语义） */
+        WE_KEY_OK,            /* 进入/确认：容器下钻、控件触发 */
+        WE_KEY_BACK,          /* 返回/取消：退出容器、清除焦点 */
+
+        /* ---- 焦点通知段 0x20+（内核→控件；端口禁止注入）---- */
+        WE_KEY_EVT_FOCUS = 0x20, /* 焦点查询：返回 0 = 本实例拒绝聚焦 */
+        WE_KEY_EVT_DEFOCUS,      /* 失去焦点 */
+        WE_KEY_EVT_FLASH_END,    /* OK 按压取消：仅回弹，不触发点击 */
+        WE_KEY_EVT_OK_RELEASE,   /* OK 松开沿：回弹并触发点击动作 */
+        WE_KEY_EVT_CHILD_FOCUS,  /* 子树内有对象获得焦点（发给祖先容器链，
+                                  * scroll_panel 据此滚动跟随） */
+
+        /* ---- 控件/应用自定义事件保留段 0x40..0x7F ----
+         * 复合控件的自定义通知（如页签切换广播）从此处起分配，
+         * 不会与内核任何段（含 0x80 修饰位组合）冲突。 */
+        WE_EVENT_USER_BASE = 0x40,
     } we_event_t;
+
+/* 端口侧"无键"哨值（仅作注入前的判空哨，不是合法键码） */
+#define WE_KEY_NONE (0x00U)
 
     typedef enum
     {
@@ -170,32 +209,12 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
     /* ---------------- 全局聚焦 / 按键导航 ----------------
-     * 语义键值：端口负责把物理按键（独立按键/五向摇杆/EC11 编码器等）
-     * 消抖后翻译成语义键注入。双沿端口用 we_gui_key_press/release 上报
-     * 按下/松开（OK 按住期间控件保持按压态）；简单端口用 we_gui_key_inject
-     * 注入一次完整 tap。方向键长按连发由端口重复注入按下沿实现。
-     * WE_KEY_EVT_* 为内核→控件的焦点通知，端口禁止注入。 */
-    typedef enum
-    {
-        WE_KEY_NONE = 0,
-        WE_KEY_UP,            /* 方向：上（导航态等效 PREV） */
-        WE_KEY_DOWN,          /* 方向：下（导航态等效 NEXT） */
-        WE_KEY_LEFT,          /* 方向：左（导航态等效 PREV） */
-        WE_KEY_RIGHT,         /* 方向：右（导航态等效 NEXT） */
-        WE_KEY_PREV,          /* 前一个（Shift+Tab 语义） */
-        WE_KEY_NEXT,          /* 后一个（Tab 语义） */
-        WE_KEY_OK,            /* 进入/确认：容器下钻、控件触发 */
-        WE_KEY_BACK,          /* 返回/取消：退出容器、清除焦点 */
-        WE_KEY_EVT_FOCUS,      /* 通知：获得焦点查询（返回 0 = 本实例拒绝聚焦） */
-        WE_KEY_EVT_DEFOCUS,    /* 通知：失去焦点 */
-        WE_KEY_EVT_FLASH_END,   /* 通知：OK 按压取消（焦点切走/清除时仅回弹，不触发点击） */
-        WE_KEY_EVT_OK_RELEASE,  /* 通知：OK 松开沿（回弹按压态并触发点击动作） */
-        WE_KEY_EVT_CHILD_FOCUS, /* 通知：子树内有对象获得焦点（发给祖先容器链，
-                                 * scroll_panel 据此滚动跟随让焦点子控件可见） */
-    } we_key_evt_t;
-
-/* we_class_t.class_flags 位定义 */
-#define WE_CLASS_FLAG_CHILD_OWNER (0x01U) /* 复合容器：前缀为 we_child_owner_t，焦点可进入 */
+     * 语义键值（并入 we_event_t 的 0x10 段）：端口负责把物理按键（独立
+     * 按键/五向摇杆/EC11 编码器等）消抖后翻译成语义键注入。双沿端口用
+     * we_gui_key_press/release 上报按下/松开（OK 按住期间控件保持按压态）；
+     * 简单端口用 we_gui_key_inject 注入一次完整 tap。方向键长按连发由
+     * 端口重复注入按下沿实现。WE_KEY_EVT_*（0x20 段）为内核→控件的焦点
+     * 通知，端口禁止注入。 */
 
 /* 键队列编码：松开沿 = 键值 | 本标志（经 we_gui_key_release 注入） */
 #define WE_KEY_RELEASE_FLAG (0x80U)
@@ -205,18 +224,22 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
 #define WE_FOCUS_F_OK_HELD (0x02U)  /* OK 物理按住中（吞掉系统连发的重复按下沿） */
 #define WE_FOCUS_F_OK_ARMED (0x04U) /* OK 按下沿已被焦点控件消费，等待松开沿回发 */
 #define WE_FOCUS_F_REL_PEND (0x08U) /* 松开沿已到但仍在最短按压窗口内，窗口到期补发 */
+#define WE_FOCUS_F_CURSOR_VIS (0x10U) /* 光标可见：按键活动/we_focus_set 亮出，触摸按下收起 */
 #endif
 
     typedef void (*we_gui_timer_cb_t)(struct we_lcd_t *lcd, uint16_t elapsed_ms);
 
-    typedef struct
+    /* 用户定时器：与中央动画引擎同构的侵入式节点——调用方持有节点、
+     * 零槽位、数量无上限、create 不会失败（槽满静默丢失的问题不复存在）。 */
+    typedef struct we_gui_timer_s
     {
+        struct we_gui_timer_s *next; /* 侵入式链表指针（内核维护） */
         we_gui_timer_cb_t cb;
         uint16_t period_ms;
         uint16_t acc_ms;
-        uint8_t repeat;
-        uint8_t active;
-    } we_gui_timer_node_t;
+        uint8_t repeat : 1;
+        uint8_t active : 1;
+    } we_gui_timer_t;
 
     typedef void (*we_lcd_set_addr_cb_t)(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 #if (LCD_DEEP == DEEP_RGB565)
@@ -227,34 +250,22 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     typedef void (*we_input_read_cb_t)(we_indev_data_t *data);
     typedef void (*we_storage_read_cb_t)(uint32_t addr, uint8_t buf[], uint32_t len);
 
-    typedef enum
-    {
-        WE_POPUP_TYPE_NONE = 0,
-        WE_POPUP_TYPE_DROPDOWN,
-        WE_POPUP_TYPE_MENU,
-        WE_POPUP_TYPE_DIALOG,
-        WE_POPUP_TYPE_KEYBOARD,
-        WE_POPUP_TYPE_TOOLTIP,
-    } we_popup_type_t;
 
-    typedef struct
-    {
-        uint8_t active;
-        uint8_t type; /* stores we_popup_type_t */
-        void *owner;
-        we_area_t area;
-        void (*draw_cb)(void *owner);
-        uint8_t (*event_cb)(void *owner, we_event_t event, we_indev_data_t *data);
-        void (*close_cb)(void *owner);
-#if (WE_CFG_ENABLE_KEY_INPUT == 1)
-        /* 弹层键通道：弹层激活期间语义键改送本回调（owner 透传）——
-         * 按下沿传裸键值，松开沿传 键值|WE_KEY_RELEASE_FLAG（弹层内控件
-         * 可据此做双沿按压手感，忽略松开沿即为按下沿触发语义）；
-         * 为 NULL 时维持"吞掉全部按键"的模态语义。open 时自动清空，
-         * 弹层拥有者在 open 后经 we_popup_layer_set_key_cb 挂接。 */
-        uint8_t (*key_cb)(void *owner, uint8_t key);
-#endif
-    } we_popup_layer_t;
+
+/* we_class_t.class_flags 位定义
+ *
+ * 结构位与行为位分开：容器“结构上能不能取 children_head”和“焦点能不能
+ * 下钻进去”是两件正交的事。slideshow / mask_group 结构上是 we_child_owner_t
+ * （删除、改挂父子关系都要走 children_head），但在分页作用域做出来之前
+ * 不该让焦点钻进非当前页的子控件，因此只带结构位。 */
+#define WE_CLASS_FLAG_CHILD_OWNER (0x01U) /* 结构位：前缀为 we_child_owner_t，可安全取 children_head */
+#define WE_CLASS_FLAG_FOCUS_ENTER (0x02U) /* 行为位：焦点可 OK 下钻 / BACK 上退 */
+#define WE_CLASS_FLAG_FOCUSABLE (0x04U)   /* 行为位：可聚焦——内核把语义键段/通知段事件经
+                                           * event_cb 发给它；返回非 0 = 已消费，普通键未
+                                           * 消费时交焦点管理器执行默认导航 */
+/* 输入派发契约：带 CHILD_OWNER 的容器由内核递归下钻到最深命中子控件并
+ * 沿父链冒泡按压；容器自身只需应答 WE_EVENT_HIT_TEST（返回 0 = 本容器连
+ * 同整棵子树跳过命中）与 WE_EVENT_DRAG_BEGIN（拖拽接管询问），不手工转发。 */
 
     // 控件类描述符 (存放于 Flash，节省 RAM)
     typedef struct
@@ -262,21 +273,26 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         void (*draw_cb)(void *obj);
         uint8_t (*event_cb)(void *obj, we_event_t event, we_indev_data_t *data);
         void (*set_pos_cb)(void *obj, int16_t x, int16_t y);
-#if (WE_CFG_ENABLE_KEY_INPUT == 1)
-        /* 按键/焦点回调：非 NULL 即视为可聚焦；返回非 0 = 已消费，
-         * 普通键未消费时交焦点管理器执行默认导航。
-         * 全部类描述符均为指定初始化器，旧控件不写该成员即为 NULL。 */
-        uint8_t (*key_cb)(void *obj, uint8_t key_evt);
-        uint8_t class_flags; /* WE_CLASS_FLAG_* 位组合 */
-#endif
+        /* 析构回调：we_obj_delete 在摘链前调用，控件在这里做自有收尾
+         * （通知业务层、释放自管资源等）。调用时 obj->lcd 与 class_p 仍然
+         * 有效，可安全标脏、可读写自身字段。
+         * 为 NULL 表示无需自清理：内核随后会统一回收 pressed / focus /
+         * modal / 动画节点四类引用，漏写不会留下悬空指针。
+         * 禁止在 delete_cb 内再次调用 we_obj_delete(自身)——会无限递归。 */
+        void (*delete_cb)(void *obj);
+        /* WE_CLASS_FLAG_* 位组合。不随按键功能裁剪：结构位 CHILD_OWNER 被
+         * 对象链表与删除路径使用，纯触摸工程同样需要它来递归删除子控件。
+         * 键/焦点事件与触摸事件共用回调：FOCUSABLE 类经统一 event_cb 接收
+         * 0x10/0x20 两段事件码（全部类描述符均为指定初始化器）。 */
+        uint8_t class_flags;
     } we_class_t;
 
     // 所有控件的绝对基类 (Base Object)
     typedef struct we_obj_s
     {
         struct we_obj_s *next;     // 链表指针 (Z轴层级)
-        struct we_obj_s *parent;   // [新增] 父节点指针 (用于脏矩形自动裁剪)
-        const we_class_t *class_p; // [重构] 指向 Flash 中的类描述符
+        struct we_obj_s *parent;   // 父节点指针 (用于脏矩形自动裁剪)
+        const we_class_t *class_p; // 指向 Flash 中的类描述符
         struct we_lcd_t *lcd;      // 绑定的屏幕上下文
         int16_t x;                 // 绝对 X 坐标
         int16_t y;                 // 绝对 Y 坐标
@@ -287,8 +303,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     /* 可挂子控件对象的最小公共前缀：
      * base + children_head。
      * 目前 group/slideshow/scroll_panel 用它与 driver 共享父子摘链语义。
-     * （历史上前缀里还有 int8_t task_id；控件动画迁入中央动画引擎后已移除，
-     *  若新增复合容器，结构体前两个成员必须保持 base、children_head 顺序。） */
+     * 新增复合容器时，结构体前两个成员必须保持 base、children_head 顺序。 */
     typedef struct
     {
         we_obj_t base;
@@ -300,9 +315,14 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * we_gui_task_handler 每个调度周期遍历该链表并调用 step_cb；
      * 控件动画到达目标态后在 step_cb 内自行 we_anim_stop 摘链。
      * 约定：
-     * 1. step_cb 内只允许摘除自身节点，不得摘除其他节点；
-     * 2. 删除带动画的控件前必须先 we_anim_stop（节点归控件所有，
-     *    内核无法代摘，否则链上留悬空指针——同 pressed_obj 教训）。 */
+     * 1. step_cb 内只允许摘除自身节点，不得摘除其他节点，也不得在
+     *    step_cb 内删除“其他”控件（we_obj_delete 会清空被摘节点的
+     *    next，截断本帧的动画遍历）；
+     * 2. 控件删除时的摘链已由内核兜底：we_obj_delete 扫描动画链摘掉
+     *    全部 owner 指向被删对象的节点（line 这类多节点控件一次全清），
+     *    因此“容器基类删子”不会再留下僵尸节点。控件自己的
+     *    we_xxx_obj_delete 里保留 we_anim_stop 仍是好习惯（语义明确、
+     *    省一次扫描），漏写也不会产生悬空节点。 */
     typedef struct we_anim_s
     {
         struct we_anim_s *next;                            /* 侵入式链表指针 */
@@ -329,7 +349,11 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         // 3. 脏矩形管理器 (彻底干掉全局变量，完美内嵌！)
         we_dirty_mgr_t dirty_mgr;
         we_obj_t *obj_list_head;
-        we_gui_timer_node_t timer_list[WE_CFG_GUI_TIMER_MAX_NUM]; // 面向用户的 GUI 定时器表
+#if (WE_CFG_ENABLE_TOP_LAYER == 1)
+        we_obj_t *top_list_head;                                  // 顶层链表：toast/msgbox 等"保证置顶"对象，普通层之后、焦点光标之后绘制
+        we_obj_t *modal_obj;                                      // 当前模态对象（顶层链成员；NULL=无模态。模态期间命中限顶层、未命中交它、语义键直送它）
+#endif
+        we_gui_timer_t *timer_head;                               // 用户定时器侵入式链表头（节点归调用方所有）
         we_anim_t *anim_head;                                     // 中央动画链表头（控件动画不占用任何槽位）
         uint16_t tick_elapsed_ms;                                 // GUI 内核累计的未消费时间
         we_indev_data_t indev_data;                               // 当前 LCD 实例绑定的输入状态缓存
@@ -338,32 +362,23 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         we_obj_t *pressed_obj;                                    // 当前按压中的对象（we_obj_delete 会同步清空，防悬空派发）
         we_input_read_cb_t input_read_cb;                         // 当前 LCD 绑定的输入读取接口
         we_storage_read_cb_t storage_read_cb;                     // 当前 LCD 绑定的外部存储读取接口
-        we_popup_layer_t popup_layer;                             // LCD 级单 overlay popup
         uint8_t opa_scale;                                        // 容器透明度级联乘子，255=无衰减（group 画子时设置，原语入口消费）
         uint8_t gesture_had_stay;                                 // 本次触摸序列是否经历过 STAY（拖拽）；与相邻字节成员共享对齐槽
+        uint8_t gesture_drag_done;                                // 本次触摸序列是否已完成拖拽接管询问（DRAG_BEGIN 只发一轮）
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
         we_obj_t *focus_obj;                     // 当前焦点对象（NULL=无；we_obj_delete 沿祖先链防悬空）
-        uint8_t focus_flags;                     // WE_FOCUS_F_* 位组合（编辑态/OK按住/OK武装/松开挂起）
+        uint8_t focus_flags;                     // WE_FOCUS_F_* 位组合（编辑态/OK按住/OK待回发/松开挂起/光标可见）
         uint8_t key_flash_left_ms;               // OK 最短按压窗口剩余毫秒（task_handler 直接倒计时，不占动画节点）
         uint8_t key_queue[WE_CFG_KEY_QUEUE_LEN]; // 语义键环形队列（SPSC：注入侧只写 tail，消费侧只写 head，中断注入安全）
         volatile uint8_t key_q_head;             // 队头下标（仅消费侧写；head==tail 为空）
         volatile uint8_t key_q_tail;             // 队尾下标（仅注入侧写；容量 = 队列深度-1）
+        volatile uint8_t key_ok_drop_seq;        // OK 松开沿因队满被丢弃的计数（仅注入侧写）
+        uint8_t key_ok_drop_ack;                 // 消费侧已对账的丢弃计数副本（对账补投防 OK 卡按压）
 #endif
 
-        /* 渲染统计信息
-         *
-         * 统计口径：
-         * 1. stat_render_frames：真正完成一次脏区提交就记 1 帧
-         * 2. stat_pfb_pushes：这一帧里实际推了多少个 PFB 小块
-         * 3. stat_pushed_pixels：累计真正送到底层 LCD 的像素数
-         *
-         * 这样在 STM32 真机上看性能时，不会只剩一个 FPS 数字，
-         * 还能一起判断是否是“脏矩形太碎”导致效率下降。
-         */
+        /* 渲染统计：真正完成一次脏区提交就记 1 帧（FPS 显示的数据源）。 */
 #if (WE_CFG_ENABLE_RENDER_STATS == 1)
         uint32_t stat_render_frames;
-        uint32_t stat_pfb_pushes;
-        uint32_t stat_pushed_pixels;
 #endif
     } we_lcd_t;
 
@@ -383,10 +398,10 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
     typedef struct
     {
         uint16_t adv_w;   // 步进宽度 (用于光标前进)
-        uint16_t box_w;   // 有效墨迹裁剪宽度
-        uint16_t box_h;   // 有效墨迹裁剪高度
-        int16_t x_ofs;    // 有效墨迹 X 偏移
-        int16_t y_ofs;    // 有效墨迹 Y 偏移
+        uint16_t box_w;   // 字形有效像素区宽度（去除四周空白后实际要画的范围）
+        uint16_t box_h;   // 字形有效像素区高度
+        int16_t x_ofs;    // 有效像素区相对光标原点的 X 偏移
+        int16_t y_ofs;    // 有效像素区相对光标原点的 Y 偏移
         uint32_t offset;  // font2c internal: 相对 bitmap_data 的偏移
     } we_glyph_info_t;
 
@@ -477,55 +492,58 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * 4. 回调参数 elapsed_ms 固定等于创建时的 period_ms。
      *    当主循环偶尔抖动时，内核会按周期补偿多次回调，
      *    而不是把一个很大的时间片一次性塞给业务层；
-     * 5. 常见用法示例：
-     *    int8_t anim_timer = we_gui_timer_create(lcd, we_btn_simple_demo_tick, 16U, 1U);
-     *    int8_t hide_timer = we_gui_timer_create(lcd, hide_cb, 1200U, 0U);
-     *    we_gui_timer_restart(lcd, hide_timer);
-     *    we_gui_timer_stop(lcd, anim_timer);
+     * 5. 常见用法示例（节点由调用方持有，静态或生命周期覆盖使用期）：
+     *    static we_gui_timer_t anim_timer, hide_timer;
+     *    we_gui_timer_create(lcd, &anim_timer, we_btn_simple_demo_tick, 16U, 1U);
+     *    we_gui_timer_create(lcd, &hide_timer, hide_cb, 1200U, 0U);
+     *    we_gui_timer_restart(lcd, &hide_timer);
+     *    we_gui_timer_stop(lcd, &anim_timer);
      */
     /**
-     * @brief 创建并启动一个 GUI 定时器。
+     * @brief 创建并启动一个 GUI 定时器（不会失败）。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
+     * @param t 传入，调用方持有的定时器节点。
      * @param cb 传入，定时器回调函数，回调参数中的 elapsed_ms 为定时器周期值。
      * @param period_ms 传入，定时器周期，单位毫秒，必须大于 0。
      * @param repeat 传入，1 表示周期定时器，0 表示单次定时器。
-     * @return 定时器编号，成功时返回 0 ~ WE_CFG_GUI_TIMER_MAX_NUM-1，失败返回 -1。
-     * @note 这是面向业务层的公开时间调度接口，适合延时触发、周期刷新和 demo 动画。
+     * @return 无。
+     * @note 与 we_anim_start 同构：节点已在链上时仅刷新参数（幂等）。
      */
-    int8_t we_gui_timer_create(we_lcd_t *p_lcd, we_gui_timer_cb_t cb, uint16_t period_ms, uint8_t repeat);
+    void we_gui_timer_create(we_lcd_t *p_lcd, we_gui_timer_t *t, we_gui_timer_cb_t cb,
+                             uint16_t period_ms, uint8_t repeat);
     /**
      * @brief 启动一个已创建的 GUI 定时器。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
-     * @param timer_id 传入，定时器编号。
+     * @param t 传入，定时器节点。
      * @return 无。
      * @note 这个接口主要用于“先 stop 后恢复”的场景。
      *       定时器在 create 成功后默认就是激活状态。
      */
-    void we_gui_timer_start(we_lcd_t *p_lcd, int8_t timer_id);
+    void we_gui_timer_start(we_lcd_t *p_lcd, we_gui_timer_t *t);
     /**
      * @brief 停止一个 GUI 定时器。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
-     * @param timer_id 传入，定时器编号。
+     * @param t 传入，定时器节点。
      * @return 无。
      * @note 停止后会清空当前累计时间，再次启动时重新开始计时。
      */
-    void we_gui_timer_stop(we_lcd_t *p_lcd, int8_t timer_id);
+    void we_gui_timer_stop(we_lcd_t *p_lcd, we_gui_timer_t *t);
     /**
      * @brief 重启一个 GUI 定时器。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
-     * @param timer_id 传入，定时器编号。
+     * @param t 传入，定时器节点。
      * @return 无。
      * @note 重启会清空累计时间并重新进入激活状态。
      */
-    void we_gui_timer_restart(we_lcd_t *p_lcd, int8_t timer_id);
+    void we_gui_timer_restart(we_lcd_t *p_lcd, we_gui_timer_t *t);
     /**
      * @brief 删除一个 GUI 定时器。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
-     * @param timer_id 传入，定时器编号。
+     * @param t 传入，定时器节点。
      * @return 无。
      * @note 删除后槽位会被完全清空，可供后续重新创建。
      */
-    void we_gui_timer_delete(we_lcd_t *p_lcd, int8_t timer_id);
+    void we_gui_timer_delete(we_lcd_t *p_lcd, we_gui_timer_t *t);
     /**
      * @brief 执行一次 GUI 主任务处理
      * @param p_lcd 传入：GUI 屏幕上下文指针
@@ -539,6 +557,18 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @return 无
      */
     void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data);
+    /**
+     * @brief 由祖先容器接管当前按压（手势接管）
+     * @param lcd 传入：GUI 屏幕上下文指针
+     * @param obj 传入：接管手势的容器对象
+     * @return 无
+     * @note 原按压对象会先收到一次 WE_EVENT_RELEASED 以回弹按压视觉——
+     *       与内核"点击只在 pressed_obj == 命中对象时才派发"配合，
+     *       被接管的子控件不会触发 CLICKED。容器通常不必直接调用本接口：
+     *       内核在位移越 WE_CFG_DRAG_THRESHOLD 时会沿祖先链发
+     *       WE_EVENT_DRAG_BEGIN 接管询问，返回非 0 的容器由内核代为接管。
+     */
+    void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj);
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
     /**
@@ -725,9 +755,64 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_obj_attach_to_lcd(we_lcd_t *lcd, we_obj_t *obj);
     /**
+     * @brief 把对象挂到 LCD 顶层链表（保证绘制在普通层与焦点光标之上）
+     * @param lcd 传入：GUI 屏幕上下文指针
+     * @param obj 传入：目标对象（可来自普通层：会先摘链再挂入）
+     * @return 无
+     * @note 顶层内部仍按链序绘制（后挂者更靠上）。toast/msgbox 用它置顶：
+     *       不打乱普通层的用户 Z 序，也不会被后来的 bring_to_front 盖住。
+     *       WE_CFG_ENABLE_TOP_LAYER=0 裁剪档下本函数
+     *       退化为 we_obj_bring_to_front（失去"保证置顶"，接口保持可链接）。
+     */
+    void we_obj_attach_to_top(we_lcd_t *lcd, we_obj_t *obj);
+    /**
+     * @brief 声明一个顶层对象为模态（弹层语义：吞下全部输入与按键）
+     * @param lcd 传入：GUI 屏幕上下文指针
+     * @param obj 传入：模态对象（应已挂顶层链）
+     * @return 无
+     * @note 模态期间：触摸命中限定顶层链，未命中即视为命中模态对象本身
+     *       （点外收起逻辑留在控件事件回调里）；语义键按下沿以裸键值、
+     *       松开沿以 键值|WE_KEY_RELEASE_FLAG 直送其 event_cb。
+     *       已有旧模态时先向旧模态发 WE_EVENT_MODAL_CLOSE（互斥策略——
+     *       模态之间默认替换，非模态顶层对象如 toast 不受影响可共存）。
+     *       WE_CFG_ENABLE_TOP_LAYER=0 裁剪档下 modal 三函数退化为空 stub
+     *       （we_modal_get 恒 NULL），弹层失去吞键与全屏命中语义。
+     */
+    void we_modal_open(we_lcd_t *lcd, we_obj_t *obj);
+    /**
+     * @brief 解除模态（owner 匹配才生效；不摘对象、不标脏，由调用方收尾）
+     */
+    void we_modal_close(we_lcd_t *lcd, we_obj_t *obj);
+    /**
+     * @brief 查询当前模态对象（NULL = 无模态）
+     */
+    we_obj_t *we_modal_get(we_lcd_t *lcd);
+    /**
+     * @brief 把对象从其当前所属链表摘出（父容器 children_head 或 LCD 顶层链表）
+     * @param obj 传入：目标对象指针
+     * @return 无
+     * @note 摘链后清空 next 与 parent，但保留 lcd / class_p，对象仍然可用——
+     *       供改挂父子关系、或把对象挂上顶层链之前调用。
+     *       不标脏：调用方通常紧接着重新挂链或自行标脏。
+     */
+    void we_obj_detach(we_obj_t *obj);
+    /**
+     * @brief 改挂对象的父子关系（先摘链，再挂到新宿主链表尾部）
+     * @param obj 传入：目标对象指针
+     * @param parent 传入：新父容器；NULL 表示挂回 LCD 顶层链表
+     * @return 无
+     * @note parent 必须是带 WE_CLASS_FLAG_CHILD_OWNER 的复合容器，否则本调用
+     *       退化为“挂回顶层”，不会把对象挂到一个没有 children_head 的对象上。
+     *       只维护链表与 parent 指针；容器自身的槽位表与局部坐标由容器的
+     *       add_child 负责。
+     */
+    void we_obj_set_parent(we_obj_t *obj, we_obj_t *parent);
+    /**
      * @brief 删除一个对象
      * @param obj 传入：待删除对象指针
      * @return 无
+     * @note 唯一删除入口：先回调 class_p->delete_cb，再后序递归删除复合容器
+     *       的子控件，最后由内核统一回收按压 / 焦点 / 弹层 / 动画节点四类引用。
      */
     void we_obj_delete(we_obj_t *obj);
     /**
@@ -773,30 +858,6 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_obj_invalidate_area_exclude(we_obj_t *obj, int16_t x, int16_t y, int16_t w, int16_t h,
                                         int16_t ex, int16_t ey, int16_t ew, int16_t eh);
-
-    /* === LCD 级 overlay popup API === */
-    void we_popup_layer_open(we_lcd_t *lcd, uint8_t type, void *owner,
-                             const we_area_t *area,
-                             void (*draw_cb)(void *owner),
-                             uint8_t (*event_cb)(void *owner, we_event_t event, we_indev_data_t *data),
-                             void (*close_cb)(void *owner));
-    void we_popup_layer_close(we_lcd_t *lcd, void *owner);
-    void we_popup_layer_close_any(we_lcd_t *lcd);
-    uint8_t we_popup_layer_is_owner(we_lcd_t *lcd, void *owner);
-    void we_popup_layer_set_area(we_lcd_t *lcd, void *owner, const we_area_t *area);
-    void we_popup_layer_invalidate(we_lcd_t *lcd);
-#if (WE_CFG_ENABLE_KEY_INPUT == 1)
-    /**
-     * @brief 为当前 overlay popup 挂接语义键回调（弹层键通道）
-     * @param lcd 传入，GUI 屏幕上下文指针
-     * @param owner 传入，popup 拥有者（不匹配则忽略）
-     * @param key_cb 传入，键回调；NULL 恢复"吞掉全部按键"模态语义
-     * @return 无
-     * @note 在 we_popup_layer_open 之后调用；弹层关闭时自动清空。
-     */
-    void we_popup_layer_set_key_cb(we_lcd_t *lcd, void *owner,
-                                   uint8_t (*key_cb)(void *owner, uint8_t key));
-#endif
 
     /* === 图形绘制 API === */
     /**

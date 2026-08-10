@@ -192,13 +192,4 @@ void we_toggle_obj_delete(we_toggle_obj_t *obj);
  */
 void we_toggle_set_opacity(we_toggle_obj_t *obj, uint8_t opacity);
 
-/**
- * @brief 占位接口：当前实现不需要外部主动推进动画。
- * @param obj 开关控件对象指针。
- */
-static inline void we_toggle_update_anim(we_toggle_obj_t *obj)
-{
-    (void)obj;
-}
-
 #endif /* __WE_WIDGET_TOGGLE_H */

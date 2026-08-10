@@ -11,7 +11,7 @@
  *   4. 完整放不进 h 的行不画；ellipsis 开启时最后一个可容纳行若还有
  *      剩余文本，行末预留 "..." 宽度截断绘制。
  * 每行经内部栈缓冲拷贝出 nul 结尾片段后交给 we_draw_string；绘制期间
- * 把 PFB 窗口收窄到自身矩形（marquee/group 同款），越界墨迹自动被裁掉。
+ * 把 PFB 窗口收窄到自身矩形（marquee/group 同款），越界像素自动被裁掉。
  */
 
 #include "we_widget_mlabel.h"
@@ -270,7 +270,7 @@ static void _mlabel_draw_cb(void *ptr)
         return;
 
     {
-        /* marquee/group 同款 PFB 窗口收窄：窗口外的字形墨迹被自动裁掉 */
+        /* marquee/group 同款 PFB 窗口收窄：窗口外的字形像素被自动裁掉 */
         we_area_t old_pfb_area = lcd->pfb_area;
         uint16_t old_y_start = lcd->pfb_y_start;
         uint16_t old_y_end = lcd->pfb_y_end;

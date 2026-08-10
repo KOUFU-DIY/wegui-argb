@@ -16,8 +16,6 @@
 - `we_popup_set_target_y(...)`
 - `we_popup_show(...)`
 - `we_popup_hide(...)`
-- `we_msgbox_show(...)`
-- `we_msgbox_hide(...)`
 
 ## 可调宏
 在 `we_user_config.h` 中可覆盖：

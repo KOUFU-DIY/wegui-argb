@@ -32,7 +32,7 @@
 - `WE_SLIDESHOW_SNAP_COMPLEX_DAMP_DEN`
 - `WE_SLIDESHOW_SNAP_COMPLEX_MAX_STEP`
 - `WE_SLIDESHOW_PAGE_MAX`
-- `WE_SLIDESHOW_CHILD_MAX`
+- （子控件数量无上限，槽位表已移除）
 
 ## 事件与行为
 - 支持拖拽、释放吸附、左右滑动切页

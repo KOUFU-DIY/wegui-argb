@@ -31,6 +31,18 @@ extern "C"
      */
     void sim_lcd_update(void);
 
+    /**
+     * @brief 对当前屏幕缓冲做 FNV-1a 链式哈希（autotest 帧校验用）
+     * @param h 上一帧累计哈希（首帧传 2166136261u）
+     * @return 融入本帧后的哈希值
+     */
+    uint32_t sim_lcd_hash(uint32_t h);
+
+    /**
+     * @brief 把当前屏幕缓冲写为 PPM（autotest 诊断用）
+     */
+    void sim_lcd_dump_ppm(const char *path);
+
 #define lcd_set_addr sim_lcd_set_addr
 
 #if (LCD_DEEP == DEEP_RGB565)

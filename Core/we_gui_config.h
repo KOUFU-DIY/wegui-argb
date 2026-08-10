@@ -88,10 +88,6 @@
 #error "WE_CFG_ENABLE_INDEXED_QOI must be defined by platform port config."
 #endif
 
-#ifndef WE_CFG_GUI_TIMER_MAX_NUM
-#error "WE_CFG_GUI_TIMER_MAX_NUM must be defined by platform port config."
-#endif
-
 #ifndef WE_CFG_ENABLE_INPUT_PORT_BIND
 #error "WE_CFG_ENABLE_INPUT_PORT_BIND must be defined by platform port config."
 #endif
@@ -107,10 +103,9 @@
 #endif
 
 /* 渲染性能统计开关。
- * 1：保留 stat_render_frames / stat_pfb_pushes / stat_pushed_pixels 三个计数器，
- *    可用于 FPS 显示和真机性能分析；
- * 0：从 we_lcd_t 中去掉这 3 个 uint32 字段（每实例省 12 字节 RAM），
- *    并消除推屏热路径里的累加开销，适合对 RAM 敏感的量产固件。
+ * 1：保留 stat_render_frames 计帧计数器，供 FPS 显示与真机帧率观测；
+ * 0：从 we_lcd_t 中去掉该 uint32 字段并消除计帧自增，
+ *    适合对 RAM 敏感的量产固件。
  * 平台端口不定义时默认启用，保证 FPS demo 等开箱即用。 */
 #ifndef WE_CFG_ENABLE_RENDER_STATS
 #define WE_CFG_ENABLE_RENDER_STATS 1
@@ -126,10 +121,59 @@
 #define WE_CFG_DEBUG_PERF_STRESS 0
 #endif
 
+/* 断言钩子：开发期可在用户配置里定义为自己的处理（打印/死循环/断点），
+ * 发布档保持默认空实现，零代码零开销。
+ * 覆盖范围：对象/定时器/动画/模态的生命周期 API 与各 init 绑定入口
+ * （"参数明显非法 = 调用方代码写错"的冷入口）；断言之后紧跟的静默
+ * 判空守卫保持不变——发布档行为始终是容错返回，断言只是开发期放大器。
+ * 不覆盖：逐帧热路径（tick/task_handler/标脏/命中测试）与可在中断里
+ * 调用的键注入三函数（we_gui_key_inject/press/release）。 */
+#ifndef WE_ASSERT
+#define WE_ASSERT(expr) ((void)0)
+#endif
+
+/* 定时器单帧补偿上限：主循环被长时间阻塞（flash 擦写/长中断）后恢复时，
+ * 周期定时器按补偿语义会在一帧内连续补发错过的节拍——本宏给补发次数
+ * 封顶，超出部分丢弃（从当前时刻重新计时），避免恢复帧被回调风暴卡死。
+ * 正常运行（每帧最多触发 1~2 次）不受影响。 */
+#ifndef WE_CFG_TIMER_CATCHUP_MAX
+#define WE_CFG_TIMER_CATCHUP_MAX 4
+#endif
+
+/* 手势接管阈值（像素）：按压后位移超过此值，内核沿祖先链发起
+ * WE_EVENT_DRAG_BEGIN 接管询问，让可滚动容器从子控件手里接管手势。
+ * 与 WE_CFG_SWIPE_THRESHOLD（松手时判定快扫，默认 30）是两码事。 */
+#ifndef WE_CFG_DRAG_THRESHOLD
+#define WE_CFG_DRAG_THRESHOLD 8
+#endif
+
+/* 层次输入子开关（默认开）。
+ * 1：触摸命中测试递归下钻复合容器子树，STAY 位移越阈值时沿祖先链发起
+ *    WE_EVENT_DRAG_BEGIN 接管询问——"可滚动容器里放交互控件"依赖这两者；
+ * 0：命中测试只扫本层链表（容器整体作为一个控件被命中，子控件收不到
+ *    触摸），接管询问编译剔除。控件全部平铺在屏幕上、不用 scroll_panel/
+ *    list 类容器交互的产品可省下钻递归与询问逻辑的 ROM 与调用栈。 */
+#ifndef WE_CFG_ENABLE_NESTED_INPUT
+#define WE_CFG_ENABLE_NESTED_INPUT 1
+#endif
+
+/* 顶层链 + 模态子开关（默认开）。
+ * 1：we_obj_attach_to_top 把对象挂顶层链（普通层与焦点光标之后绘制、
+ *    命中优先），we_modal_open 声明模态（命中限顶层、未命中交模态对象、
+ *    语义键双沿直送其 event_cb）；
+ * 0：整套编译剔除——we_lcd_t 不含顶层链/模态字段，we_obj_attach_to_top
+ *    退化为 we_obj_bring_to_front（仍置顶但可能被普通层后来者盖住），
+ *    modal 三函数退化为空操作 stub（we_modal_get 恒返回 NULL）。
+ *    msgbox/toast/dropdown 弹层照常编译可用，只是失去"保证置顶"与
+ *    模态吞键/全屏命中语义。不用弹层类控件的产品可整段裁掉。 */
+#ifndef WE_CFG_ENABLE_TOP_LAYER
+#define WE_CFG_ENABLE_TOP_LAYER 1
+#endif
+
 /* 全局聚焦 + 按键导航总开关。
  * 1：启用 we_gui_key_inject 键值注入、焦点管理器、分层作用域导航
  *    （OK 进入容器 / BACK 退出容器）与驱动级矩形焦点光标；
- * 0：全部编译剔除——we_lcd_t 不含任何焦点字段、we_class_t 不含 key_cb、
+ * 0：全部编译剔除——we_lcd_t 不含任何焦点字段、语义键事件不再派发、
  *    各控件按键回调整体不参与编译，纯触摸工程零 ROM/RAM 成本。
  * 平台端口不定义时默认关闭。 */
 #ifndef WE_CFG_ENABLE_KEY_INPUT
@@ -156,15 +200,17 @@
 #define WE_CFG_FOCUS_NESTED 1
 #endif
 
-/* 语义键环形队列深度（须为 2 的幂；SPSC 单生产者单消费者语义，
- * 实际容量 = 深度-1，队满时丢弃新注入的键值）。
- * 按下/松开双沿各占一个槽位，tap 式注入一次占两格，故默认给到 8。 */
+/* 语义键环形队列深度（须为 2 的幂且 >= 4；SPSC 单生产者单消费者语义，
+ * 实际容量 = 深度-1，队满时丢弃新注入的键值；OK 松开沿被丢弃时消费侧
+ * 会对账补投，不会卡在按压态）。
+ * 按下/松开双沿各占一个槽位，tap 式注入一次占两格——深度 2（容量 1）
+ * 连一次 tap 都装不下，故下限 4；默认给到 8。 */
 #ifndef WE_CFG_KEY_QUEUE_LEN
 #define WE_CFG_KEY_QUEUE_LEN 8
 #endif
 
-#if (WE_CFG_KEY_QUEUE_LEN < 2) || ((WE_CFG_KEY_QUEUE_LEN & (WE_CFG_KEY_QUEUE_LEN - 1)) != 0)
-#error "WE_CFG_KEY_QUEUE_LEN must be a power of two (2/4/8/...): the ring indices wrap with & (LEN-1), which avoids pulling in __aeabi_uidivmod on Cortex-M0."
+#if (WE_CFG_KEY_QUEUE_LEN < 4) || ((WE_CFG_KEY_QUEUE_LEN & (WE_CFG_KEY_QUEUE_LEN - 1)) != 0)
+#error "WE_CFG_KEY_QUEUE_LEN must be a power of two >= 4 (a tap injects two edges; ring wraps with & (LEN-1) to avoid __aeabi_uidivmod on Cortex-M0)."
 #endif
 
 /* 焦点光标框线宽（像素）。 */
