@@ -245,7 +245,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1"
 - `tool/0.tool/` — 底层转换器（font2c / img2bin_raw / img2bin_indexqoi / bin2c）
 - `tool/1.font2c/` — 字体取模（向导生成配置 + 一键构建；内置字体出 `.c/.h`，外挂字体出索引 + 字形 `.bin`）
 - `tool/2.img2c/` — 图片取模（按 像素格式 × 压缩 × 去向 分桶：`*_2c` 合并为内置数组，`*_2bin` 出散 bin；含 A1/A2/A4/A8 透明位图）
-- `tool/3.bin2c/` — 外挂资源合并（字体 + 图片 bin → `merged_bin.bin` + 地址表 `.c/.h`；另出仅供烧录工程的嵌数据版）
+- `tool/3.bin2c/` — 外挂资源合并（字体 + 图片 bin → `merged_bin.bin` + 地址表 `.c/.h`；另出仅供烧录工程的嵌数据版——体积大不入库，烧录前跑一次 `build_bin.bat` 再生）
 - `tool/4.STM32F103_ex_flash_download/` — W25Qxx 烧录工程（经调试器用自制 FLM 算法写入外挂 Flash）
 - `tool/0.1.2.3.update_all.bat` — 一键串联 1→2→3
 
