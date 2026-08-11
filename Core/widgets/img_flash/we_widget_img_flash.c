@@ -154,19 +154,22 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
                                               we_flash_img_obj_t *obj,
                                               uint8_t opacity)
 {
-    /* 每次绘制时读取 13 字节内层头，省去结构体缓存字段 */
-    uint8_t  inner[13];
-    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 13U);
+    /* 每次绘制时读取 14 字节 V2 索引头，省去结构体缓存字段 */
+    uint8_t  inner[14];
+    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
     uint8_t  head_size = inner[0];
     uint16_t interval  = ((uint16_t)inner[5]  << 8) | inner[6];
     uint16_t u16_size  = ((uint16_t)inner[7]  << 8) | inner[8];
     uint16_t u24_size  = ((uint16_t)inner[9]  << 8) | inner[10];
     uint16_t u32_size  = ((uint16_t)inner[11] << 8) | inner[12];
+    uint8_t  pal_count = inner[13];
     uint32_t idx_off   = head_size;
-    uint32_t dat_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
+    uint32_t pal_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
+    uint32_t dat_off   = pal_off + (uint32_t)pal_count * 2U;
 
-    /* 防御：索引头固定读取 13 字节，head_size 小于 13 说明资源头已损坏。 */
-    if (head_size < 13U)
+    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）；
+     * 调色盘条目数上限 64，超出视为损坏流。 */
+    if (head_size != 0x0EU || pal_count > 64U)
         return;
 
     int16_t  x0    = obj->base.x;
@@ -252,6 +255,12 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
     uint16_t cur_x      = (uint16_t)(jump_pixel % img_w);
     uint16_t cur_y      = (uint16_t)(jump_pixel / img_w);
 
+    /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 2 字节 = 128B）：
+     * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
+    uint8_t pal[128];
+    if (pal_count > 0U)
+        p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 2U);
+
     /* ---- 初始化流，定位到解码起点 ---- */
     flash_stream_t stream;
     flash_stream_init(&stream, p_lcd->storage_read_cb,
@@ -300,7 +309,22 @@ uint8_t nb   = flash_stream_get(&stream);
             b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
             cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
         }
-        else if ((flag & 0xC0U) == 0xC0U)
+        else if (flag < 0x40U)
+        {
+            /* 0x00..0x3F：静态调色盘 op（V2），查栈缓存的调色盘 */
+            uint8_t h;
+            uint8_t l;
+
+            if (flag >= pal_count)
+                return; /* 超出条目数视为损坏流 */
+            h = pal[(uint16_t)flag << 1];
+            l = pal[((uint16_t)flag << 1) + 1U];
+            cur_pixel = ((uint16_t)h << 8) | l;
+            r = h >> 3;
+            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+            b = l & 0x1FU;
+        }
+        else /* 0xC0..0xFD：RUN */
         {
             uint8_t run = (flag & 0x3FU) + 1U;
 colour_t fg = we_color_from_rgb565(cur_pixel);
@@ -357,12 +381,13 @@ we_store_blended_color(dst, fg, opacity);
  * IMG_ARGB8565_INDEXQOI Flash 渲染器
  *
  * 与 RGB565 版本的差异：
+ *   0x00..0x3F → 静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha）
  *   0xFF → 读 3 字节 [A][H][L]，更新 cur_alpha + RGB565
  *   0xFE → 读 2 字节 [H][L]，alpha 不变
  *   输出时 final_alpha = cur_alpha × opacity / 255
  *
- * 前提：取模工具须保证每个 index entry point 处的第一个 opcode 为 0xFF，
- * 使解码器 seek 后能立即重建完整状态（包括 cur_alpha）。
+ * V2 段首（索引点）op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
+ * 解码器 seek 后即可自包含重建完整状态（包括 cur_alpha；调色盘全局有效）。
  * -------------------------------------------------------------------------- */
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 
@@ -376,18 +401,22 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
                                                we_flash_img_obj_t *obj,
                                                uint8_t opacity)
 {
-    uint8_t  inner[13];
-    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 13U);
+    /* 每次绘制时读取 14 字节 V2 索引头，省去结构体缓存字段 */
+    uint8_t  inner[14];
+    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
     uint8_t  head_size = inner[0];
     uint16_t interval  = ((uint16_t)inner[5]  << 8) | inner[6];
     uint16_t u16_size  = ((uint16_t)inner[7]  << 8) | inner[8];
     uint16_t u24_size  = ((uint16_t)inner[9]  << 8) | inner[10];
     uint16_t u32_size  = ((uint16_t)inner[11] << 8) | inner[12];
+    uint8_t  pal_count = inner[13];
     uint32_t idx_off   = head_size;
-    uint32_t dat_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
+    uint32_t pal_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
+    uint32_t dat_off   = pal_off + (uint32_t)pal_count * 3U;
 
-    /* 防御：索引头固定读取 13 字节，head_size 小于 13 说明资源头已损坏。 */
-    if (head_size < 13U)
+    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）；
+     * 调色盘条目数上限 64，超出视为损坏流。 */
+    if (head_size != 0x0EU || pal_count > 64U)
         return;
 
     int16_t  x0    = obj->base.x;
@@ -470,6 +499,12 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
     uint16_t cur_x      = (uint16_t)(jump_pixel % img_w);
     uint16_t cur_y      = (uint16_t)(jump_pixel / img_w);
 
+    /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 3 字节 = 192B）：
+     * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
+    uint8_t pal[192];
+    if (pal_count > 0U)
+        p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 3U);
+
     flash_stream_t stream;
     flash_stream_init(&stream, p_lcd->storage_read_cb,
                       obj->flash_addr + 6U + dat_off);
@@ -528,7 +563,25 @@ uint8_t nb = flash_stream_get(&stream);
             b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
             cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
         }
-        else if ((flag & 0xC0U) == 0xC0U)
+        else if (flag < 0x40U)
+        {
+            /* 0x00..0x3F：静态调色盘 op（V2），条目 3 字节 [A][H][L]（含 Alpha） */
+            uint16_t pi;
+            uint8_t h;
+            uint8_t l;
+
+            if (flag >= pal_count)
+                return; /* 超出条目数视为损坏流 */
+            pi = (uint16_t)flag * 3U;
+            cur_alpha = pal[pi];
+            h = pal[pi + 1U];
+            l = pal[pi + 2U];
+            cur_pixel = ((uint16_t)h << 8) | l;
+            r = h >> 3;
+            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+            b = l & 0x1FU;
+        }
+        else /* 0xC0..0xFD：RUN */
         {
             uint8_t  run         = (flag & 0x3FU) + 1U;
             uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);

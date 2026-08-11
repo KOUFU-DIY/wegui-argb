@@ -347,13 +347,15 @@ void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t 
 }
 
 /* --------------------------------------------------------------------------
- * 索引 QOI 绘制入口
+ * 索引 QOI 绘制入口（V2 流：14 字节索引头 0x0E + 三档跳转索引 + 静态调色盘）
  *
  * 当前工程只保留“索引 QOI”这一条图片解码路径。
  * 原始 QOI 已经在编译期开关里裁掉，目的有三点：
  * 1. 减少 Flash 占用
  * 2. 简化图片控件的格式分发逻辑
  * 3. 只保留当前实际会用到的解码能力
+ * 段首（索引点）op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
+ * 因此从任意索引点跳入解码自包含；调色盘全局有效、解码中永不修改。
  * -------------------------------------------------------------------------- */
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 /* --------------------------------------------------------------------------
@@ -376,6 +378,8 @@ typedef struct
     uint16_t dst_stride;
     const uint8_t *arry;     /* 解码起点指针（已跳到最近的字节偏移） */
     const uint8_t *data_end; /* 解码字节流保守硬上界（最坏 4 字节/像素），防越界读 */
+    const uint8_t *palette;  /* 静态调色盘起点（每项 = 完整原始格式像素，全局有效） */
+    uint8_t pal_count;       /* 调色盘条目数 0..64（0 = 无调色盘） */
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
@@ -383,17 +387,19 @@ typedef struct
 } _we_qoi_dec_t;
 
 /**
- * @brief 解析索引 QOI 头部、按目标区域跳转解码起点并算好裁剪参数
+ * @brief 解析索引 QOI V2 头部、按目标区域跳转解码起点并算好裁剪参数
  * @param p_lcd 传入：GUI 屏幕上下文指针
  * @param x0 传入：图片左上角屏幕 X 坐标
  * @param y0 传入：图片左上角屏幕 Y 坐标
  * @param img 传入：索引 QOI 图片资源描述
- * @param dec 传出：解码上下文（裁剪范围、起点指针、起始像素坐标等）
+ * @param px_bytes 传入：目标格式每像素字节数（rgb565=2，argb8565=3；用于定位调色盘尾）
+ * @param dec 传出：解码上下文（裁剪范围、起点指针、调色盘、起始像素坐标等）
  * @return 1 表示需要继续解码，0 表示整图不在当前 PFB 切片内或数据非法
  * @note RGB565 / ARGB8565 两条解码路径共用本函数完成全部前置准备。
+ *       payload 布局：[14字节索引头][u16区][u24区][u32区][静态调色盘][QOI数据流]。
  */
 static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
-                                      const uint8_t *img, _we_qoi_dec_t *dec)
+                                      const uint8_t *img, uint8_t px_bytes, _we_qoi_dec_t *dec)
 {
     uint16_t img_w = IMG_DAT_WIDTH(img);
     uint16_t img_h = IMG_DAT_HEIGHT(img);
@@ -420,13 +426,19 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
         return 0U;
 
     uint8_t head_size = dat[0];
+
+    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）。 */
+    if (head_size != 0x0EU)
+        return 0U;
+
     uint16_t interval = (dat[5] << 8) | dat[6];
     uint16_t u16_size = (dat[7] << 8) | dat[8];
     uint16_t u24_size = (dat[9] << 8) | dat[10];
     uint16_t u32_size = (dat[11] << 8) | dat[12];
+    uint8_t pal_count = dat[13];
 
-    /* 防御：索引头固定读取 dat[0..12]，head_size 小于 13 说明头部已损坏。 */
-    if (head_size < 13U)
+    /* 调色盘条目数上限 64，超出视为损坏流。 */
+    if (pal_count > 64U)
         return 0U;
 
     uint16_t num_u16 = u16_size / 2;
@@ -437,7 +449,8 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     const uint8_t *idx_u16 = dat + head_size;
     const uint8_t *idx_u24 = idx_u16 + u16_size;
     const uint8_t *idx_u32 = idx_u24 + u24_size;
-    const uint8_t *qoi_start = idx_u32 + u32_size;
+    const uint8_t *palette = idx_u32 + u32_size;
+    const uint8_t *qoi_start = palette + (uint16_t)pal_count * px_bytes;
 
     uint32_t first_needed_pixel = (uint32_t)iy_start * img_w + ix_start;
     uint32_t skip_intervals = (interval > 0) ? (first_needed_pixel / interval) : 0;
@@ -494,6 +507,8 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     dec->dst_stride = p_lcd->pfb_width;
     dec->arry = qoi_start + byte_offset;
     dec->data_end = qoi_start + stream_max;
+    dec->palette = palette;
+    dec->pal_count = pal_count;
     dec->cur_x = (uint16_t)(jump_pixel_idx % img_w);
     dec->cur_y = (uint16_t)(jump_pixel_idx / img_w);
     dec->decoded_pixels = jump_pixel_idx;
@@ -523,6 +538,8 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     uint16_t dst_stride;
     const uint8_t *arry;
     const uint8_t *data_end;
+    const uint8_t *palette;
+    uint8_t pal_count;
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
@@ -533,7 +550,7 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
         return;
 
     /* 头部解析 + 索引跳转 + 裁剪参数，与 ARGB8565 共用同一前置逻辑。 */
-    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, &dec))
+    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, 2U, &dec))
         return;
 
     img_w = dec.img_w;
@@ -546,6 +563,8 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
     dst_stride = dec.dst_stride;
     arry = dec.arry;
     data_end = dec.data_end;
+    palette = dec.palette;
+    pal_count = dec.pal_count;
     cur_x = dec.cur_x;
     cur_y = dec.cur_y;
     decoded_pixels = dec.decoded_pixels;
@@ -570,6 +589,7 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
 
         if ((flag == 0xFF) || (flag == 0xFE))
         {
+            /* 0xFF 原始全量（rgb565 流只用 0xFF；0xFE 容错按全量处理） */
             uint8_t h = *arry++;
             uint8_t l = *arry++;
             cur_pixel = (h << 8) | l;
@@ -593,7 +613,25 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
             b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
             cur_pixel = (r << 11) | (g << 5) | b;
         }
-        else if ((flag & 0xC0) == 0xC0)
+        else if (flag < 0x40)
+        {
+            /* 0x00..0x3F：静态调色盘 op（V2）。条目 = 2 字节大端 RGB565，
+             * 全局有效、解码中永不修改；查到即成为后续 DIFF/LUMA 的前像素。 */
+            const uint8_t *pe;
+            uint8_t h;
+            uint8_t l;
+
+            if (flag >= pal_count)
+                return; /* 超出条目数视为损坏流 */
+            pe = palette + ((uint16_t)flag << 1);
+            h = pe[0];
+            l = pe[1];
+            cur_pixel = (h << 8) | l;
+            r = h >> 3;
+            g = ((h & 0x07) << 3) | (l >> 5);
+            b = l & 0x1F;
+        }
+        else /* 0xC0..0xFD：RUN */
         {
             uint8_t run = (flag & 0x3F) + 1;
 
@@ -657,11 +695,12 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
  * 与 RGB565 版本的差异：
  * 1. 像素格式为 24 位：[A(8)][R5G6B5_高(8)][R5G6B5_低(8)]
  * 2. 解码状态额外维护 cur_alpha（当前像素 alpha，0~255）
- * 3. 操作码扩展：
+ * 3. 操作码（V2）：
+ *    - 0x00..0x3F：静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha）
  *    - 0xFF：读 3 字节 [A][H][L]，更新 alpha + RGB565
  *    - 0xFE：读 2 字节 [H][L]，alpha 不变
  *    - 0x40 / 0x80：RGB delta，alpha 不变
- *    - 0xC0：RLE，混色时使用 cur_alpha × opacity / 255
+ *    - 0xC0..0xFD：RLE，混色时使用 cur_alpha × opacity / 255
  * -------------------------------------------------------------------------- */
 /**
  * @brief  在局部帧缓冲(PFB)中绘制索引 QOI 压缩的 ARGB8565 图片
@@ -685,6 +724,8 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     uint16_t dst_stride;
     const uint8_t *arry;
     const uint8_t *data_end;
+    const uint8_t *palette;
+    uint8_t pal_count;
     uint16_t cur_x;
     uint16_t cur_y;
     uint32_t decoded_pixels;
@@ -695,7 +736,7 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
         return;
 
     /* 头部解析 + 索引跳转 + 裁剪参数，与 RGB565 共用同一前置逻辑。 */
-    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, &dec))
+    if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, 3U, &dec))
         return;
 
     img_w = dec.img_w;
@@ -708,6 +749,8 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     dst_stride = dec.dst_stride;
     arry = dec.arry;
     data_end = dec.data_end;
+    palette = dec.palette;
+    pal_count = dec.pal_count;
     cur_x = dec.cur_x;
     cur_y = dec.cur_y;
     decoded_pixels = dec.decoded_pixels;
@@ -772,7 +815,27 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
             b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
             cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
         }
-        else if ((flag & 0xC0) == 0xC0)
+        else if (flag < 0x40)
+        {
+            /* 0x00..0x3F：静态调色盘 op（V2）。条目 = 3 字节 [A][RGB565 大端]，
+             * 含 Alpha 可表达透明度变化；全局有效、解码中永不修改。 */
+            const uint8_t *pe;
+            uint8_t h;
+            uint8_t l;
+
+            if (flag >= pal_count)
+                return; /* 超出条目数视为损坏流 */
+            pe = palette + (uint16_t)flag * 3U;
+            cur_alpha = pe[0];
+            final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+            h = pe[1];
+            l = pe[2];
+            cur_pixel = ((uint16_t)h << 8) | l;
+            r = h >> 3;
+            g = ((h & 0x07) << 3) | (l >> 5);
+            b = l & 0x1F;
+        }
+        else /* 0xC0..0xFD：RUN */
         {
             /* RLE：重复当前 ARGB 像素，final_alpha 已在变 alpha 时算好 */
             uint8_t run = (flag & 0x3F) + 1;

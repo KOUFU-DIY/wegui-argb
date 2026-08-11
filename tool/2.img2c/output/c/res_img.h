@@ -2,7 +2,7 @@
 #ifndef RES_IMG_H
 #define RES_IMG_H
 
-extern const unsigned char demo_argb8565_indexqoi_be_80x80[4479];
+extern const unsigned char demo_argb8565_indexqoi_be_80x80[3261];
 
 extern const unsigned char demo_argb8565_raw_be_80x80[19206];
 
@@ -46,7 +46,7 @@ extern const unsigned char demo_powerdrill_a4_raw_be_48x48[1158];
 
 extern const unsigned char demo_powerdrill_a8_raw_be_48x48[2310];
 
-extern const unsigned char demo_rgb565_indexqoi_be_128x64[9438];
+extern const unsigned char demo_rgb565_indexqoi_be_128x64[6807];
 
 extern const unsigned char demo_rgb565_raw_be_64x80[10246];
 

@@ -1,8 +1,8 @@
-# WeGui-ARGB · V0.2.3
+# WeGui-ARGB · V0.3.0 beta
 
 轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供 SDL2 PC 模拟器。
 
-> 当前版本 **V0.2.3**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
+> 当前版本 **V0.3.0 beta**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
 
 ## 特性
 
@@ -29,13 +29,13 @@
 
 ### 各 demo 单独占用（STM32F030 / Cortex-M0 实测）
 
-每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器 `--gc-sections` 剔除未引用控件）后的 Keil `.map` 实测（V0.2.3 全表重测）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
+每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器 `--gc-sections` 剔除未引用控件）后的 Keil `.map` 实测（V0.2.3 全表实测；3/15/31 三行随 V0.3.0 beta 的 indexQOI V2 重测，其余 demo 不受该变更影响）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
 
 | DEMO_ID | demo / 主要控件 | ROM | RAM | 备注 |
 |---|---|---|---|---|
 | 1 | label | 17.3 KB | 5.84 KB | 基准底座（含约 3.5 KB 字体资产） |
 | 2 | btn | 18.9 KB | 6.00 KB | |
-| 3 | img | 52.8 KB | 5.91 KB | ⚠ 含 demo 内嵌图片资产 ~33 KB（indexqoi ×2 + argb8565 raw） |
+| 3 | img | 49.2 KB | 5.91 KB | ⚠ 含 demo 内嵌图片资产 ~29 KB（indexqoi V2 ×2 + argb8565 raw） |
 | 4 | img_ex（旋转/缩放） | 28.6 KB | 5.86 KB | ⚠ 含 demo 内嵌 RGB565 raw 图 ~10 KB |
 | 5 | arc | 20.1 KB | 5.90 KB | |
 | 6 | group（含子控件） | 20.4 KB | 6.02 KB | |
@@ -47,7 +47,7 @@
 | 12 | toggle | 19.3 KB | 6.17 KB | |
 | 13 | progress（含 btn） | 20.6 KB | 6.00 KB | |
 | 14 | msgbox（含 btn） | 22.1 KB | 6.02 KB | |
-| 15 | flash img（img_flash） | 20.2 KB | 5.95 KB | 需外挂 SPI flash 存储 |
+| 15 | flash img（img_flash） | 20.4 KB | 5.95 KB | 需外挂 SPI flash 存储 |
 | 16 | flash font（font_flash） | 19.9 KB | 6.06 KB | 需外挂 SPI flash 存储 |
 | 17 | slider | 20.2 KB | 6.06 KB | |
 | 18 | scroll_panel（含子控件） | 22.0 KB | 6.27 KB | |
@@ -63,7 +63,7 @@
 | 28 | toast（轻提示） | 20.3 KB | 5.86 KB | |
 | 29 | focus（聚焦导航） | 22.5 KB | 6.12 KB | btn/checkbox/toggle/indicator/group 组合 |
 | 30 | focus2（聚焦编辑态） | 27.9 KB | 6.19 KB | slider/stepper/roller/list 组合 |
-| 31 | img_alpha（透明位图） | 33.8 KB | 6.14 KB | ⚠ 含 A1/A2/A4/A8 位图资产 ~13 KB |
+| 31 | img_alpha（透明位图） | 33.9 KB | 6.14 KB | ⚠ 含 A1/A2/A4/A8 位图资产 ~13 KB |
 
 > ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex`/`img_alpha` 的 ROM 偏大是 demo 内嵌了图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..31 均可单独烧录到 F030。F103 同口径约再大 0.7 KB（多一份外挂 flash 端口实现）。
 
