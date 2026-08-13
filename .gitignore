@@ -1,5 +1,4 @@
 # Build outputs
-Simulator/build*/
 STM32F030/MDK-ARM/Objects/
 STM32F030/MDK-ARM/Listings/
 STM32F030/MDK-ARM/STM32F030/
@@ -9,6 +8,27 @@ tool/4.STM32F103_ex_flash_download/Objects/
 tool/4.STM32F103_ex_flash_download/Listings/
 build_out.txt
 
+# AD14N 目标暂不入库（整目录忽略；下面的产物细则保留，供将来入库时恢复使用）
+AD14N/
+
+# AD14N build outputs (build_ad14n.ps1 -> build/, CodeBlocks -> obj/;
+# post_build 生成物：链接脚本/固件/LTO 中间产物；wegui/ 下保留工具 exe 与 boot/loader/ini)
+AD14N/build/
+AD14N/obj/
+AD14N/sdk/app/post_build/sh54/app.ld
+AD14N/sdk/app/post_build/sh54/app.bin
+AD14N/sdk/app/post_build/sh54/data.bin
+AD14N/sdk/app/post_build/sh54/debug_data.bin
+AD14N/sdk/app/post_build/sh54/download.bat
+AD14N/sdk/app/post_build/sh54/sdk.elf*
+AD14N/sdk/app/post_build/sh54/sdk.bin
+AD14N/sdk/app/post_build/sh54/sdk.symbol.txt
+AD14N/sdk/app/post_build/sh54/wegui/app.bin
+AD14N/sdk/app/post_build/sh54/wegui/jl_isd.*
+AD14N/sdk/app/post_build/sh54/wegui/update.ufw
+AD14N/sdk/app/post_build/sh54/wegui/ota.bin
+AD14N/sdk/app/post_build/sh54/wegui/local.db
+
 # 嵌数据版合并产物（16.7MB C 源，仅烧录工程用；跑 tool/3.bin2c/build_bin.bat 可再生）
 tool/3.bin2c/output/embed/
 
@@ -17,6 +37,7 @@ tool/3.bin2c/output/embed/
 *.uvopt
 *.uvoptx
 *.lnp
+*.layout
 
 # Generic binaries / objects / maps / deps
 *.axf
@@ -38,3 +59,7 @@ tool/gui/
 
 # VS Code local IntelliSense config
 .vscode/c_cpp_properties.json
+
+# SimLite build output and local TCC toolchain
+SimLite/build/
+SimLite/tcc/

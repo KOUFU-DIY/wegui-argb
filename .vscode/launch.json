@@ -2,14 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Simulator: Debug",
+            "name": "SimLite: Debug (gcc)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/Simulator/build/wegui_sim.exe",
-            "cwd": "${workspaceFolder}/Simulator/build",
+            "program": "${workspaceFolder}/SimLite/build/wegui_lite_dev.exe",
+            "args": [
+                "33"
+            ],
+            "cwd": "${workspaceFolder}/SimLite/build",
             "MIMode": "gdb",
             "miDebuggerPath": "D:/msys64/mingw64/bin/gdb.exe",
-            "preLaunchTask": "sim: build",
+            "preLaunchTask": "lite: build dev (gcc, debug)",
             "setupCommands": [
                 {
                     "description": "Enable pretty printing",

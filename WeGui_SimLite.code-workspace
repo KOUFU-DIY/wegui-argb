@@ -1,0 +1,37 @@
+{
+    // WeGui SimLite 轻量模拟器工作区。
+    // 构建/运行任务在 .vscode/tasks.json（lite: 前缀，lite: build 为默认构建任务，
+    // Ctrl+Shift+B 直接编 SimLite）。装上推荐扩展 actboy168.tasks 后，
+    // 底部状态栏出现 "SimLite 编译" / "编译+运行" 两个按钮（其余任务默认隐藏）。
+    // 切换 demo：改 SimLite/main_lite.c 顶部的 DEMO_ID 宏后重编（与硬件目标同
+    // 一套用法）。开发调试工具在 SimLite/debug/，用 build_lite.ps1 -Dev 单独构建。
+    "folders": [
+        {
+            "name": "WeGui (SimLite)",
+            "path": "."
+        }
+    ],
+    "extensions": {
+        "recommendations": [
+            "actboy168.tasks"
+        ]
+    },
+    "settings": {
+        // IntelliSense：SimLite 路径排最前，让 we_sim_port_config.h 解析到 SimLite 这份
+        // （本地 .vscode/c_cpp_properties.json 存在时以其为准）
+        "C_Cpp.default.defines": [
+            "WE_SIMULATOR"
+        ],
+        "C_Cpp.default.includePath": [
+            "${workspaceFolder}/SimLite",
+            "${workspaceFolder}",
+            "${workspaceFolder}/Core",
+            "${workspaceFolder}/Core/widgets",
+            "${workspaceFolder}/Demo",
+            "${workspaceFolder}/Demo/preview",
+            "${workspaceFolder}/tool/1.font2c/output",
+            "${workspaceFolder}/tool/2.img2c/output/c",
+            "${workspaceFolder}/tool/3.bin2c/output"
+        ]
+    }
+}

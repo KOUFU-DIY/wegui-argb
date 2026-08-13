@@ -61,6 +61,7 @@ int main(void)
      * 27 = marquee (滚动字条)     28 = toast (轻提示)
      * 29 = focus (聚焦导航)       30 = focus2 (聚焦编辑态)
      * 31 = img_alpha (A1/A2/A4/A8 透明位图)
+     * 32 = imgbtn (图片按钮)      33 = segdisp (数码管)
      *
      * preview 孵化区（101 起，未打磨、随时可能下架；2026-07 重排：
      * 常用 12 个在前、其余靠后，今后毕业迁出的编号留空洞不复用）：
@@ -72,8 +73,8 @@ int main(void)
      * 111 = joystick (虚拟摇杆)   112 = statusbar (状态栏)
      * 113 = ime_pinyin (拼音输入法) 114 = spinner (加载指示)
      * 115 = btnmatrix (按键矩阵)  116 = radio (单选组)
-     * 117 = sevenseg (数码管)     118 = knob (旋钮)
-     * 119 = colorwheel (色轮)     120 = imgbtn (图片按钮)
+     * 117 = (已毕业→33)           118 = knob (旋钮)
+     * 119 = colorwheel (色轮)     120 = (已毕业→32)
      * 121 = animimg (帧动画)      122 = canvas (自绘画布)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
      * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
@@ -173,6 +174,12 @@ int main(void)
 #elif (DEMO_ID == 31)
     we_img_alpha_simple_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_img_alpha_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 32)
+    we_imgbtn_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, &demo_timer, we_imgbtn_simple_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 33)
+    we_segdisp_simple_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, &demo_timer, we_segdisp_simple_demo_tick, 16U, 1U);
 #elif (DEMO_ID == 101)
     we_keyboard_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_keyboard_preview_demo_tick, 16U, 1U);
@@ -221,18 +228,12 @@ int main(void)
 #elif (DEMO_ID == 116)
     we_radio_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_radio_preview_demo_tick, 16U, 1U);
-#elif (DEMO_ID == 117)
-    we_sevenseg_preview_demo_init(&g_lcd);
-    we_gui_timer_create(&g_lcd, &demo_timer, we_sevenseg_preview_demo_tick, 16U, 1U);
 #elif (DEMO_ID == 118)
     we_knob_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_knob_preview_demo_tick, 16U, 1U);
 #elif (DEMO_ID == 119)
     we_colorwheel_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_colorwheel_preview_demo_tick, 16U, 1U);
-#elif (DEMO_ID == 120)
-    we_imgbtn_preview_demo_init(&g_lcd);
-    we_gui_timer_create(&g_lcd, &demo_timer, we_imgbtn_preview_demo_tick, 16U, 1U);
 #elif (DEMO_ID == 121)
     we_animimg_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_animimg_preview_demo_tick, 16U, 1U);

@@ -16,6 +16,9 @@
  *   0x4 = 索引QOI（V2 流：14 字节索引头 0x0E + 三档跳转索引 + 静态调色盘；
  *         旧版 V1 头 0x0D 不支持，解码器直接拒绝）
  *   0x5 = QOIF (img2bin 工具族预留，Core 暂未实现解码)
+ *   0x6 = 索引QOI_MASK（A8 透明蒙版专用：行字节偏移索引 + 静态字典 +
+ *         INDEX/DIFF/DELTA/RUN/ALPHA 标签流，可选 8/7/6/5bit 量化；
+ *         规格见 tool/0.tool/windows/img2bin_indexqoimask/README）
  *
  * 格式代码[3:0] 像素格式:
  *   0x0 = RGB565    0x1 = RGB888    0x2 = RGB555    0x3 = RGB444
@@ -109,6 +112,8 @@ typedef enum
     IMG_ARGB6666_INDEXQOI = 0x46,
     IMG_ARGB4444_INDEXQOI = 0x47,
     IMG_ARGB8565_INDEXQOI = 0x48,
+
+    IMG_A8_INDEXQOIMASK   = 0x6B, /* 索引QOI_MASK 压缩 A8 透明蒙版（alpha 蒙版目前唯一的压缩格式） */
 } imgarry_type_t;
 
 /* demo 图片数组已迁至资源工作区自动生成（tool/2.img2c/output/c/res_img.c/.h，

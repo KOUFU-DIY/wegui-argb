@@ -4,35 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WeGui-ARGB is a lightweight embedded GUI framework for MCU / SoC targets plus an SDL2 PC simulator. The platform-independent GUI kernel and demos live in `Core/` and `Demo/`; each hardware/simulator target provides only the port layer, startup code, and build project.
+WeGui-ARGB is a lightweight embedded GUI framework for MCU / SoC targets plus a lightweight PC simulator. The platform-independent GUI kernel and demos live in `Core/` and `Demo/`; each hardware/simulator target provides only the port layer, startup code, and build project.
 
 Primary targets currently present in this repository:
-- `Simulator/` — SDL2 PC simulator built with CMake + MinGW/Ninja or MinGW Makefiles.
+- `SimLite/` — PC simulator on the vendored single-header `fenster` backend (Win32 GDI / macOS Cocoa / Linux X11, no SDL), compiled with TCC (vendored-able, ~2.5 MB, second-scale full builds) or system gcc/cc. Replaced the former SDL2+CMake `Simulator/` 2026-08; the golden-CRC autotest harness moved here with bit-identical hashes.
 - `STM32F103/` — Keil MDK-ARM AC5 hardware target, with LCD, input, and W25Qxx external flash ports.
 - `STM32F030/` — Keil MDK-ARM AC5 hardware target, with LCD and input ports.
+- `AD14N/` — JieLi AD142A4 (sh54 core) hardware target, CodeBlocks + pi32 LTO toolchain, with SPI1+DMA LCD port (480×320 ST7796S), single-button key port, and a trimmed in-repo SDK subset.
 
 Full API reference: `WEGUI_API_REFERENCE.md` (ch.16 is a focus/key-nav quick reference; the authoritative description is the "Focus and Key Navigation" section below plus `Core/we_gui_driver.h` comments).
 
 ## Build Commands
 
-### Simulator (CMake + MinGW)
-
-Use the repository wrapper scripts rather than calling CMake directly:
+### SimLite (TCC / gcc, no CMake)
 
 ```powershell
-# Clean configure + build
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1" -Clean
+# Release build (demo chosen by the DEMO_ID macro in SimLite/main_lite.c)
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1"
 
-# Incremental build
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1"
+# Override DEMO_ID from the command line without editing source (-DDEMO_ID=N)
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Demo 25 -Run
 
-# Run latest built simulator
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps1"
+# Developer build wegui_lite_dev (runtime demo select / --shot / --autotest / --list)
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Dev
+
+# macOS / Linux (clang+Cocoa / cc+libx11-dev)
+sh SimLite/build_lite.sh [--dev]
 ```
 
-`Simulator/build_sim.ps1` auto-detects `ninja + gcc + g++` first and falls back to `mingw32-make + gcc + g++`. If the simulator build is stale or broken, delete `Simulator/build/` and rebuild with `-Clean`.
-
-`Simulator/CMakeLists.txt` globs core/widget sources (`../Core/*.c` and `../Core/widgets/*/*.c`, excluding `*_bckup.c`) plus the preview zone (`../Core/widgets_preview/*/*.c` and `../Demo/preview/*.c`), but lists stable `DEMO_SOURCES` **explicitly** (demo `.c` files plus the generated font/image resource `.c` files under `../tool/1.font2c/output/`, `../tool/2.img2c/output/c/` and `../tool/3.bin2c/output/`). Adding a new widget or preview demo compiles automatically; adding a new stable demo requires appending its `demo_xxx.c` to `DEMO_SOURCES`.
+`build_lite.ps1` prefers TCC unpacked at `SimLite/tcc/tcc.exe` (gitignored; second-scale full builds) and falls back to gcc (`-O2 -g`, debuggable via `.vscode/launch.json`). Sources are globbed from `Core/*.c`, `Core/widgets/*/*.c`, `Core/widgets_preview/*/*.c`, `Demo/preview/*.c` plus an **explicit** demo list (`$DemoSources`, incl. showcase) and the generated resource `.c` files under `tool/`; new widgets/preview demos compile automatically, a new stable demo must be appended to `$DemoSources` in `build_lite.ps1` **and** the list in `build_lite.sh`. The release exe compiles exactly one demo (hardware-identical usage); the `-Dev` exe carries the runtime registry (`SimLite/debug/sim_demo_registry.c`) for no-rebuild demo switching.
 
 ### STM32F103 Hardware (Keil MDK-ARM AC5)
 
@@ -50,47 +50,62 @@ UV4.exe -r "STM32F030\MDK-ARM\Project.uvprojx" -t "STM32F030"
 
 Build log: `STM32F030/MDK-ARM/STM32F030/STM32F030.build_log.htm` (Keil writes F030 output into a folder named after the target, unlike F103's `Objects/`)
 
-### VS Code Tasks
+### AD14N Hardware (JieLi AD142A4, CodeBlocks / pi32)
 
-`.vscode/tasks.json` currently provides simulator tasks (`sim: stop running`, `sim: build`, `sim: clean and build`, `sim: run latest`, `sim: build and run`; the build tasks run `sim: stop running` first so the linker can overwrite a running `wegui_sim.exe`) and STM32F103 Keil tasks (`stm32: build (AC5)`, `stm32: rebuild (AC5)`, `stm32: open MDK project`). The Keil tasks depend on local VS Code settings such as `wegui.keilUv4Path`, `wegui.stm32ProjectFile`, and `wegui.stm32TargetName`.
+Requires the JieLi pi32 toolchain at `C:\JL\pi32` (installed with JieLi's CodeBlocks distribution). Two equivalent build paths:
+
+```powershell
+# Headless build (compile + LTO link + app.bin); add -Download to flash via USB
+powershell -NoProfile -ExecutionPolicy Bypass -File "AD14N/build_ad14n.ps1"
+
+# CodeBlocks CLI (also runs the post-build download.bat, which packs wegui/update.ufw;
+# without a board attached the USB-download step just fails harmlessly)
+& "C:\Program Files\CodeBlocks\codeblocks.exe" /na /nd /ns --rebuild --target=Release AD14N\AD14N_wegui.cbp
+```
+
+`AD14N/AD14N_wegui.cbp` is generated by `AD14N/gen_cbp.ps1`, which globs Core/widgets/preview/Demo sources — rerun it after adding/removing any `.c` file (the AD14N target needs no manual project-file edits, unlike the Keil `.uvprojx`). `build_ad14n.ps1` globs the same set at build time. Artifacts land in `AD14N/sdk/app/post_build/sh54/` (`app.bin` ≈ 30–37 KB per demo; `wegui/update.ufw` is the flashable firmware package). Memory model: 32 KB RAM total — 2 KB stack (cpu_lib `startup.o`), ~10.8 KB `.bss` incl. the 7.5 KB PFB (480×8 rows), remainder heap; hot flush/SPI code runs from RAM via the `.wegui.text.cache.L2` section.
+
+`.vscode/tasks.json` currently provides SimLite tasks (`lite: stop running`, `lite: build` — the default build task on Ctrl+Shift+B, `lite: run`, `lite: build and run`, `lite: build dev (gcc, debug)` — gdb-debuggable dev build used by `launch.json`, `lite: autotest`; build tasks run `lite: stop running` first so the linker can overwrite a running exe) and STM32F103 Keil tasks (`stm32: build (AC5)`, `stm32: rebuild (AC5)`, `stm32: open MDK project`). The Keil tasks depend on local VS Code settings such as `wegui.keilUv4Path`, `wegui.stm32ProjectFile`, and `wegui.stm32TargetName`.
 
 ## Tests / Validation
 
-### Golden-CRC regression (simulator, headless)
+### Golden-CRC regression (SimLite, headless)
 
 ```powershell
-# Compare every demo (1..31, 101..126) against Simulator/autotest/golden.txt
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1"
+# Compare every demo (1..33, 101..126 minus graduated holes 117/120) against SimLite/autotest/golden.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/autotest.ps1"
 
 # Only specific demos
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1" -Ids 18,7,25
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/autotest.ps1" -Ids 18,7,25
 
-# Re-baseline after an INTENDED visual change (review FAILs first)
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1" -Update
+# Re-baseline after an INTENDED visual change (review FAILs first; merges — only re-run ids are rewritten)
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/autotest.ps1" -Update
 ```
 
-Per demo the script reconfigures `Simulator/build_autotest/` with `-DWE_DEMO_ID=<id>` and `-DWE_SIM_AUTOTEST=1` (the scaffold in `sim_autotest.c/h` is compile-gated, default 0 — the everyday `Simulator/build` exe contains no regression code and ignores `--autotest`; `DEMO_ID` in `main_sim.c` is `#ifndef`-guarded), rebuilds (only `main_sim.c` recompiles), and runs `wegui_sim --autotest 180` headless (SDL dummy video driver, fixed 16ms ticks, FNV-1a hash chained over every frame's screen buffer, result written to a file because the exe links `-mwindows`). **Interaction-trajectory goldens**: if `Simulator/autotest/scripts/<id>.evt` exists (frame-stamped `down/move/up` — STAY auto-injected between down and up — plus `kinject/kpress/krelease` semantic keys), the demo is run a second time with `--script` and compared as a separate golden line, so drags, inertia, focus navigation and popup open/select/close are locked frame-exact (10 scripts currently: 7/18/19/25/29/30/102/103/105/107; a script may override its frame count via a first-line `# frames=N`). Diagnostics: env `WE_AUTOTEST_DUMP=1` writes per-frame CRCs, `WE_AUTOTEST_PPM=f1,f2,...` captures those frames as PPM images. A FAIL means behavior changed — inspect before deciding whether it's a regression or an intended change to re-baseline (`-Update` rewrites all lines). Input *feel* still needs a human. Runs are deterministic (unseeded `rand()`, no wall clock).
+The script builds the developer exe **once** (`build_lite.ps1 -Dev`, tcc-first; `-SkipBuild` to reuse), then runs `wegui_lite_dev <id> --autotest 180 --out <file>` headless per id (no window, fixed 16ms ticks, FNV-1a hash chained over every frame's ARGB8888 framebuffer) — no per-id reconfigure/recompile, a full 57-demo + 10-script sweep takes ~80 s. The scaffold lives in `SimLite/debug/lite_autotest.c/h` and is only compiled into the `-Dev` exe — the release build contains no regression code (no compile gate needed; the `debug/` folder is simply not in the release source list). Hash discipline: the framebuffer layout and 565→ARGB8888 bit-replication in `fenster_port.c` are bit-identical to the retired SDL simulator, so golden values survived the migration unchanged (verified 2026-08: full sweep ALL PASS against the pre-migration golden file). **Interaction-trajectory goldens**: if `SimLite/autotest/scripts/<id>.evt` exists (frame-stamped `down/move/up` — STAY auto-injected between down and up — plus `kinject/kpress/krelease` semantic keys), the demo is run a second time with `--script` and compared as a separate golden line, so drags, inertia, focus navigation and popup open/select/close are locked frame-exact (10 scripts currently: 7/18/19/25/29/30/102/103/105/107; a script may override its frame count via a first-line `# frames=N`). Diagnostics: env `WE_AUTOTEST_DUMP=1` writes per-frame CRCs, `WE_AUTOTEST_PPM=f1,f2,...` captures those frames as PPM images; `wegui_lite_dev <id> --shot N out.ppm` renders N frames headless and dumps a PPM for eyeballing. A FAIL means behavior changed — inspect before deciding whether it's a regression or an intended change to re-baseline. Input *feel* still needs a human. Runs are deterministic (unseeded `rand()`, no wall clock).
 
 ### Manual smoke test
 
 Validation beyond rendering is done by building a target and running one demo as an integration smoke test:
-- **Simulator**: change `#define DEMO_ID` near the top of `main` in `Simulator/main_sim.c` (`0` = showcase), rebuild, run `wegui_sim`, and verify rendering/animation/input behavior.
+- **SimLite**: change `#define DEMO_ID` near the top of `main` in `SimLite/main_lite.c` (`0` = showcase), rebuild (`build_lite.ps1`, ~2 s with tcc), run `wegui_lite`, and verify rendering/animation/input behavior; or skip the edit entirely with `wegui_lite_dev <id>`.
 - **STM32F103**: change `#define DEMO_ID` near the top of `main` in `STM32F103/main.c`, rebuild/flash, and verify on the LCD.
 - **STM32F030**: change `#define DEMO_ID` near the top of `main` in `STM32F030/main.c`, rebuild/flash, and verify on the LCD.
+- **AD14N**: change `#define DEMO_ID` near the top of `app` in `AD14N/main.c`, run `AD14N/build_ad14n.ps1 -Download` (JieLi USB download), and verify on the LCD. No touch — the single button on PA0 maps to short-press `WE_KEY_NEXT` / long-press `WE_KEY_OK`, so focus-navigable demos are fully operable; demos 15/16 (external flash) show empty placeholders and 113 (ime_pinyin, ~700 KB font) exceeds the 512 KB flash.
 
-Hardware flashing is done outside the build command (CMSIS-DAP / DAPLink / pyOCD are usable depending on the board). If flashed content appears stale, verify the relevant `.build_log.htm` timestamp before reflashing.
+Hardware flashing is done outside the build command (CMSIS-DAP / DAPLink / pyOCD are usable depending on the board; the AD14N flashes through JieLi's `isd_download.exe` via `download.bat`/`-Download` instead). If flashed content appears stale, verify the relevant `.build_log.htm` timestamp before reflashing.
 
 ## Architecture
 
 ### Directory Layout
 
-- `Core/` — platform-independent GUI kernel (`we_gui_driver.c` — objects/input/focus/timers/animation/PFB engine), rendering primitives split into `we_render.c` (image decoders, masks, AA lines, sin/cos, fills — pure move, declarations stay in `we_render.h`/`we_gui_driver.h`), the embeddable scroll-physics component `we_scroll.c/.h` (drag/overscroll/inertia/rebound state machine; used by list/menu/table/logview/dropdown — scroll_panel and roller keep bespoke physics by design), dirty engine `dirty_driver.c`, image/font support; widgets under `Core/widgets/<name>/`. New Core `.c` files must be added to both Keil `.uvprojx` by hand (simulator globs pick them up automatically).
+- `Core/` — platform-independent GUI kernel (`we_gui_driver.c` — objects/input/focus/timers/animation/PFB engine), rendering primitives split into `we_render.c` (image decoders, masks, AA lines, sin/cos, fills — pure move, declarations stay in `we_render.h`/`we_gui_driver.h`), the embeddable scroll-physics component `we_scroll.c/.h` (drag/overscroll/inertia/rebound state machine; used by list/menu/table/logview/dropdown — scroll_panel and roller keep bespoke physics by design), dirty engine `dirty_driver.c`, image/font support; widgets under `Core/widgets/<name>/`. New Core `.c` files must be added to both Keil `.uvprojx` by hand (the simulator and the AD14N build glob them automatically; rerun `AD14N/gen_cbp.ps1` to refresh the CodeBlocks project).
 - `Demo/` — demo applications; each widget type has its own `demo_xxx.c`, with declarations in `simple_widget_demos.h`. `demo_common.h` also exposes `we_demo_scale_*` helpers, but those are **legacy**: current demos are written directly against a fixed 280×240 layout.
 - `Demo/we_lcd_port_template.c/h`, `we_input_port_template.c/h`, `we_storage_port_template.c/h`, `we_user_config.h_template(...)` — the porting kit for bringing up a new platform.
-- `Core/widgets_preview/` + `Demo/preview/` — **preview incubation zone** for experimental widgets (currently 26, e.g. `mask_group`, `ime_pinyin`). Compiled by all three targets (simulator via CMake globs; both Keil projects carry `we_widget_preview`/`demo_preview` file groups — the linker strips whatever the selected demo doesn't reference), DEMO_ID range 100+ (currently 101..126, resequenced 2026-07 with the 12 most-used widgets first; future graduations leave holes), ID table and demo entry declarations in `Demo/preview/preview_demos.h`, function naming `we_<name>_preview_demo_init/tick`. New preview widgets/demos are picked up automatically by the simulator globs but must be added to both `.uvprojx` file groups by hand. These widgets are unpolished and may be removed at any time; graduation moves them into `Core/widgets/` and the stable numbering range.
-- `Simulator/` — SDL2 entry (`main_sim.c`), SDL LCD/input/key port (`sdl_port.c/h`), simulator config (`we_sim_port_config.h`), the headless regression scaffold (`sim_autotest.c/h`), and build/run scripts. `main_sim.c` is meant to read as a porting template — it holds only the init/demo-select/main-loop skeleton; the autotest machinery (arg parsing, script parsing, frame loop, hashing, diagnostics) lives entirely in `sim_autotest.c` behind two calls, and the whole scaffold is compile-gated by `WE_SIM_AUTOTEST` (default 0 in `sim_autotest.h` — the everyday build contains no regression code and ignores `--autotest`; `autotest.ps1` passes `-DWE_SIM_AUTOTEST=1` automatically).
+- `Core/widgets_preview/` + `Demo/preview/` — **preview incubation zone** for experimental widgets (currently 24, e.g. `mask_group`, `ime_pinyin`). Compiled by all four targets (simulator and AD14N via source globs; both Keil projects carry `we_widget_preview`/`demo_preview` file groups — the linker strips whatever the selected demo doesn't reference), DEMO_ID range 100+ (currently 101..126 with graduated holes 117→33 segdisp and 120→32 imgbtn, resequenced 2026-07 with the 12 most-used widgets first; graduations leave holes), ID table and demo entry declarations in `Demo/preview/preview_demos.h`, function naming `we_<name>_preview_demo_init/tick`. New preview widgets/demos are picked up automatically by the simulator/AD14N globs but must be added to both `.uvprojx` file groups by hand. These widgets are unpolished and may be removed at any time; graduation moves them into `Core/widgets/` and the stable numbering range.
+- `SimLite/` — PC simulator: entry `main_lite.c` (pure porting template, hardware-identical `#define DEMO_ID` + `#if/#elif` chain, no debug facilities), vendored `fenster.h` (single-header Win32 GDI / Cocoa / X11 windowing), port `fenster_port.c` + `lite_port.h` (mouse→touch, keyboard→semantic keys with auto-repeat, WASD swipe injection, external-flash image via `merged_bin.bin` next to the exe, ARGB8888 framebuffer + `lite_fb()`/`lite_dump_ppm()` debug accessors), simulator config `we_sim_port_config.h` (same filename as the retired SDL simulator's — include-path order picks this one), build scripts `build_lite.ps1`/`.sh` (tcc-first / gcc, `-Dev` for the developer exe), the regression driver `autotest.ps1` + `autotest/` (golden.txt + scripts/*.evt), and `debug/` — developer-only sources compiled solely into `wegui_lite_dev`: `debug_main.c` (runtime demo select via argv, `--shot`, `--autotest`), `sim_demo_registry.c/h` (id→init/tick table incl. 0=showcase), `lite_autotest.c/h` (headless CRC regression scaffold, ported bit-compatible from the retired SDL `sim_autotest.c`).
 - `STM32F103/` — STM32F103 entry (`main.c`), Keil project, LCD SPI ports (soft/hard/DMA 4-line), button/input port, and W25Qxx external flash port.
 - `STM32F030/` — STM32F030 entry (`main.c`), Keil project, LCD SPI ports, and button/input port.
+- `AD14N/` — JieLi AD142A4 entry (`main.c` — SDK boot flow `c_main → system_init → app`, then the standard WeGui main loop), `sdk_glue.c` (2 ms tick ISR → `g_we_tick_ms`/`jiffies`, `os_time_dly`, plus a self-contained `snprintf`/`vsnprintf` — JieLi's libc has none), `app_config.h/.c` + `app_modules.h` (SDK-style board config; debug UART on PA9 @1 Mbps), `Lcd_Port/` (`ad14n_hw_config.h` LCD_IC selection, `ad14n_lcd_spi1_port.c` SPI1-register+DMA bus primitives with in-place RGB565 byte swap, six screen-IC drivers), `Key_Port/` (PA0 single button → semantic keys), `sdk/` (trimmed JieLi SDK subset: headers, `cpu_lib.a`, bsp sources, `post_build/sh54/` link/pack toolchain incl. the `wegui/` variant of `app_ld.c`/`download_bat.c`/`isd_config.ini`), `AD14N_wegui.cbp` + `gen_cbp.ps1` + `build_ad14n.ps1`.
 - `tool/` — **numbered example-driven resource pipeline** (see “Resource Pipeline” below): `0.tool/windows/` (the underlying exes: font2c, img2bin_raw, img2bin_indexqoi, bin2c), `1.font2c/` (font conversion), `2.img2c/` (image conversion), `3.bin2c/` (external-flash merge), `4.STM32F103_ex_flash_download/` (W25Qxx burn project), `pinyin2c/` (pinyin-table generator feeding the `ime_pinyin` preview widget). Each stage folder has a companion numbered `.txt` note written by the user (`1.字体取模.txt`, …) — treat those as the user-facing docs and edit them minimally. Each stage’s example output IS the demo asset set; `0.1.2.3.update_all.bat` chains stages 1→2→3.
 
 ### Platform Config Chain
@@ -100,12 +115,15 @@ Hardware flashing is done outside the build command (CMSIS-DAP / DAPLink / pyOCD
 **Fonts are fully explicit — there is no default font.** Core never includes any resource header; every text widget takes a `font` pointer in its `obj_init` (mandatory: NULL makes init return without doing anything). The demo layer owns the resource reference: `Demo/simple_widget_demos.h` and `Demo/preview/preview_demos.h` include `simli_16_2bpp.h` (generated into `tool/1.font2c/output/`) and define the legacy alias `we_font_consolas_18` as `((const unsigned char *)&simli_16_2bpp)`, which all demos pass explicitly.
 
 The core includes this config directly through `Core/we_gui_driver.h`. Platform routing then selects a target-specific LCD/port config through `we_hw_port.h` or an STM32-local port header:
-- `WE_SIMULATOR` → `Simulator/we_sim_port_config.h`
+- `WE_SIMULATOR` → `SimLite/we_sim_port_config.h`
 - `WE_PLATFORM_STM32F030` → `STM32F030/Lcd_Port/stm32f030_hw_config.h`
 - `WE_PLATFORM_CMS32C030` → CMS32C030 config (referenced by router, not present in this checkout)
 - `WE_PLATFORM_CW32L012` → CW32L012 config (referenced by router, not present in this checkout)
-- `WE_PLATFORM_AD15N` → AD15N config (referenced by router)
+- `WE_PLATFORM_AD15N` → AD15N config (referenced by router, not present in this checkout)
+- `WE_PLATFORM_AD14N` → `AD14N/Lcd_Port/ad14n_hw_config.h`
 - default → STM32F103 config
+
+`SCREEN_WIDTH`/`SCREEN_HEIGHT` in `we_user_config.h` branch per platform: `WE_PLATFORM_AD14N` gets the ST7796S native 480×320, every other target stays 280×240. Demos are written against the fixed 280×240 layout, so on the AD14N they render anchored to the top-left of the larger panel.
 
 Target hardware config headers select the LCD IC (`LCD_IC`) and physical LCD port (`LCD_PORT`), then define `lcd_set_addr`, `lcd_ic_init`, and `LCD_FLUSH_PORT`/flush callbacks that bind the GUI core to the concrete driver.
 
@@ -158,7 +176,7 @@ while (1) {
 }
 ```
 
-The simulator additionally calls `sim_lcd_update()` after `we_gui_task_handler()`. Touch input is polled automatically inside `we_gui_task_handler()` through the registered input callback; call `we_gui_indev_handler()` directly only when managing input state manually. Semantic keys are *not* polled — ports push them (see focus section).
+The simulator additionally calls `lite_present()` after `we_gui_task_handler()`. Touch input is polled automatically inside `we_gui_task_handler()` through the registered input callback; call `we_gui_indev_handler()` directly only when managing input state manually. Semantic keys are *not* polled — ports push them (see focus section).
 
 ### Timer API and the Central Animation Engine
 
@@ -210,13 +228,13 @@ The reclamation step is a mechanism, not a convention — it covers `pressed_obj
 
 ### Widgets
 
-Stable widgets live in `Core/widgets/<name>/we_widget_<name>.c/.h`; preview widgets in `Core/widgets_preview/<name>/`. Current stable set: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`, `dropdown`, `stepper`, `indicator`, `line`, `box`, `gauge`, `list`, `roller`, `marquee`, `toast`.
+Stable widgets live in `Core/widgets/<name>/we_widget_<name>.c/.h`; preview widgets in `Core/widgets_preview/<name>/`. Current stable set: `label`, `btn`, `img`, `img_ex`, `arc`, `group`, `checkbox`, `label_ex`, `chart`, `toggle`, `progress`, `msgbox`, `img_flash`, `font_flash`, `slideshow`, `slider`, `scroll_panel`, `dropdown`, `stepper`, `indicator`, `line`, `box`, `gauge`, `list`, `roller`, `marquee`, `toast`, `imgbtn`, `segdisp`.
 
-**Every widget directory carries a `widget.md`** (功能 / 适用场景 / 关键 API / 可调宏 / 事件与行为 / 注意事项 / 已完成的毕业优化 / 对应 demo). Read `Core/widgets/<name>/widget.md` before the source when working on one widget — it documents the tuning macros, dirty-marking strategy, and delete contract. All 26 preview widgets have one; the only stable widgets missing it are `box` and `line`.
+**Every widget directory carries a `widget.md`** (功能 / 适用场景 / 关键 API / 可调宏 / 事件与行为 / 注意事项 / 已完成的毕业优化 / 对应 demo). Read `Core/widgets/<name>/widget.md` before the source when working on one widget — it documents the tuning macros, dirty-marking strategy, and delete contract. All 24 preview widgets have one; the only stable widgets missing it are `box` and `line`.
 
 Cross-cutting rules that no single `widget.md` owns:
 - `img_ex` and `label_ex` use a **512-step angle unit** (`0..511` = full circle; 90° = 128; 180° = 256) — use `WE_ANGLE(deg)` / `WE_DEG(deg)` — and a **256-step scale unit** (`256` = 1.0×, `128` = 0.5×, `512` = 2.0×).
-- For `img_ex`, `cx/cy` are the screen transform center while `pivot_ofs_x/y` are source-image local pivot offsets; do not merge those coordinate systems. `img_ex` accepts **only uncompressed RGB565** source images (the plain `img` widget handles the other formats: ARGB8565 raw, both indexed-QOI variants, and the A1/A2/A4/A8 alpha bitmaps — see Resource Pipeline). Alpha bitmaps carry no color: `img` blends them with a per-object foreground color (`we_img_obj_set_color`, default white); their rows are byte-aligned MSB-first, a different layout from the linear bit stream `we_draw_alpha_mask`/fonts use.
+- For `img_ex`, `cx/cy` are the screen transform center while `pivot_ofs_x/y` are source-image local pivot offsets; do not merge those coordinate systems. `img_ex` accepts **only uncompressed RGB565** source images (the plain `img` widget handles the other formats: ARGB8565 raw, both indexed-QOI variants, the A1/A2/A4/A8 alpha bitmaps, and the indexed-QOI-MASK compressed A8 mask — see Resource Pipeline). **Format dispatch lives in the render layer**, not in the widgets: `we_img_render_auto` / `we_img_format_supported` (`Core/we_render.c`) are shared by `img` and `imgbtn`, so adding a pixel format touches one place. Alpha bitmaps carry no color: `img` blends them with a per-object foreground color (`we_img_obj_set_color`, default white); their rows are byte-aligned MSB-first, a different layout from the linear bit stream `we_draw_alpha_mask`/fonts use. The compressed alpha variant `IMG_A8_INDEXQOIMASK` (0x6B) decodes row-by-row through a per-row byte-offset index, so PFB slices only decode visible rows with zero extra RAM (`we_img_render_indexqoi_mask`, trim via `WE_CFG_ENABLE_INDEXQOI_MASK`).
 - **Data-driven widgets never copy their data.** `dropdown` (`we_dropdown_option_t[]`), `list`/`roller` (`const char *const *`), `marquee`/`toast` (text pointer) store the caller's pointer; the caller must keep it alive for the widget's lifetime.
 - **Popups are ordinary top-layer objects with a modal flag** — the old `popup_layer` slot is gone. `we_obj_attach_to_top` puts an object on the LCD top layer (drawn after the normal list and the focus cursor, never clipped by `group`/`scroll_panel`/`slideshow` parents, hit-tested with priority); `we_modal_open/close/get` declares one of them modal: hit-testing is then restricted to the top layer with misses routed to the modal object ("its hit area is the whole screen" — outside-tap-closes stays widget-side), and semantic keys go straight to its `event_cb` (press edges raw, release edges `key | WE_KEY_RELEASE_FLAG`). Opening a new modal sends `WE_EVENT_MODAL_CLOSE` to the old one (modals are mutually exclusive; non-modal top-layer objects like `toast` coexist freely — a toast can float above the keyboard). Users: `dropdown` (embedded `overlay` companion object), preview `keyboard`/`ime_pinyin` (the widget object itself); `msgbox`/`toast` are non-modal top-layer objects; the preview `menu` draws its pages inside its own rect. Touch focus-follow skips top-layer hits (tapping a popup/toast never steals the focus ring).
 - **The event space is segmented** (`we_event_t`; one `event_cb` receives every segment): `0x00–0x0F` touch/gesture/kernel queries, `0x10–0x17` semantic keys, `0x20+` focus notifications, `0x40–0x7F` reserved for widget/app custom events (allocate from `WE_EVENT_USER_BASE`), and `0x80` is the release-edge modifier bit — modal objects actually receive `0x90–0x97` for key release edges, so custom codes must stay below `0x80`.
@@ -252,7 +270,7 @@ The partial frame buffer covers only a few screen rows. `USER_GRAM_NUM = SCREEN_
 
 **Container contract.** The kernel descends into every `CHILD_OWNER` container unconditionally; containers never forward events to children by hand. A container implements only `WE_EVENT_HIT_TEST` (return 0 to skip this container *and its whole subtree* — used for a fully transparent `group`/`mask_group`, or a point outside `scroll_panel`'s inner rect), `WE_EVENT_DRAG_BEGIN` if it scrolls/pages, and its own gesture handling; everything else returns 0 so unconsumed presses bubble to outer containers.
 
-**Focus-cursor ghost prevention is kernel-side**: `we_obj_set_pos` invalidates the focus ring before and after moving `lcd->focus_obj` (the ring hangs GAP+THICKNESS outside the widget bbox, which the widget's own old/new marking cannot cover). Code that moves a focused widget — container relayout, scroll-follow — needs no manual ring marking.
+**Focus-cursor ghost prevention is kernel-side**: `we_obj_set_pos` (move) and `we_obj_set_size` (resize, top-left anchored) invalidate the focus ring before and after changing `lcd->focus_obj`'s geometry (the ring hangs GAP+THICKNESS outside the widget bbox, which the widget's own old/new marking cannot cover). Code that moves or resizes a focused widget — container relayout, scroll-follow, `imgbtn` swapping to a different-sized image — needs no manual ring marking; widgets must never hand-roll the ring geometry.
 
 Swipe detection is also in `we_gui_indev_handler()`: on release, movement from press exceeding `WE_CFG_SWIPE_THRESHOLD` (default 30) dispatches `WE_EVENT_SWIPE_LEFT/RIGHT/UP/DOWN` instead of a click. `lcd->gesture_had_stay` records whether the sequence ever hit STAY, which scrollable widgets use to tell a drag from a fast flick; `lcd->gesture_drag_done` marks the drag hand-off offer as already made.
 
@@ -260,7 +278,7 @@ Swipe detection is also in `we_gui_indev_handler()`: on release, movement from p
 
 ### Focus and Key Navigation
 
-Added in V0.2.2 and **not covered by `WEGUI_API_REFERENCE.md`** — this section plus the comments in `Core/we_gui_driver.h` are the reference. Gated by `WE_CFG_ENABLE_KEY_INPUT` (`1` in the shared user config; the core default in `we_gui_config.h` is `0`, so a bare port compiles the whole subsystem out at zero cost). Touch and keys coexist — enabling keys changes nothing about touch handling. **The cursor ring is input-source gated** (`WE_FOCUS_F_CURSOR_VIS`): any key activity or a programmatic `we_focus_set`/`we_focus_edit_enter` shows it; a touch press hides it — touch still moves focus underneath (the finger is the cursor), so a later key press resumes navigation from the last-tapped widget with the ring back on. Demos `29` (`demo_focus.c`) and `30` (`demo_focus2.c`) exercise it; the simulator maps arrows / Tab / Shift+Tab / Enter / Space / Esc / Backspace in `Simulator/sdl_port.c`.
+Added in V0.2.2 and **not covered by `WEGUI_API_REFERENCE.md`** — this section plus the comments in `Core/we_gui_driver.h` are the reference. Gated by `WE_CFG_ENABLE_KEY_INPUT` (`1` in the shared user config; the core default in `we_gui_config.h` is `0`, so a bare port compiles the whole subsystem out at zero cost). Touch and keys coexist — enabling keys changes nothing about touch handling. **The cursor ring is input-source gated** (`WE_FOCUS_F_CURSOR_VIS`): any key activity or a programmatic `we_focus_set`/`we_focus_edit_enter` shows it; a touch press hides it — touch still moves focus underneath (the finger is the cursor), so a later key press resumes navigation from the last-tapped widget with the ring back on. Demos `29` (`demo_focus.c`) and `30` (`demo_focus2.c`) exercise it; the simulator maps arrows / Tab / Shift+Tab / Enter / Space / Esc / Backspace in `SimLite/fenster_port.c` (direction/Tab auto-repeat is port-side, OK is dual-edge).
 
 **Ports inject semantic keys; they never poll.** The port debounces physical buttons (independent keys, 5-way joystick, EC11 encoder…) and translates them into `WE_KEY_UP/DOWN/LEFT/RIGHT/PREV/NEXT/OK/BACK`:
 - Dual-edge ports call `we_gui_key_press(lcd, key)` / `we_gui_key_release(lcd, key)`. Only OK consumes the release edge (widgets stay visually pressed while OK is held); other keys may skip release reporting. Direction-key auto-repeat is the port's job — re-inject the press edge.
@@ -275,21 +293,21 @@ Public API: `we_focus_set` / `we_focus_get` / `we_focus_candidate` (structural t
 
 **Modal key channel**: while a modal object is registered (`we_modal_open`), semantic keys bypass the focus manager and go straight to that object's `event_cb` — press edges as the raw key value, release edges as `key | WE_KEY_RELEASE_FLAG` (`0x90..0x97` on the wire). Unconsumed keys do not fall through (modal swallows all keys). `dropdown` and the preview `keyboard` / `ime_pinyin` rely on this; there is no separate hook to install since the unified `event_cb` receives everything.
 
-**Size trimming** (all default on): `WE_CFG_FOCUS_EDIT 0` removes the edit state entirely (only click-like semantics remain); `WE_CFG_FOCUS_NESTED 0` flattens the focus ring to top-level widgets; and each widget has its own `WE_<NAME>_USE_KEY` macro (defined in that widget's header) to drop its key callback and focusability individually. Stable widgets with key support: `btn`, `checkbox`, `toggle`, `indicator`, `slider`, `stepper`, `roller`, `list`, `scroll_panel`, `dropdown`. Preview: `calendar`, `imgbtn`, `logview`, `menu`, `radio`, `table`, `textarea`. Cursor appearance and feel are tunable via `WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B` and `WE_CFG_FOCUS_FLASH_MS`.
+**Size trimming** (all default on): `WE_CFG_FOCUS_EDIT 0` removes the edit state entirely (only click-like semantics remain); `WE_CFG_FOCUS_NESTED 0` flattens the focus ring to top-level widgets; and each widget has its own `WE_<NAME>_USE_KEY` macro (defined in that widget's header) to drop its key callback and focusability individually. Stable widgets with key support: `btn`, `checkbox`, `toggle`, `indicator`, `slider`, `stepper`, `roller`, `list`, `scroll_panel`, `dropdown`, `imgbtn`. Preview: `calendar`, `logview`, `menu`, `radio`, `table`, `textarea`. Cursor appearance and feel are tunable via `WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B` and `WE_CFG_FOCUS_FLASH_MS`.
 
 ### Resource Pipeline (`tool/`) and Image Format
 
 `tool/` is a numbered, example-driven pipeline: each stage is a self-contained tool whose example inputs/outputs double as the demo asset set, so a user can reproduce the whole flow by double-clicking the stage `.bat`s (or `tool/0.1.2.3.update_all.bat` for the 1→2→3 chain). Stage notes live in the user-written numbered `.txt` files.
 
 - `1.font2c/` — fonts. `1.manage_input.bat` is an interactive wizard that generates `input/*.json` configs; `2.build.bat` runs font2c over all of them into `output/`. Current demo fonts: `simli_16_2bpp` (internal ASCII — the `we_font_consolas_18` alias target used by every demo), `msyh_16_4bpp_ime` (internal, ASCII + GB2312 level-1 charset for the `ime_pinyin` preview), `gbsn00lp_2_16_4bpp` (external ASCII+CJK: index `.c/.h` compiled into the MCU, glyph-data `.bin` merged into external flash; demos 0/16). Font files resolve against `fonts/` then the system font directories (`SIMLI.TTF`/`msyh.ttc` come from Windows, not the repo).
-- `2.img2c/` — images. `img2c_rgb565.bat` (matches this repo’s RGB565 targets; an rgb888 variant exists for other targets). `input/` buckets encode pixel format × compression × destination: `*_2c` buckets are merged into the internal-array `output/c/res_img.c/.h`, `*_2bin` buckets become per-image bins in `output/bin/`. Demo images: `demo_rgb565_raw_be_64x80` (uncompressed RGB565 — the only format `img_ex` accepts; also used by imgbtn/showcase), `demo_rgb565_indexqoi_be_128x64`, `demo_argb8565_indexqoi_be_80x80`, `demo_argb8565_raw_be_80x80`. The A1/A2/A4/A8 alpha-bitmap buckets (six 48×48 icons per depth) are decoded by the `img` widget and consumed by demo 31 (`demo_img_alpha.c`).
+- `2.img2c/` — images. `img2c_rgb565.bat` (matches this repo’s RGB565 targets; an rgb888 variant exists for other targets). `input/` buckets encode pixel format × compression × destination: `*_2c` buckets are merged into the internal-array `output/c/res_img.c/.h`, `*_2bin` buckets become per-image bins in `output/bin/`. Demo images: `demo_rgb565_raw_be_64x80` (uncompressed RGB565 — the only format `img_ex` accepts; also used by imgbtn/showcase), `demo_rgb565_indexqoi_be_128x64`, `demo_argb8565_indexqoi_be_80x80`, `demo_argb8565_raw_be_80x80`. The alpha buckets hold six 48×48 icons split across `A8_indexqoimask_2c/2bin` (indexed-QOI-MASK compressed, the recommended alpha format, encoded by `img2bin_indexqoimask` at 6-bit quantization) and `A8_raw_2c/2bin` (kept for future rotated-image support); the A1/A2/A4 raw buckets were removed 2026-08 (core decoders remain). Consumed by demo 31 (`demo_img_alpha.c`, raw-vs-compressed comparison) and demo 32 (imgbtn tint/swap icons).
 - `3.bin2c/` — external-flash merge. `build_bin.bat` concatenates `1.font2c/output/*.bin` + `2.img2c/output/bin/*.bin` into `output/merged_bin.bin/.c/.h` (`.c` holds only the `bin_addr_table[]`; `.h` has the ID enum plus SIZE/ADDR macros) and additionally an **embed-data** variant under `output/embed/` that is compiled ONLY by the burn project (not committed — a ~17 MB generated C source; run `build_bin.bat` once before burning).
 - `4.STM32F103_ex_flash_download/` — Keil burn project: compiles `3.bin2c/output/embed/merged_bin.c` and writes it to the W25Qxx through the debugger using the custom `Flash_FLM/WE_STM32F103_W25Q128.FLM` algorithm. **Changing an external asset means re-burning** — a firmware rebuild alone will not update external flash.
 - Consumers: all three targets add `tool/1.font2c/output`, `tool/2.img2c/output/c`, `tool/3.bin2c/output` to their include paths and compile the three font `.c`, `res_img.c`, and the table-only `merged_bin.c`. Demos include `res_img.h` (internal arrays) or `merged_bin.h` (external-flash ID/address table).
-- **The simulator embeds no external-flash data**: its storage port opens `merged_bin.bin` next to the exe (CMake copies it post-build) and serves reads via `fseek`/`fread`; a missing file reads as `0xFF` (erased flash). Changing external assets = rerun `3.bin2c` + restart the sim, no rebuild — mirroring the hardware “re-burn” flow.
-- Batch files are saved as **GBK + CRLF** (cmd’s native encoding; UTF-8 or LF-only bats mis-parse Chinese comments into broken commands).
+- **The simulator embeds no external-flash data**: its storage port opens `merged_bin.bin` next to the exe (`build_lite.ps1`/`.sh` copy it post-build) and serves reads via `fseek`/`fread`; a missing file reads as `0xFF` (erased flash). Changing external assets = rerun `3.bin2c` + copy/restart, no rebuild — mirroring the hardware “re-burn” flow.
+- Batch files are saved as **GBK + CRLF** (cmd’s native encoding; UTF-8 or LF-only bats mis-parse Chinese comments into broken commands). The numbered stage-note `.txt` files are **UTF-8** — do not read/write them as GBK (PowerShell 5.1 console round-trips can make a UTF-8 file *look* GBK-decodable; verify with a strict decode first). `.ps1` scripts with Chinese comments need a **UTF-8 BOM** (PowerShell 5.1 parses BOM-less files as ANSI — mojibake comment bytes can contain quote characters that break parsing); note that plain-text file edits may strip the BOM, so re-check/re-add it after editing any `.ps1`.
 
-Image resource format v2 (`Core/image_res.h`) is the contract between the tools and the core: a 6-byte header `[res_type][format][width_hi][width_lo][height_hi][height_lo]` (dimensions always big-endian) followed by pixel data, parsed with the `IMG_DAT_*` macros. The format byte splits into a compression nibble `[7:4]` (`0x0` none, `0x1/0x2` RLE, `0x3` plain QOI, `0x4` indexed QOI — **V2 stream only**: 14-byte index header (byte0=0x0E) + u16/u24/u32 jump index + static palette (≤64 full-pixel entries, op `0x00..0x3F`); V1 streams (0x0D header) are rejected by the decoders, `0x5` QOIF — tool-reserved, no core decoder) and a pixel-format nibble `[3:0]` (`0x0` RGB565 … `0x8` ARGB8565, `0xB`/`0xC`/`0xD`/`0xE` = A8/A4/A2/A1 alpha bitmaps, `0xF` OLED bitmap; `0x9/0xA` tool-reserved). `WE_CFG_ENABLE_INDEXED_QOI` in `we_user_config.h` trims the indexed-QOI decoder and its dispatch path out of the image widget.
+Image resource format v2 (`Core/image_res.h`) is the contract between the tools and the core: a 6-byte header `[res_type][format][width_hi][width_lo][height_hi][height_lo]` (dimensions always big-endian) followed by pixel data, parsed with the `IMG_DAT_*` macros. The format byte splits into a compression nibble `[7:4]` (`0x0` none, `0x1/0x2` RLE, `0x3` plain QOI, `0x4` indexed QOI — **V2 stream only**: 14-byte index header (byte0=0x0E) + u16/u24/u32 jump index + static palette (≤64 full-pixel entries, op `0x00..0x3F`); V1 streams (0x0D header) are rejected by the decoders, `0x5` QOIF — tool-reserved, no core decoder, `0x6` indexed QOI_MASK — A8-only: per-row byte-offset index (u16/u32 split tables, row dedup) + static dictionary + INDEX/DIFF/DELTA/RUN/ALPHA tag stream with optional 8/7/6/5-bit quantization, spec in `tool/0.tool/windows/img2bin_indexqoimask/README`) and a pixel-format nibble `[3:0]` (`0x0` RGB565 … `0x8` ARGB8565, `0xB`/`0xC`/`0xD`/`0xE` = A8/A4/A2/A1 alpha bitmaps, `0xF` OLED bitmap; `0x9/0xA` tool-reserved). `WE_CFG_ENABLE_INDEXED_QOI` / `WE_CFG_ENABLE_INDEXQOI_MASK` in `we_user_config.h` trim the indexed-QOI / indexed-QOI-MASK decoders and their dispatch paths out of the image widgets.
 
 ## Demo Style
 
@@ -302,9 +320,9 @@ void we_xxx_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 One demo should be a small, copyable example: static variables plus one init function plus one tick function, written against the fixed 280×240 layout. Demos are also the primary integration tests for widgets, timers, input, storage-backed assets, and rendering behavior. A demo whose feature is compile-gated (e.g. the focus demos under `WE_CFG_ENABLE_KEY_INPUT`) provides empty `#else` stubs so every target still links.
 
-Demo selection is a **compile-time `#define DEMO_ID`** + `#if/#elif` chain in each entry's `main` (no runtime `switch`); only the selected demo's `init`/`tick` is compiled in. Numbering is unified across all three targets — `1..31` and the preview range `101..126` are identical: `1` label, `2` btn, `3` img, `4` img_ex, `5` arc, `6` group, `7` slideshow, `8` concentric arc, `9` checkbox, `10` label_ex, `11` chart, `12` toggle, `13` progress, `14` msgbox, `15` flash img, `16` flash font, `17` slider, `18` scroll_panel, `19` dropdown, `20` stepper, `21` indicator, `22` line, `23` box, `24` gauge, `25` list, `26` roller, `27` marquee, `28` toast, `29` focus, `30` focus2, `31` img_alpha. Only `0 = showcase` remains simulator-only (needs 800×480, guarded by a nested `#warning`; on STM32 an ID of 0 falls through to the fallback). The `#else` fallback is `label` on all three targets. Switch demos by editing the single `#define DEMO_ID` line near the top of `main`.
+Demo selection is a **compile-time `#define DEMO_ID`** + `#if/#elif` chain in each entry's `main` (no runtime `switch`); only the selected demo's `init`/`tick` is compiled in. Numbering is unified across all four targets (SimLite / STM32F103 / STM32F030 / AD14N) — `1..33` and the preview range `101..126` are identical: `1` label, `2` btn, `3` img, `4` img_ex, `5` arc, `6` group, `7` slideshow, `8` concentric arc, `9` checkbox, `10` label_ex, `11` chart, `12` toggle, `13` progress, `14` msgbox, `15` flash img, `16` flash font, `17` slider, `18` scroll_panel, `19` dropdown, `20` stepper, `21` indicator, `22` line, `23` box, `24` gauge, `25` list, `26` roller, `27` marquee, `28` toast, `29` focus, `30` focus2, `31` img_alpha, `32` imgbtn, `33` segdisp. Only `0 = showcase` remains simulator-only (needs 800×480, guarded by a nested `#warning`; on hardware targets an ID of 0 falls through to the fallback). The `#else` fallback is `label` on all targets. Switch demos by editing the single `#define DEMO_ID` line near the top of `main` (on AD14N it sits inside `app` in `AD14N/main.c`; on SimLite `build_lite.ps1 -Demo N` can override it without editing).
 
-When adding a demo, update the `DEMO_ID` comment block + `#if/#elif` chain in all three entry files, declare its `init`/`tick` in `Demo/simple_widget_demos.h`, and add the `demo_xxx.c` to `DEMO_SOURCES` in `Simulator/CMakeLists.txt` (and to each Keil `.uvprojx`).
+When adding a demo, update the `DEMO_ID` comment block + `#if/#elif` chain in all four entry files, declare its `init`/`tick` in `Demo/simple_widget_demos.h`, add the `demo_xxx.c` to `$DemoSources` in `SimLite/build_lite.ps1` + the list in `build_lite.sh`, register it in `SimLite/debug/sim_demo_registry.c` (dev exe / autotest), and add it to each Keil `.uvprojx` (the AD14N picks it up by rerunning `AD14N/gen_cbp.ps1`; `build_ad14n.ps1` globs it automatically).
 
 ## Code Style
 
@@ -323,7 +341,7 @@ When adding a demo, update the `DEMO_ID` comment block + `#if/#elif` chain in al
 3. `we_hw_port.h` — platform routing by preprocessor define.
 4. `Core/we_gui_driver.h` — core runtime object, event/key enums, and public API surface.
 5. `Core/widgets/<name>/widget.md` — per-widget documentation; the first stop for any single-widget task.
-6. `Simulator/main_sim.c` — simulator entry and demo selection.
+6. `SimLite/main_lite.c` — simulator entry and demo selection.
 7. `STM32F103/main.c` / `STM32F030/main.c` — hardware entries and demo selection.
 8. `Demo/simple_widget_demos.h` — demo entry declarations.
 9. `tool/` numbered `.txt` notes — per-stage tool usage (fonts / images / merge / burn).

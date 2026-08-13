@@ -346,6 +346,170 @@ void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t 
     }
 }
 
+#if (WE_CFG_ENABLE_INDEXQOI_MASK == 1)
+/**
+ * @brief 渲染索引QOI_MASK 压缩的 A8 透明蒙版（仅 alpha 通道，以前景色混合）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x0 传入：目标左上角 X 坐标
+ * @param y0 传入：目标左上角 Y 坐标
+ * @param img 传入：图片数据指针（IMG_A8_INDEXQOIMASK 格式）
+ * @param fg_color 传入：前景色（蒙版 alpha 以该颜色对背景混合）
+ * @param opacity 传入：整体透明度（0~255）
+ * @return 无
+ * @note 行独立编码（RUN/DIFF 不跨行）+ 行字节偏移索引：PFB 切片渲染只解码
+ *       可见行，行内越过裁剪右缘立即停止，单行解码零额外 RAM（边解边混合）。
+ *       流内数值全部是 q 位量化域值，输出时按高位复制还原 8bit。
+ *       格式规格：tool/0.tool/windows/img2bin_indexqoimask/README。
+ */
+void we_img_render_indexqoi_mask(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img,
+                                 colour_t fg_color, uint8_t opacity)
+{
+    opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
+    if (opacity == 0)
+        return;
+
+    uint16_t img_w = IMG_DAT_WIDTH(img);
+    uint16_t img_h = IMG_DAT_HEIGHT(img);
+
+    /* ---------------- 1. 包围盒与 PFB 切片求交 ---------------- */
+    int16_t x1 = x0 + img_w - 1;
+    int16_t y1 = y0 + img_h - 1;
+
+    if ((x0 > p_lcd->pfb_area.x1) || (x1 < p_lcd->pfb_area.x0) || (y0 > p_lcd->pfb_y_end) || (y1 < p_lcd->pfb_y_start))
+    {
+        return;
+    }
+
+    uint16_t ix_start = (x0 < p_lcd->pfb_area.x0) ? (p_lcd->pfb_area.x0 - x0) : 0;
+    uint16_t iy_start = (y0 < p_lcd->pfb_y_start) ? (p_lcd->pfb_y_start - y0) : 0;
+
+    uint16_t draw_width = img_w - ix_start - ((x1 > p_lcd->pfb_area.x1) ? (x1 - p_lcd->pfb_area.x1) : 0);
+    uint16_t draw_height = img_h - iy_start - ((y1 > p_lcd->pfb_y_end) ? (y1 - p_lcd->pfb_y_end) : 0);
+
+    /* ---------------- 2. payload 解析 ----------------
+     * 6 字节通用头之后：[标志 1B][u16 行索引项数 m 2B][u32 行索引项数 2B]
+     * [u16 表 m×2B][u32 表 (h−m)×4B][字典数 n 1B][字典 n×1B][像素流]
+     * 行偏移相对像素流起点，多字节字段一律大端。 */
+    const uint8_t *pl = IMG_DAT_PIXELS(img);
+    uint8_t q = (uint8_t)(8U - (pl[0] & 0x03U)); /* 量化位数：00b=8bit 01b=7 10b=6 11b=5 */
+    uint8_t shift = (uint8_t)(8U - q);           /* 反量化（高位复制）左移量 */
+    uint16_t m = (uint16_t)(((uint16_t)pl[1] << 8) | pl[2]);
+    const uint8_t *tab16 = pl + 5;
+    const uint8_t *tab32 = tab16 + ((uint32_t)m << 1);
+    const uint8_t *p_dict_n = tab32 + (((uint32_t)(img_h - m)) << 2);
+    const uint8_t *dict = p_dict_n + 1;
+    const uint8_t *base = dict + *p_dict_n; /* 像素流起点（行偏移的基准） */
+
+    /* ---------------- 3. 目标起始指针与跨距 ---------------- */
+    int16_t draw_x0 = x0 + ix_start;
+    int16_t draw_y0 = y0 + iy_start;
+    colour_t *dst_line = p_lcd->pfb_gram + ((draw_y0 - p_lcd->pfb_y_start) * p_lcd->pfb_width) + (draw_x0 - p_lcd->pfb_area.x0);
+    uint16_t dst_stride = p_lcd->pfb_width;
+
+    uint16_t x_end = (uint16_t)(ix_start + draw_width); /* 行内绘制右缘（源列，开区间） */
+    uint16_t row;
+
+/* 输出 1 个 q 位域像素：高位复制还原 8bit → 乘控件透明度 → 前景色混合。
+ * 只在可见列区间内落笔，但无论落笔与否列游标 x 都前进一格。
+ * q=8 时 shift=0：v>>8 恒 0，表达式退化为 v 本身，无需特判。 */
+#define _IQM_EMIT(v)                                                                             \
+    do                                                                                           \
+    {                                                                                            \
+        if (x >= ix_start && x < x_end)                                                          \
+        {                                                                                        \
+            uint32_t a_ = ((uint32_t)(v) << shift) | ((uint32_t)(v) >> (q - shift));             \
+            if (a_ > 0U)                                                                         \
+            {                                                                                    \
+                if (opacity != 255U)                                                             \
+                    a_ = we_div255(a_ * opacity);                                                \
+                we_store_blended_color(p_dst + (x - ix_start), fg_color, (uint8_t)a_);           \
+            }                                                                                    \
+        }                                                                                        \
+        x++;                                                                                     \
+    } while (0)
+
+    /* ---------------- 4. 行循环：可见行经行索引定位后独立解码 ---------------- */
+    for (row = iy_start; row < (uint16_t)(iy_start + draw_height); row++)
+    {
+        uint32_t ofs;
+        const uint8_t *p;
+        colour_t *p_dst = dst_line;
+        uint16_t x = 0;
+        uint8_t prev;
+
+        if (row < m)
+        {
+            uint32_t i2 = (uint32_t)row << 1;
+
+            ofs = ((uint32_t)tab16[i2] << 8) | tab16[i2 + 1U];
+        }
+        else
+        {
+            uint32_t i4 = (uint32_t)(row - m) << 2;
+
+            ofs = ((uint32_t)tab32[i4] << 24) | ((uint32_t)tab32[i4 + 1U] << 16) |
+                  ((uint32_t)tab32[i4 + 2U] << 8) | tab32[i4 + 3U];
+        }
+        p = base + ofs;
+
+        prev = *p++; /* 行首字节 = 首像素原始值（无 tag），同时初始化 prev */
+        _IQM_EMIT(prev);
+
+        while (x < x_end) /* 越过裁剪右缘即止：行独立，剩余字节与后续行无关 */
+        {
+            uint8_t b = *p++;
+
+            if (b == 0xFF) /* ALPHA：绝对值直设，后接 1 字节原始值 */
+            {
+                prev = *p++;
+                _IQM_EMIT(prev);
+            }
+            else
+            {
+                switch (b >> 6)
+                {
+                case 0: /* INDEX：查静态字典 */
+                    prev = dict[b & 0x3FU];
+                    _IQM_EMIT(prev);
+                    break;
+
+                case 1: /* DIFF：连续 2 像素小渐变，各 3bit [-4,+3]（存储值 = d+4） */
+                    prev = (uint8_t)(prev + (int16_t)((b >> 3) & 0x07U) - 4);
+                    _IQM_EMIT(prev);
+                    prev = (uint8_t)(prev + (int16_t)(b & 0x07U) - 4);
+                    _IQM_EMIT(prev);
+                    break;
+
+                case 2: /* DELTA：1 像素大渐变 6bit [-32,+31]（存储值 = d+32） */
+                    prev = (uint8_t)(prev + (int16_t)(b & 0x3FU) - 32);
+                    _IQM_EMIT(prev);
+                    break;
+
+                default: /* RUN：复制 prev (计数+1) 次，1..63（0xFF 已被 ALPHA 特判占用） */
+                {
+                    uint8_t cnt = (uint8_t)((b & 0x3FU) + 1U);
+
+                    if (prev == 0U)
+                    {
+                        x = (uint16_t)(x + cnt); /* 全透明跑段直接跳列（图标留白主路径） */
+                    }
+                    else
+                    {
+                        while (cnt--)
+                            _IQM_EMIT(prev);
+                    }
+                    break;
+                }
+                }
+            }
+        }
+
+        dst_line += dst_stride;
+    }
+#undef _IQM_EMIT
+}
+#endif /* WE_CFG_ENABLE_INDEXQOI_MASK */
+
 /* --------------------------------------------------------------------------
  * 索引 QOI 绘制入口（V2 流：14 字节索引头 0x0E + 三档跳转索引 + 静态调色盘）
  *
@@ -888,6 +1052,101 @@ void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     }
 }
 #endif
+
+/* --------------------------------------------------------------------------
+ * 图片格式分发
+ *
+ * 所有内置图片控件（img / imgbtn 等）共用这一份分发表：控件只决定"画哪张图、
+ * 用什么透明度"，"支持哪些格式、走哪个解码器"由渲染层统一回答。新增像素格式
+ * 时只改这两个函数，控件层不必跟着改。
+ * -------------------------------------------------------------------------- */
+
+/**
+ * @brief 判断图片格式是否为当前编译配置支持（供控件在 init 阶段拦截）
+ * @param fmt 传入，资源信息头里的格式码
+ * @return 1 表示可渲染，0 表示不支持
+ */
+uint8_t we_img_format_supported(imgarry_type_t fmt)
+{
+    switch (fmt)
+    {
+    case IMG_RGB565:
+    case IMG_ARGB8565:
+    case IMG_A1:
+    case IMG_A2:
+    case IMG_A4:
+    case IMG_A8:
+        return 1U;
+
+#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
+    case IMG_RGB565_INDEXQOI:
+    case IMG_ARGB8565_INDEXQOI:
+        return 1U;
+#endif
+
+#if (WE_CFG_ENABLE_INDEXQOI_MASK == 1)
+    case IMG_A8_INDEXQOIMASK:
+        return 1U;
+#endif
+
+    default:
+        return 0U;
+    }
+}
+
+/**
+ * @brief 按资源格式自动选择渲染内核绘制图片
+ * @param p_lcd 传入，GUI 屏幕上下文指针
+ * @param x0 传入，目标左上角 X 坐标
+ * @param y0 传入，目标左上角 Y 坐标
+ * @param img 传入，图片数据指针（image_res.h 信息头格式）
+ * @param fg_color 传入，前景色，仅 A1/A2/A4/A8 透明位图使用，其余格式忽略
+ * @param opacity 传入，整体透明度（0~255）
+ * @return 无
+ */
+void we_img_render_auto(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img,
+                        colour_t fg_color, uint8_t opacity)
+{
+    if (p_lcd == NULL || img == NULL)
+        return;
+
+    switch (IMG_DAT_FORMAT(img))
+    {
+    case IMG_RGB565:
+        we_img_render_rgb565(p_lcd, x0, y0, img, opacity);
+        break;
+
+    case IMG_ARGB8565:
+        we_img_render_argb8565(p_lcd, x0, y0, img, opacity);
+        break;
+
+    case IMG_A1:
+    case IMG_A2:
+    case IMG_A4:
+    case IMG_A8:
+        we_img_render_alpha(p_lcd, x0, y0, img, fg_color, opacity);
+        break;
+
+#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
+    case IMG_RGB565_INDEXQOI:
+        we_img_render_indexed_qoi_rgb565(p_lcd, x0, y0, img, opacity);
+        break;
+
+    case IMG_ARGB8565_INDEXQOI:
+        we_img_render_indexed_qoi_argb8565(p_lcd, x0, y0, img, opacity);
+        break;
+#endif
+
+#if (WE_CFG_ENABLE_INDEXQOI_MASK == 1)
+    case IMG_A8_INDEXQOIMASK:
+        we_img_render_indexqoi_mask(p_lcd, x0, y0, img, fg_color, opacity);
+        break;
+#endif
+
+    default:
+        break; /* 不支持的格式静默跳过（控件已在 init 拦截） */
+    }
+}
 
 /**
  * @brief 在局部帧缓冲(PFB)中绘制实心矩形

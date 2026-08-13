@@ -1151,6 +1151,16 @@
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets\checkbox\we_widget_checkbox.c</FilePath>
             </File>
+            <File>
+              <FileName>we_widget_imgbtn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\imgbtn\we_widget_imgbtn.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_segdisp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets\segdisp\we_widget_segdisp.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1316,6 +1326,16 @@
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_focus2.c</FilePath>
             </File>
+            <File>
+              <FileName>demo_imgbtn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_imgbtn.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_segdisp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\demo_segdisp.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1412,11 +1432,6 @@
               <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_widget_ime_pinyin.c</FilePath>
             </File>
             <File>
-              <FileName>we_widget_imgbtn.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\imgbtn\we_widget_imgbtn.c</FilePath>
-            </File>
-            <File>
               <FileName>we_widget_joystick.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets_preview\joystick\we_widget_joystick.c</FilePath>
@@ -1470,11 +1485,6 @@
               <FileName>we_widget_scale.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets_preview\scale\we_widget_scale.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_sevenseg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\sevenseg\we_widget_sevenseg.c</FilePath>
             </File>
             <File>
               <FileName>we_widget_spectrum.c</FileName>
@@ -1552,11 +1562,6 @@
               <FilePath>..\..\Demo\preview\demo_ime_pinyin.c</FilePath>
             </File>
             <File>
-              <FileName>demo_imgbtn.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Demo\preview\demo_imgbtn.c</FilePath>
-            </File>
-            <File>
               <FileName>demo_joystick.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\preview\demo_joystick.c</FilePath>
@@ -1605,11 +1610,6 @@
               <FileName>demo_scale.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\preview\demo_scale.c</FilePath>
-            </File>
-            <File>
-              <FileName>demo_sevenseg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Demo\preview\demo_sevenseg.c</FilePath>
             </File>
             <File>
               <FileName>demo_spectrum.c</FileName>

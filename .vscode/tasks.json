@@ -2,11 +2,20 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "sim: stop running",
+            "label": "lite: stop running",
             "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'wegui_sim*' } | Stop-Process -Force\"",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'wegui_lite*' } | Stop-Process -Force\"",
+            "linux": {
+                "command": "pkill -f wegui_lite || true"
+            },
+            "osx": {
+                "command": "pkill -f wegui_lite || true"
+            },
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
             },
             "presentation": {
                 "reveal": "never",
@@ -15,16 +24,31 @@
             "problemMatcher": []
         },
         {
-            "label": "sim: build",
+            "label": "lite: build",
             "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/build_sim.ps1\"",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/build_lite.ps1\"",
+            "linux": {
+                "command": "sh \"${workspaceFolder}/SimLite/build_lite.sh\""
+            },
+            "osx": {
+                "command": "sh \"${workspaceFolder}/SimLite/build_lite.sh\""
+            },
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "label": "$(tools) SimLite 编译",
+                    "tooltip": "build_lite.ps1（tcc 优先，约 2 秒）"
+                }
             },
             "dependsOrder": "sequence",
             "dependsOn": [
-                "sim: stop running"
+                "lite: stop running"
             ],
+            "presentation": {
+                "reveal": "silent",
+                "focus": false,
+                "showReuseMessage": false
+            },
             "problemMatcher": [
                 "$gcc"
             ],
@@ -34,26 +58,20 @@
             }
         },
         {
-            "label": "sim: clean and build",
+            "label": "lite: run",
             "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/build_sim.ps1\" -Clean",
-            "options": {
-                "cwd": "${workspaceFolder}"
+            "command": "powershell -NoProfile -Command \"Start-Process -FilePath '${workspaceFolder}/SimLite/build/wegui_lite.exe' -WorkingDirectory '${workspaceFolder}/SimLite/build'\"",
+            "linux": {
+                "command": "cd \"${workspaceFolder}/SimLite/build\" && ./wegui_lite &"
             },
-            "dependsOrder": "sequence",
-            "dependsOn": [
-                "sim: stop running"
-            ],
-            "problemMatcher": [
-                "$gcc"
-            ]
-        },
-        {
-            "label": "sim: run latest",
-            "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/Simulator/run_latest_sim.ps1\"",
+            "osx": {
+                "command": "cd \"${workspaceFolder}/SimLite/build\" && ./wegui_lite &"
+            },
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
             },
             "presentation": {
                 "reveal": "never",
@@ -62,12 +80,52 @@
             "problemMatcher": []
         },
         {
-            "label": "sim: build and run",
+            "label": "lite: build and run",
             "dependsOrder": "sequence",
             "dependsOn": [
-                "sim: build",
-                "sim: run latest"
+                "lite: build",
+                "lite: run"
             ],
+            "options": {
+                "statusbar": {
+                    "label": "$(rocket) 编译+运行",
+                    "tooltip": "编译 SimLite 后启动 wegui_lite.exe"
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "lite: build dev (gcc, debug)",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/build_lite.ps1\" -Dev -Compiler gcc",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
+            },
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "lite: stop running"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "lite: autotest",
+            "type": "shell",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/autotest.ps1\"",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
             "problemMatcher": []
         },
         {
@@ -75,7 +133,10 @@
             "type": "shell",
             "command": "& { $log = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.build_log.htm'; $axf = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.axf'; $null = Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '-j0','-b','${config:wegui.stm32ProjectFile}','-t','${config:wegui.stm32TargetName}' -PassThru -Wait; if (!(Test-Path $log) -or !(Test-Path $axf)) { Write-Error 'Keil did not generate Project.axf or build log.'; exit 1 }; $txt = Get-Content -Raw $log; if ($txt -match ' - 0 Error\\(s\\),') { exit 0 } else { Write-Error 'Keil build log contains errors.'; exit 1 } }",
             "options": {
-                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM",
+                "statusbar": {
+                    "hide": true
+                }
             },
             "presentation": {
                 "reveal": "always",
@@ -91,7 +152,10 @@
             "type": "shell",
             "command": "& { $log = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.build_log.htm'; $axf = Join-Path '${workspaceFolder}' 'STM32F103/MDK-ARM/Objects/Project.axf'; $null = Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '-j0','-r','${config:wegui.stm32ProjectFile}','-t','${config:wegui.stm32TargetName}' -PassThru -Wait; if (!(Test-Path $log) -or !(Test-Path $axf)) { Write-Error 'Keil did not generate Project.axf or build log.'; exit 1 }; $txt = Get-Content -Raw $log; if ($txt -match ' - 0 Error\\(s\\),') { exit 0 } else { Write-Error 'Keil build log contains errors.'; exit 1 } }",
             "options": {
-                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM",
+                "statusbar": {
+                    "hide": true
+                }
             },
             "presentation": {
                 "reveal": "always",
@@ -106,7 +170,10 @@
             "type": "shell",
             "command": "& { Start-Process -FilePath '${config:wegui.keilUv4Path}' -ArgumentList '${config:wegui.stm32ProjectFile}' }",
             "options": {
-                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM"
+                "cwd": "${workspaceFolder}/STM32F103/MDK-ARM",
+                "statusbar": {
+                    "hide": true
+                }
             },
             "presentation": {
                 "reveal": "never",

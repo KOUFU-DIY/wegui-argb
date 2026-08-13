@@ -47,8 +47,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 分辨率不足(800x480)的告警已移到 Simulator/main_sim.c，
- * 仅当 DEMO_ID 选中本 demo(0) 时才提示（main_sim.c 的 #if (DEMO_ID==0)
+/* 分辨率不足(800x480)的告警已移到 SimLite/main_lite.c，
+ * 仅当 DEMO_ID 选中本 demo(0) 时才提示（main_lite.c 的 #if (DEMO_ID==0)
  * 分支内 #warning），避免编译其他 demo 时误报。 */
 
 /* ---- 顶栏 ---- */

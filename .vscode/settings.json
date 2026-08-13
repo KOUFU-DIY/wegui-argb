@@ -1,5 +1,12 @@
 {
-    "cmake.configureOnOpen": true,
-    "cmake.sourceDirectory": "${workspaceFolder}/Simulator",
-    "cmake.buildDirectory": "${workspaceFolder}/Simulator/build"
+    // 状态栏任务按钮（actboy168.tasks 扩展）：默认全部隐藏，
+    // 只显示 tasks.json 里带 options.statusbar.label 的任务（SimLite 编译/编译+运行）
+    "tasks.statusbar.default.hide": true,
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, BreakBeforeBraces: Allman, IndentWidth: 4, ColumnLimit: 120 }",
+    "files.exclude": {
+        "SimLite/build": true,
+        "SimLite/tcc": true
+    }
 }

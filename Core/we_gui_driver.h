@@ -741,6 +741,16 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      */
     void we_obj_set_pos(we_obj_t *obj, int16_t new_x, int16_t new_y);
     /**
+     * @brief 修改对象包围盒尺寸（左上角不动）
+     * @param obj 传入：目标对象指针
+     * @param new_w 传入：新的宽度（像素）
+     * @param new_h 传入：新的高度（像素）
+     * @return 无
+     * @note 与 we_obj_set_pos 同款：新旧区域与焦点光标环的标脏都由内核负责，
+     *       控件改尺寸走这里即可，不必自己算环的几何。
+     */
+    void we_obj_set_size(we_obj_t *obj, int16_t new_w, int16_t new_h);
+    /**
      * @brief 将对象追加到指定对象链表尾部
      * @param head_p 传入：链表头指针地址
      * @param obj 传入：待追加对象

@@ -1443,6 +1443,45 @@ void we_obj_set_pos(we_obj_t *obj, int16_t new_x, int16_t new_y)
 }
 
 /**
+ * @brief 通用对象改尺寸接口，适用于所有继承 we_obj_t 的控件
+ * @param obj 传入，目标对象指针
+ * @param new_w 传入，新的宽度（像素）
+ * @param new_h 传入，新的高度（像素）
+ * @return 无
+ * @note 与 we_obj_set_pos 同款契约：焦点光标环悬在包围盒外侧，尺寸变化会带动
+ *       环的位置，控件自身的旧/新包围盒标脏盖不住它，因此改尺寸前后由内核
+ *       各标一次环——控件不必自己算环的几何。
+ *       只改尺寸不改坐标（左上角不动）；尺寸未变时直接返回。
+ */
+void we_obj_set_size(we_obj_t *obj, int16_t new_w, int16_t new_h)
+{
+    if (obj == NULL || obj->lcd == NULL)
+        return;
+    if (obj->w == new_w && obj->h == new_h)
+        return;
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    if (obj == obj->lcd->focus_obj && (obj->lcd->focus_flags & WE_FOCUS_F_CURSOR_VIS) != 0U)
+        _we_focus_cursor_invalidate(obj);
+#endif
+
+    // 1. 先把旧尺寸区域标脏，保证缩小后多出来的部分会被重绘擦除。
+    we_obj_invalidate(obj);
+
+    // 2. 更新尺寸；左上角与所属链表、绘制顺序都不变。
+    obj->w = new_w;
+    obj->h = new_h;
+
+    // 3. 再把新尺寸区域标脏，保证放大后新增的部分会被绘制出来。
+    we_obj_invalidate(obj);
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+    if (obj == obj->lcd->focus_obj && (obj->lcd->focus_flags & WE_FOCUS_F_CURSOR_VIS) != 0U)
+        _we_focus_cursor_invalidate(obj);
+#endif
+}
+
+/**
  * @brief 将对象追加到指定对象链表尾部
  * @param head_p 传入，链表头指针地址
  * @param obj 传入，待追加对象

@@ -88,6 +88,11 @@
 #error "WE_CFG_ENABLE_INDEXED_QOI must be defined by platform port config."
 #endif
 
+/* 索引QOI_MASK（A8 透明蒙版压缩）解码裁剪开关：老工程配置无此宏时默认保留 */
+#ifndef WE_CFG_ENABLE_INDEXQOI_MASK
+#define WE_CFG_ENABLE_INDEXQOI_MASK (1)
+#endif
+
 #ifndef WE_CFG_ENABLE_INPUT_PORT_BIND
 #error "WE_CFG_ENABLE_INPUT_PORT_BIND must be defined by platform port config."
 #endif

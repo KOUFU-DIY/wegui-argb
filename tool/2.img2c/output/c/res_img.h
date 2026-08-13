@@ -6,43 +6,11 @@ extern const unsigned char demo_argb8565_indexqoi_be_80x80[3261];
 
 extern const unsigned char demo_argb8565_raw_be_80x80[19206];
 
-extern const unsigned char demo_backspace_a1_raw_be_48x48[294];
+extern const unsigned char demo_mapin_a8_indexqoimask_be_48x48[916];
 
-extern const unsigned char demo_backspace_a2_raw_be_48x48[582];
+extern const unsigned char demo_picture_a8_indexqoimask_be_48x48[767];
 
-extern const unsigned char demo_backspace_a4_raw_be_48x48[1158];
-
-extern const unsigned char demo_backspace_a8_raw_be_48x48[2310];
-
-extern const unsigned char demo_chat_a1_raw_be_48x48[294];
-
-extern const unsigned char demo_chat_a2_raw_be_48x48[582];
-
-extern const unsigned char demo_chat_a4_raw_be_48x48[1158];
-
-extern const unsigned char demo_chat_a8_raw_be_48x48[2310];
-
-extern const unsigned char demo_mapin_a1_raw_be_48x48[294];
-
-extern const unsigned char demo_mapin_a2_raw_be_48x48[582];
-
-extern const unsigned char demo_mapin_a4_raw_be_48x48[1158];
-
-extern const unsigned char demo_mapin_a8_raw_be_48x48[2310];
-
-extern const unsigned char demo_picture_a1_raw_be_48x48[294];
-
-extern const unsigned char demo_picture_a2_raw_be_48x48[582];
-
-extern const unsigned char demo_picture_a4_raw_be_48x48[1158];
-
-extern const unsigned char demo_picture_a8_raw_be_48x48[2310];
-
-extern const unsigned char demo_powerdrill_a1_raw_be_48x48[294];
-
-extern const unsigned char demo_powerdrill_a2_raw_be_48x48[582];
-
-extern const unsigned char demo_powerdrill_a4_raw_be_48x48[1158];
+extern const unsigned char demo_powerdrill_a8_indexqoimask_be_48x48[482];
 
 extern const unsigned char demo_powerdrill_a8_raw_be_48x48[2310];
 
@@ -50,11 +18,7 @@ extern const unsigned char demo_rgb565_indexqoi_be_128x64[6807];
 
 extern const unsigned char demo_rgb565_raw_be_64x80[10246];
 
-extern const unsigned char demo_windows_a1_raw_be_48x48[294];
-
-extern const unsigned char demo_windows_a2_raw_be_48x48[582];
-
-extern const unsigned char demo_windows_a4_raw_be_48x48[1158];
+extern const unsigned char demo_windows_a8_indexqoimask_be_48x48[609];
 
 extern const unsigned char demo_windows_a8_raw_be_48x48[2310];
 

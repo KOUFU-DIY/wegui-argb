@@ -4,17 +4,10 @@
 /* --------------------------------------------------------------------------
  * 图片控件绘制回调
  *
- * 这里把“图片类型分发”收口到 img 控件内部。
- *
- * 实现思路：
- * 1. 控件层只关心当前资源属于哪一种图片格式
- * 2. 根据 dat_type 选择对应的渲染内核
- * 3. we_gui_driver.c 不承担“图片控件该怎么分发”的职责
- *
- * 这样后面查看图片控件时，只看 we_widget_img.c 就能知道：
- * - 当前支持哪些图片类型
- * - 当前工程是否裁掉了某些格式
- * - 控件最终会落到哪条渲染路径
+ * 图片格式分发统一由渲染层的 we_img_render_auto / we_img_format_supported
+ * 负责（we_render.c），img 与 imgbtn 等所有图片控件共用同一份分发表：
+ * - 支持哪些格式、当前工程裁掉了哪些，只看 we_render.c 一处
+ * - 控件层只做"init 阶段拦下不支持的资源、绘制时把图和参数递进去"
  * -------------------------------------------------------------------------- */
 
 /**
@@ -31,77 +24,10 @@ static void _img_draw_cb(void *ptr)
         return;
     }
 
-    switch (IMG_DAT_FORMAT(obj->img_src))
-    {
-    case IMG_RGB565:
-        we_img_render_rgb565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
-        break;
-
-    case IMG_ARGB8565:
-        we_img_render_argb8565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
-        break;
-
-    case IMG_A1:
-    case IMG_A2:
-    case IMG_A4:
-    case IMG_A8:
-        we_img_render_alpha(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->color, obj->opacity);
-        break;
-
-#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-    case IMG_RGB565_INDEXQOI:
-        we_img_render_indexed_qoi_rgb565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
-        break;
-
-    case IMG_ARGB8565_INDEXQOI:
-        we_img_render_indexed_qoi_argb8565(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src, obj->opacity);
-        break;
-#endif
-
-    default:
-        break;
-    }
-}
-
-/* --------------------------------------------------------------------------
- * 判断当前图片格式是否受支持
- *
- * 这一步放在控件层的目的，是在初始化阶段就把不支持的资源挡住，
- * 避免后面 draw_cb 每一帧还要继续判断这个对象能不能画。
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 判断图片数据格式是否为当前编译配置支持。
- * @param dat_type 图片资源的数据格式枚举值。
- * @return 返回状态标志（1 有效，0 无效）。
- */
-static uint8_t _img_type_supported(imgarry_type_t dat_type)
-{
-    switch (dat_type)
-    {
-    case IMG_RGB565:
-        return 1U;
-
-    case IMG_ARGB8565:
-        return 1U;
-
-    case IMG_A1:
-    case IMG_A2:
-    case IMG_A4:
-    case IMG_A8:
-        return 1U;
-
-#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-    case IMG_RGB565_INDEXQOI:
-        return 1U;
-
-    case IMG_ARGB8565_INDEXQOI:
-        return 1U;
-#endif
-
-    default:
-        return 0U;
-    }
+    /* 格式分发由渲染层统一负责（we_img_render_auto），控件只提供
+     * "画哪张图 + 前景色 + 透明度"；前景色仅 A1/A2/A4/A8 会用到。 */
+    we_img_render_auto(obj->base.lcd, obj->base.x, obj->base.y, obj->img_src,
+                       obj->color, obj->opacity);
 }
 
 /**
@@ -128,7 +54,7 @@ void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, con
     obj->base.y = y;
     obj->base.w = IMG_DAT_WIDTH(img);
     obj->base.h = IMG_DAT_HEIGHT(img);
-    obj->base.class_p = _img_type_supported(IMG_DAT_FORMAT(img)) ? &_img_class : NULL;
+    obj->base.class_p = we_img_format_supported(IMG_DAT_FORMAT(img)) ? &_img_class : NULL;
     obj->base.next = NULL;
 
     obj->img_src = img;

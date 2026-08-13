@@ -1,6 +1,6 @@
 工具路径./img2c
 支持图片像素格式：alpha、rgb565、rgb888
-支持图片压缩格式：raw 无压缩、indexqoi压缩
+支持图片压缩格式：raw 无压缩、indexqoi压缩、indexqoimask压缩（A8透明位图专用, 默认推荐）
 支持图片输出格式：bin/h用于外置储存、c/h用于单片机内置
 
 使用步骤:
@@ -10,14 +10,10 @@
 TIP 1.1:
 input目录
 ./input/alpha/ #透明位图待取模文件夹
-./input/alpha/a1_raw_2bin #外置储存1位精度透明位图图片存放路径
-./input/alpha/a1_raw_2c #内置储存1位精度透明位图图片存放路径
-./input/alpha/a2_raw_2bin #外置储存2位精度透明位图图片存放路径
-./input/alpha/a2_raw_2c #内置储存2位精度透明位图图片存放路径
-./input/alpha/a4_raw_2bin #外置储存4位精度透明位图图片存放路径
-./input/alpha/a4_raw_2c #内置储存4位精度透明位图图片存放路径
-./input/alpha/a8_raw_2bin #外置储存8位精度透明位图图片存放路径
-./input/alpha/a8_raw_2c #内置储存8位精度透明位图图片存放路径
+./input/alpha/A8_raw_2bin #外置储存8位精度透明位图图片存放路径（预留后续旋转图支持）
+./input/alpha/A8_raw_2c #内置储存8位精度透明位图图片存放路径（预留后续旋转图支持）
+./input/alpha/A8_indexqoimask_2bin #外置储存索引QOI_MASK压缩透明位图图片存放路径（推荐）
+./input/alpha/A8_indexqoimask_2c #内置储存索引QOI_MASK压缩透明位图图片存放路径（推荐）
 
 ./input/rgb565/ #rgb565像素格式待取模文件夹
 ./input/rgb888/ #rgb888像素格式待取模文件夹

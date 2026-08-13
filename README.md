@@ -1,8 +1,8 @@
-# WeGui-ARGB · V0.3.0 beta
+# WeGui-ARGB · V0.4.0 beta
 
-轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供 SDL2 PC 模拟器。
+轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供轻量 PC 模拟器（SimLite，无 SDL 依赖，TCC 秒级编译）。
 
-> 当前版本 **V0.3.0 beta**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
+> 当前版本 **V0.4.0 beta**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
 
 ## 特性
 
@@ -10,10 +10,10 @@
 - 脏矩形刷新策略（全屏 / 单包围盒 / 多脏矩形）
 - 统一的 GUI tick / timer / 中央动画调度
 - 全局聚焦 + 按键导航（方向键空间就近移动 / Tab 环序 / OK 双沿按压 / 容器下钻，触摸与按键共存，纯触摸工程可整体编译剔除）
-- 图片格式：RGB565 / ARGB8565（无压缩与索引 QOI）+ A1/A2/A4/A8 透明位图（前景色上色，同一份取模反复换色复用）
+- 图片格式：RGB565 / ARGB8565（无压缩与索引 QOI）+ A1/A2/A4/A8 透明位图（前景色上色，同一份取模反复换色复用）+ 索引QOI_MASK 压缩 A8 蒙版（alpha 推荐格式，行索引随机访问、流式解码零额外 RAM，48×48 图标约为裸 A8 的 21%~40%）
 - 内置控件与完整 demo 工程；`tool/` 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → 烧录）
 - 支持外部 Flash 图片与字体资源（模拟器直读 `merged_bin.bin`，与硬件"重烧"流程对应）
-- 同时支持 STM32F103 / STM32F030 硬件目标与 SDL2 模拟器目标
+- 同时支持 STM32F103 / STM32F030 / 杰理 AD14N（AD142A4）硬件目标与 SimLite PC 模拟器目标（fenster 三平台窗口底座：Win32 GDI / macOS Cocoa / Linux X11）
 - headless 基准哈希回归：67 项逐帧 CRC 金样（含 10 条交互轨迹脚本），一条命令全量校验
 
 ## 资源占用（实测）
@@ -29,7 +29,7 @@
 
 ### 各 demo 单独占用（STM32F030 / Cortex-M0 实测）
 
-每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器 `--gc-sections` 剔除未引用控件）后的 Keil `.map` 实测（V0.2.3 全表实测；3/15/31 三行随 V0.3.0 beta 的 indexQOI V2 重测，其余 demo 不受该变更影响）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
+每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器 `--gc-sections` 剔除未引用控件）后的 Keil `.map` 实测（**V0.3.0 beta 全表重测**）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
 
 | DEMO_ID | demo / 主要控件 | ROM | RAM | 备注 |
 |---|---|---|---|---|
@@ -63,9 +63,15 @@
 | 28 | toast（轻提示） | 20.3 KB | 5.86 KB | |
 | 29 | focus（聚焦导航） | 22.5 KB | 6.12 KB | btn/checkbox/toggle/indicator/group 组合 |
 | 30 | focus2（聚焦编辑态） | 27.9 KB | 6.19 KB | slider/stepper/roller/list 组合 |
-| 31 | img_alpha（透明位图） | 33.9 KB | 6.14 KB | ⚠ 含 A1/A2/A4/A8 位图资产 ~13 KB |
+| 31 | img_alpha（透明位图） | 28.7 KB | 6.14 KB | ⚠ 含 A8 raw + 索引QOI_MASK 位图资产 ~7.2 KB |
+| 32 | imgbtn（图片按钮） | 35.8 KB | 5.93 KB | ⚠ 含 demo 内嵌图片资产 ~14 KB（RGB565 raw + A8 raw + 索引QOI_MASK ×2） |
+| 33 | segdisp（数码管） | 18.8 KB | 5.95 KB | 控件全功能本体仅 ~1.66 KB，无字库/图片资产 |
 
-> ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex`/`img_alpha` 的 ROM 偏大是 demo 内嵌了图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..31 均可单独烧录到 F030。F103 同口径约再大 0.7 KB（多一份外挂 flash 端口实现）。
+> 内核里没被引用的 API 不进固件：新增 `we_obj_set_size` 后全表逐行零变化，
+> 同口径的 F103 dropdown 更是逐字节相同（Code/RO/RW/ZI 四项全等），
+> 说明链接器把未引用的内核函数整体剔除了——按需付费，加 API 不涨底座。
+>
+> ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex`/`img_alpha` 的 ROM 偏大是 demo 内嵌了图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..33 均可单独烧录到 F030。F103 同口径约再大 0.7 KB（多一份外挂 flash 端口实现）。
 
 ## 当前控件状态
 
@@ -98,6 +104,8 @@
 - roller
 - marquee
 - toast
+- imgbtn
+- segdisp
 
 其中：
 
@@ -115,14 +123,17 @@
 - `roller` 为滚轮选值器：慢速松手就近吸附，快速甩动惯性继承拖拽速度、滑过多行再减速吸附，轻点上/下可见行直达该行；滚动只标文本列带，文字测量走 y-bbox 常量化 + 行宽缓存（绘制内环零测量调用）
 - `marquee` 为跑马灯标签："放得下静止、放不下循环滚动"自适应（两段绘制无缝接缝 + 可停留）；窗口化字形绘制对不可见字形只做游标快进（零位图取址、零像素扫描），滚动由单个中央动画节点推进
 - `toast` 为非模态轻提示横幅（挂 LCD 顶层链，浮于一切之上且不拦截输入）：顶部滑入 → 停留 → 滑出；滑动每步把新旧包围盒 union 成单个矩形一次标脏，超宽文本尾部自动截断加省略号
-- `img` 支持 RGB565 / ARGB8565 raw、两种索引 QOI 与 A1/A2/A4/A8 透明位图（`we_img_obj_set_color` 前景色上色，默认白色）；`dropdown` 展开列表 / 弹层软键盘走顶层 + 模态通道（命中与语义键直送模态对象）
+- `img` 支持 RGB565 / ARGB8565 raw、两种索引 QOI、A1/A2/A4/A8 透明位图与索引QOI_MASK 压缩 A8 蒙版（`we_img_obj_set_color` 前景色上色，默认白色）；`dropdown` 展开列表 / 弹层软键盘走顶层 + 模态通道（命中与语义键直送模态对象）
 - 所有带动画的控件（toggle/progress/indicator/msgbox/slideshow/scroll_panel/dropdown/line/gauge/list/roller/marquee/toast）统一走**中央动画引擎**，不占用定时器槽位、数量无上限、空闲自动摘链
 - 容器透明度可向子控件级联传播（group/slideshow/scroll_panel）；裸 `group` 会把触摸事件转发给内部子控件，全透明 group 不拦截输入
+- `imgbtn` 为图片按钮：与 `img` 共用渲染层格式分发（全部图片格式可作按钮皮肤），无按压态图时自动变暗（带透明通道压透明度、不透明图叠半透明黑），支持运行时换图与 OK 键双沿触发
+- `segdisp` 为段码数码管：每位一个段码字节（bit0~6 = a~g、bit7 = dp，与 TM1650 类驱动段码表对齐），文本便捷层与段码直控双通道，45° 斜切段形（可选矩形）、逐位标脏；字宽/字高/间距/段厚在 init 全参数化（0 = 自动推导）
 
 除稳定区外，仓库另设 **preview 孵化区**：实验控件位于 `Core/widgets_preview/`（demo 在
-`Demo/preview/`，DEMO_ID 使用 100 起的独立编号段），仅模拟器编译、不进 Keil 硬件工程，
-未细致优化、随时可能下架；毕业后才迁入 `Core/widgets/` 与稳定编号段。当前含 `mask_group`
-在内共 26 个实验控件，完整清单见 `Demo/preview/preview_demos.h` 顶部的编号一览。
+`Demo/preview/`，DEMO_ID 使用 100 起的独立编号段），四个目标均参与编译（链接器剔除未引用部分），
+未细致优化、随时可能下架；毕业后才迁入 `Core/widgets/` 与稳定编号段（已毕业迁出的编号留空洞
+不复用，如 117→33 segdisp、120→32 imgbtn）。当前含 `mask_group` 在内共 24 个实验控件，
+完整清单见 `Demo/preview/preview_demos.h` 顶部的编号一览。
 
 ## 仓库结构
 
@@ -130,33 +141,36 @@
 - `Demo/` — 各控件 demo 与模板端口文件
 - `STM32F103/` — STM32F103 硬件入口、Keil 工程与 LCD/输入/外挂 Flash 端口层
 - `STM32F030/` — STM32F030 硬件入口、Keil 工程与 LCD/输入端口层
-- `Simulator/` — SDL2 模拟器入口、SDL 端口与模拟器配置
+- `AD14N/` — 杰理 AD142A4（sh54 内核）硬件入口、CodeBlocks 工程 + 无头构建脚本、SPI1+DMA LCD 端口、单按键端口与裁剪版 SDK 子集
+- `SimLite/` — 轻量 PC 模拟器：移植模板式入口、fenster 端口与配置、TCC/gcc 构建脚本、headless 基准哈希回归（`autotest.ps1` + `debug/` 开发者工具）
 - `tool/` — 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → W25Qxx 烧录）
 
 ## 快速开始
 
-### 1. Simulator
+### 1. SimLite（PC 模拟器）
 
-推荐方式：通过仓库内置脚本构建，脚本会自动探测当前环境中的可用工具链。
-优先使用 `ninja + gcc + g++`，找不到时回退到 `mingw32-make + gcc + g++`。
+无 SDL、无 CMake：把 TinyCC 解压到 `SimLite/tcc/`（全套约 2.5 MB）即可秒级全量编译；
+已装 MinGW 时自动回退 gcc（带 `-g`，可配合 VS Code gdb 调试）。
 
-清理并重建：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1" -Clean
-```
-
-普通构建：
+正式版构建（demo 由 `SimLite/main_lite.c` 顶部的 `DEMO_ID` 宏决定，与硬件目标同一套用法）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1"
 ```
 
-运行最新模拟器：
+不改源码临时换 demo / 构建完直接运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Demo 25 -Run
 ```
+
+开发者版 `wegui_lite_dev`（运行时选 demo：`wegui_lite_dev 25`，另有 `--list` / `--shot` / `--autotest`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Dev
+```
+
+macOS / Linux（clang+Cocoa / cc+libx11-dev）：`sh SimLite/build_lite.sh [--dev]`
 
 ### 2. STM32F103 / STM32F030 — Keil MDK-ARM AC5
 
@@ -173,9 +187,28 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 
 当前代码状态下，F103 / F030 工程均已验证可编译通过：`0 Error(s), 0 Warning(s)`
 
+### 3. AD14N（杰理 AD142A4）— CodeBlocks / pi32
+
+需要杰理 pi32 工具链（随杰理版 CodeBlocks 安装，默认 `C:\JL\pi32`）。两种等效构建方式：
+
+```powershell
+# 无头构建（编译 + LTO 链接 + app.bin）；加 -Download 经 USB 烧录
+powershell -NoProfile -ExecutionPolicy Bypass -File "AD14N/build_ad14n.ps1"
+
+# CodeBlocks 命令行（会连带跑 post-build 的 download.bat，打包 wegui/update.ufw；
+# 不接板时仅 USB 下载一步失败，不影响产物）
+& "C:\Program Files\CodeBlocks\codeblocks.exe" /na /nd /ns --rebuild --target=Release AD14N\AD14N_wegui.cbp
+```
+
+说明：
+- 工程文件 `AD14N/AD14N_wegui.cbp` 由 `AD14N/gen_cbp.ps1` 生成（glob 收集源文件），增删 `.c` 后重跑一次即可
+- 产物在 `AD14N/sdk/app/post_build/sh54/`：`app.bin`（单 demo 约 30~37 KB / 512 KB flash）、`wegui/update.ufw`（升级固件包）
+- 板级配置：480×320 ST7796S（SPI1 寄存器直操 + DMA，热路径入 RAM），PA0 单按键 = 短按 `NEXT` / 长按 `OK`，调试串口 PA9 @ 1 Mbps
+- 限制：无触摸；demo 15/16 需外挂 flash（本片无外挂，画面为空占位）；113（拼音输入法，字库约 700 KB）超出 512 KB flash 无法装下
+
 ## Demo 选择
 
-当前 simple demo 共 **31 个**，三个目标（Simulator / STM32F103 / STM32F030）编号已统一：`1..31` 完全一致；Simulator 额外用 `0 = showcase`（全控件汇总，仅模拟器，需 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
+当前 simple demo 共 **33 个**，四个目标（SimLite / STM32F103 / STM32F030 / AD14N）编号已统一：`1..33` 完全一致；SimLite 额外用 `0 = showcase`（全控件汇总，仅模拟器，需把分辨率调到 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
 
 下表为统一后的 `DEMO_ID`：
 
@@ -212,31 +245,35 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 | 28 | toast |
 | 29 | focus（聚焦/按键导航） |
 | 30 | focus2（聚焦编辑态：方向键调值） |
-| 31 | img_alpha（A1/A2/A4/A8 透明位图） |
+| 31 | img_alpha（A8 raw 与索引QOI_MASK 压缩透明位图） |
+| 32 | imgbtn（图片按钮） |
+| 33 | segdisp（数码管） |
 
-> `0`（showcase）仅 Simulator 提供；STM32 无此项。未列编号三个目标统一回退到 `label`。`29/30` 依赖 `WE_CFG_ENABLE_KEY_INPUT=1`（共享配置默认开启；关闭时这两个 demo 编译为提示桩）。模拟器按键映射：方向键 / Tab / Shift+Tab / Enter / 空格 / Esc / 退格。
+> `0`（showcase）仅 SimLite 提供；硬件目标无此项。未列编号各目标统一回退到 `label`。`29/30` 依赖 `WE_CFG_ENABLE_KEY_INPUT=1`（共享配置默认开启；关闭时这两个 demo 编译为提示桩）。模拟器按键映射：方向键 / Tab / Shift+Tab / Enter / 空格 / Esc / 退格。AD14N 单按键映射：短按 `NEXT`（焦点环下一个）/ 长按 `OK`（触发/下钻/编辑态），可聚焦类 demo 单键即可完整操作。
 
 ### 修改方法
-改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`Simulator/main_sim.c`、`STM32F103/main.c`、`STM32F030/main.c`。STM32 改完需重新编译 / 烧录。
+改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`SimLite/main_lite.c`、`STM32F103/main.c`、`STM32F030/main.c`、`AD14N/main.c`（在 `app` 函数内）。硬件目标改完需重新编译 / 烧录；SimLite 也可用 `build_lite.ps1 -Demo N` 免改源码，或直接用开发者版 `wegui_lite_dev N` 运行时切换。
 
 ## 构建与验证
 
 推荐的最小验证方式：
 
-- **Simulator**：编译并运行 `wegui_sim`，检查选定 demo 是否正常绘制与动画
+- **SimLite**：编译并运行 `wegui_lite`（或 `wegui_lite_dev <id>`），检查选定 demo 是否正常绘制与动画
 - **STM32**：编译 Keil 工程并在板上运行选定 demo
+- **AD14N**：`AD14N/build_ad14n.ps1 -Download` 编译并经 USB 烧录，在板上运行选定 demo
 
 回归验证（headless 基准哈希，无需人工看屏）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/autotest.ps1"
 ```
 
-对 1..31 与 preview 101..126 逐 demo 跑 180 帧（SDL dummy 视频驱动、固定 16ms 步进），
-对每帧屏幕缓冲做链式 FNV-1a 哈希并与 `Simulator/autotest/golden.txt` 比对（67 项）；
-`Simulator/autotest/scripts/*.evt` 存在时额外注入触摸/按键轨迹回放，把拖拽惯性、
-焦点导航、弹层开合锁到逐帧精确。改动导致 FAIL 时先确认是回归还是有意变更，
-有意变更用 `-Update` 重录基准。
+只构建一次开发者版 exe（运行时选 demo，无需逐个重编译），对 1..33 与 preview
+101..126（跳过毕业空洞 117/120）逐 demo 跑 180 帧（headless 不开窗、固定 16ms 步进），
+对每帧屏幕缓冲做链式 FNV-1a 哈希并与 `SimLite/autotest/golden.txt` 比对（67 项，
+全量约 80 秒）；`SimLite/autotest/scripts/*.evt` 存在时额外注入触摸/按键轨迹回放，
+把拖拽惯性、焦点导航、弹层开合锁到逐帧精确。改动导致 FAIL 时先确认是回归还是
+有意变更，有意变更用 `-Update` 重录基准（合并写回，只覆盖本次跑过的条目）。
 
 ## 资源与工具
 
@@ -244,7 +281,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/autotest.ps1"
 
 - `tool/0.tool/` — 底层转换器（font2c / img2bin_raw / img2bin_indexqoi / bin2c）
 - `tool/1.font2c/` — 字体取模（向导生成配置 + 一键构建；内置字体出 `.c/.h`，外挂字体出索引 + 字形 `.bin`）
-- `tool/2.img2c/` — 图片取模（按 像素格式 × 压缩 × 去向 分桶：`*_2c` 合并为内置数组，`*_2bin` 出散 bin；含 A1/A2/A4/A8 透明位图）
+- `tool/2.img2c/` — 图片取模（按 像素格式 × 压缩 × 去向 分桶：`*_2c` 合并为内置数组，`*_2bin` 出散 bin；alpha 蒙版默认推荐索引QOI_MASK 压缩取模，A8 raw 桶保留）
 - `tool/3.bin2c/` — 外挂资源合并（字体 + 图片 bin → `merged_bin.bin` + 地址表 `.c/.h`；另出仅供烧录工程的嵌数据版——体积大不入库，烧录前跑一次 `build_bin.bat` 再生）
 - `tool/4.STM32F103_ex_flash_download/` — W25Qxx 烧录工程（经调试器用自制 FLM 算法写入外挂 Flash）
 - `tool/0.1.2.3.update_all.bat` — 一键串联 1→2→3

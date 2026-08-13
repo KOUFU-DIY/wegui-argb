@@ -10,7 +10,7 @@
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    User Application                   │
-│          (main.c / main_sim.c / demo_xxx.c)          │
+│          (main.c / main_lite.c / demo_xxx.c)         │
 ├──────────────────────────────────────────────────────┤
 │            Widget Layer (Core/widgets/...)            │
 │   label │ btn │ img │ img_ex │ arc │ group │ ...      │
@@ -30,7 +30,7 @@
 | `Core/` | Platform-independent kernel, widgets, dirty-rect engine, fonts |
 | `Demo/` | Demo applications, each widget has its own `demo_xxx.c` |
 | `STM32F103/` | Hardware MCU entry, Keil project, LCD SPI port |
-| `Simulator/` | SDL2 simulator entry, SDL port, simulator config |
+| `SimLite/` | PC simulator entry (fenster backend, no SDL), port, config, autotest harness |
 
 ### Key Concepts
 
@@ -83,15 +83,15 @@ while (1) {
     we_gui_task_handler(&mylcd);       // input + timers + render + flush
 }
 
-// Simulator (additional SDL call):
-while (sim_handle_events(&mylcd)) {
-    uint32_t delta = SDL_GetTicks() - last_tick;
+// SimLite simulator (additional present call):
+while (lite_handle_events(&mylcd)) {
+    uint32_t delta = lite_ticks_ms() - last_tick;
     if (delta > 0U) {
         we_gui_tick_inc(&mylcd, (uint16_t)delta);
         last_tick += delta;
     }
     we_gui_task_handler(&mylcd);
-    sim_lcd_update();                  // push PFB to SDL window
+    lite_present();                    // push framebuffer to the window
 }
 ```
 
@@ -691,10 +691,10 @@ editing the `#define DEMO_ID` line near the top of `main`.
 
 ## 14. Build Commands
 
-### Simulator (wrapper-script preferred)
+### SimLite simulator (TCC-first, no SDL / no CMake)
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/build_sim.ps1" -Clean
-powershell -NoProfile -ExecutionPolicy Bypass -File "Simulator/run_latest_sim.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Run
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Dev   # wegui_lite_dev: runtime demo select / --autotest
 ```
 
 ### STM32 (Keil MDK-ARM AC5)
@@ -798,6 +798,10 @@ void we_obj_delete(we_obj_t *obj);                    /* 唯一删除入口：de
                                                          内核回收按压/焦点/弹层/动画引用 */
 void we_obj_attach_to_top(we_lcd_t *lcd, we_obj_t *o);/* 顶层链：保证置顶（toast/msgbox），
                                                          不打乱普通层 Z 序 */
+
+/* 几何（新旧区域 + 焦点光标环的标脏都由内核负责，控件不必自己算环） */
+void we_obj_set_pos(we_obj_t *obj, int16_t x, int16_t y);
+void we_obj_set_size(we_obj_t *obj, int16_t w, int16_t h); /* 左上角不动，只改包围盒 */
 
 /* 输入（内核统一派发） */
 void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj);     /* 祖先容器接管手势（原按压对象

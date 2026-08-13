@@ -8,7 +8,7 @@
  * 3. Esc(BACK)：从 group 内退回容器本体（光标框住整个 group），顶层再按清除焦点
  * 4. 底部状态行显示最近一次按键触发的动作
  *
- * 模拟器按键映射（Simulator/sdl_port.c）：
+ * 模拟器按键映射（SimLite/fenster_port.c）：
  *   方向键 = 上/下/左/右   Tab / Shift+Tab = 后一个/前一个
  *   Enter / 空格 = OK      Esc / 退格 = BACK
  * 触摸/鼠标操作与按键共存，互不影响。

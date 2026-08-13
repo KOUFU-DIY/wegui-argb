@@ -29,8 +29,8 @@
  *   111 joystick(虚拟摇杆)    112 statusbar(状态栏)
  *   113 ime_pinyin(拼音输入法) 114 spinner(加载指示)
  *   115 btnmatrix(按键矩阵)   116 radio(单选组)
- *   117 sevenseg(数码管)      118 knob(旋钮)
- *   119 colorwheel(色轮)      120 imgbtn(图片按钮)
+ *   117 (已毕业→33 segdisp)   118 knob(旋钮)
+ *   119 colorwheel(色轮)      120 (已毕业→32 imgbtn)
  *   121 animimg(帧动画)       122 canvas(自绘画布)
  *   123 tabview(页签容器)     124 hold_btn(长按确认)
  *   125 mask_group(蒙版容器)  126 mlabel(多行文本)
@@ -48,10 +48,6 @@ void we_btnmatrix_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 void we_radio_preview_demo_init(we_lcd_t *lcd);
 void we_radio_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
-/* sevenseg 七段数码管（大数字/时钟显示，不吃字库）。 */
-void we_sevenseg_preview_demo_init(we_lcd_t *lcd);
-void we_sevenseg_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
-
 /* knob 旋钮/弧形滑块（拖拽改值的交互圆弧）。 */
 void we_knob_preview_demo_init(we_lcd_t *lcd);
 void we_knob_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
@@ -59,10 +55,6 @@ void we_knob_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 /* colorwheel HSV 色轮（环形取色 + 选色回调）。 */
 void we_colorwheel_preview_demo_init(we_lcd_t *lcd);
 void we_colorwheel_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
-
-/* imgbtn 图片按钮（按状态切图/按压变暗 + 点击回调）。 */
-void we_imgbtn_preview_demo_init(we_lcd_t *lcd);
-void we_imgbtn_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 /* animimg 帧动画（图片序列循环播放）。 */
 void we_animimg_preview_demo_init(we_lcd_t *lcd);

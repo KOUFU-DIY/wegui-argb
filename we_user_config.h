@@ -6,7 +6,7 @@
 
 /* ----------------------------- 版本 ----------------------------- */
 /* 框架版本号（字符串），与 README / 对外发布保持一致 */
-#define WE_GUI_VERSION "V0.3.0 beta"
+#define WE_GUI_VERSION "V0.4.0 beta"
 
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
@@ -15,9 +15,17 @@
 /* LCD 输出色深 */
 #define LCD_DEEP (DEEP_RGB565)
 
-/* 屏幕宽高 */
+/* 屏幕宽高
+ * AD14N 目标板接 ST7796S 480x320 横屏，用原生分辨率；
+ * 其余目标统一 280x240（demo 均按 280x240 固定布局编写，
+ * 480x320 下 demo 内容锚定左上角显示）。 */
+#if defined(WE_PLATFORM_AD14N)
+#define SCREEN_WIDTH (480)
+#define SCREEN_HEIGHT (320)
+#else
 #define SCREEN_WIDTH (280)
 #define SCREEN_HEIGHT (240)
+#endif
 
 /* 屏幕显存
  * 最小设置 1 行；
@@ -65,6 +73,10 @@
 /* 1: 保留索引 QOI 解码
  * 0: 裁掉索引 QOI 相关绘图函数和图片控件分发路径 */
 #define WE_CFG_ENABLE_INDEXED_QOI (1)
+
+/* 1: 保留索引QOI_MASK（A8 透明蒙版压缩）解码
+ * 0: 裁掉该解码器与图片控件分发路径（只剩未压缩 A1/A2/A4/A8） */
+#define WE_CFG_ENABLE_INDEXQOI_MASK (1)
 
 /* --------------------------- GUI 定时器配置 --------------------------- */
 /* 用户定时器已改为调用方持有的侵入式节点（we_gui_timer_t）：无槽位上限 */

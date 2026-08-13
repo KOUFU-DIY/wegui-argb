@@ -142,6 +142,14 @@ void we_focus2_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 void we_img_alpha_simple_demo_init(we_lcd_t *lcd);
 void we_img_alpha_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
+/* imgbtn demo（图片按钮：三条格式路径 + 按压变暗/运行时换图 + 点击计数）。 */
+void we_imgbtn_simple_demo_init(we_lcd_t *lcd);
+void we_imgbtn_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* segdisp demo（段码数码管：斜切时钟 + 宽扁 dp 计数器 + 段码直控跑马灯）。 */
+void we_segdisp_simple_demo_init(we_lcd_t *lcd);
+void we_segdisp_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
 /* 汇总 demo（仅模拟器：4 页 slideshow 串联主要控件与子系统）。 */
 void we_showcase_simple_demo_init(we_lcd_t *lcd);
 void we_showcase_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);

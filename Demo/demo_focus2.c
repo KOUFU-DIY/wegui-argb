@@ -12,7 +12,7 @@
  * 3. Enter/Esc 退出编辑态回到导航；触摸点击可直接把焦点带过去
  * 4. 底部状态行显示最近一次值变化
  *
- * 模拟器按键映射（Simulator/sdl_port.c）：
+ * 模拟器按键映射（SimLite/fenster_port.c）：
  *   方向键 = 上/下/左/右   Tab / Shift+Tab = 后一个/前一个
  *   Enter / 空格 = OK      Esc / 退格 = BACK
  */
