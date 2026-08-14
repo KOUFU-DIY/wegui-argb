@@ -13,7 +13,7 @@
 - 图片格式：RGB565 / ARGB8565（无压缩与索引 QOI）+ A1/A2/A4/A8 透明位图（前景色上色，同一份取模反复换色复用）+ 索引QOI_MASK 压缩 A8 蒙版（alpha 推荐格式，行索引随机访问、流式解码零额外 RAM，48×48 图标约为裸 A8 的 21%~40%）
 - 内置控件与完整 demo 工程；`tool/` 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → 烧录）
 - 支持外部 Flash 图片与字体资源（模拟器直读 `merged_bin.bin`，与硬件"重烧"流程对应）
-- 同时支持 STM32F103 / STM32F030 / 杰理 AD14N（AD142A4）硬件目标与 SimLite PC 模拟器目标（fenster 三平台窗口底座：Win32 GDI / macOS Cocoa / Linux X11）
+- 同时支持 STM32F103 / STM32F030 硬件目标与 SimLite PC 模拟器目标（fenster 三平台窗口底座：Win32 GDI / macOS Cocoa / Linux X11）
 - headless 基准哈希回归：67 项逐帧 CRC 金样（含 10 条交互轨迹脚本），一条命令全量校验
 
 ## 资源占用（实测）
@@ -155,7 +155,6 @@
 - `Demo/` — 各控件 demo 与模板端口文件
 - `STM32F103/` — STM32F103 硬件入口、Keil 工程与 LCD/输入/外挂 Flash 端口层
 - `STM32F030/` — STM32F030 硬件入口、Keil 工程与 LCD/输入端口层
-- `AD14N/` — 杰理 AD142A4（sh54 内核）硬件入口、CodeBlocks 工程 + 无头构建脚本、SPI1+DMA LCD 端口、单按键端口与裁剪版 SDK 子集
 - `SimLite/` — 轻量 PC 模拟器：移植模板式入口、fenster 端口与配置、TCC/gcc 构建脚本、headless 基准哈希回归（`autotest.ps1` + `debug/` 开发者工具）
 - `tool/` — 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → W25Qxx 烧录）
 
@@ -201,28 +200,9 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 
 当前代码状态下，F103 / F030 工程均已验证可编译通过：`0 Error(s), 0 Warning(s)`
 
-### 3. AD14N（杰理 AD142A4）— CodeBlocks / pi32
-
-需要杰理 pi32 工具链（随杰理版 CodeBlocks 安装，默认 `C:\JL\pi32`）。两种等效构建方式：
-
-```powershell
-# 无头构建（编译 + LTO 链接 + app.bin）；加 -Download 经 USB 烧录
-powershell -NoProfile -ExecutionPolicy Bypass -File "AD14N/build_ad14n.ps1"
-
-# CodeBlocks 命令行（会连带跑 post-build 的 download.bat，打包 wegui/update.ufw；
-# 不接板时仅 USB 下载一步失败，不影响产物）
-& "C:\Program Files\CodeBlocks\codeblocks.exe" /na /nd /ns --rebuild --target=Release AD14N\AD14N_wegui.cbp
-```
-
-说明：
-- 工程文件 `AD14N/AD14N_wegui.cbp` 由 `AD14N/gen_cbp.ps1` 生成（glob 收集源文件），增删 `.c` 后重跑一次即可
-- 产物在 `AD14N/sdk/app/post_build/sh54/`：`app.bin`（单 demo 约 30~37 KB / 512 KB flash）、`wegui/update.ufw`（升级固件包）
-- 板级配置：480×320 ST7796S（SPI1 寄存器直操 + DMA，热路径入 RAM），PA0 单按键 = 短按 `NEXT` / 长按 `OK`，调试串口 PA9 @ 1 Mbps
-- 限制：无触摸；demo 15/16 需外挂 flash（本片无外挂，画面为空占位）；113（拼音输入法，字库约 700 KB）超出 512 KB flash 无法装下
-
 ## Demo 选择
 
-当前 simple demo 共 **33 个**，四个目标（SimLite / STM32F103 / STM32F030 / AD14N）编号已统一：`1..33` 完全一致；SimLite 额外用 `0 = showcase`（全控件汇总，仅模拟器，需把分辨率调到 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
+当前 simple demo 共 **33 个**，三个目标（SimLite / STM32F103 / STM32F030）编号已统一：`1..33` 完全一致；SimLite 额外用 `0 = showcase`（全控件汇总，仅模拟器，需把分辨率调到 800×480）。选择方式是**编译期宏**——改入口 `main` 顶部的 `#define DEMO_ID` 即可，只有选中的 demo 会被编译进去。
 
 下表为统一后的 `DEMO_ID`：
 
@@ -263,10 +243,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "AD14N/build_ad14n.ps1"
 | 32 | imgbtn（图片按钮） |
 | 33 | segdisp（数码管） |
 
-> `0`（showcase）仅 SimLite 提供；硬件目标无此项。未列编号各目标统一回退到 `label`。`29/30` 依赖 `WE_CFG_ENABLE_KEY_INPUT=1`（共享配置默认开启；关闭时这两个 demo 编译为提示桩）。模拟器按键映射：方向键 / Tab / Shift+Tab / Enter / 空格 / Esc / 退格。AD14N 单按键映射：短按 `NEXT`（焦点环下一个）/ 长按 `OK`（触发/下钻/编辑态），可聚焦类 demo 单键即可完整操作。
+> `0`（showcase）仅 SimLite 提供；硬件目标无此项。未列编号各目标统一回退到 `label`。`29/30` 依赖 `WE_CFG_ENABLE_KEY_INPUT=1`（共享配置默认开启；关闭时这两个 demo 编译为提示桩）。模拟器按键映射：方向键 / Tab / Shift+Tab / Enter / 空格 / Esc / 退格。
 
 ### 修改方法
-改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`SimLite/main_lite.c`、`STM32F103/main.c`、`STM32F030/main.c`、`AD14N/main.c`（在 `app` 函数内）。硬件目标改完需重新编译 / 烧录；SimLite 也可用 `build_lite.ps1 -Demo N` 免改源码，或直接用开发者版 `wegui_lite_dev N` 运行时切换。
+改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`SimLite/main_lite.c`、`STM32F103/main.c`、`STM32F030/main.c`。硬件目标改完需重新编译 / 烧录；SimLite 也可用 `build_lite.ps1 -Demo N` 免改源码，或直接用开发者版 `wegui_lite_dev N` 运行时切换。
 
 ## 构建与验证
 
@@ -274,7 +254,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "AD14N/build_ad14n.ps1"
 
 - **SimLite**：编译并运行 `wegui_lite`（或 `wegui_lite_dev <id>`），检查选定 demo 是否正常绘制与动画
 - **STM32**：编译 Keil 工程并在板上运行选定 demo
-- **AD14N**：`AD14N/build_ad14n.ps1 -Download` 编译并经 USB 烧录，在板上运行选定 demo
 
 回归验证（headless 基准哈希，无需人工看屏）：
 

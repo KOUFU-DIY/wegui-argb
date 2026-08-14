@@ -51,11 +51,9 @@ tool/3.bin2c/output/embed/
 *.build_log*
 build_log.txt
 
-# Shelved tools (kept locally, excluded from upload)
-tool/gui/
-
-# Local Claude settings
+# Local editor / assistant files
 .claude/
+.cursor/
 
 # VS Code local IntelliSense config
 .vscode/c_cpp_properties.json
@@ -63,3 +61,4 @@ tool/gui/
 # SimLite build output and local TCC toolchain
 SimLite/build/
 SimLite/tcc/
+

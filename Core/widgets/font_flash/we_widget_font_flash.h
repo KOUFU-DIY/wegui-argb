@@ -12,7 +12,11 @@ extern "C"
 
 #define WE_FLASH_FONT_BLOB_HEADER_SIZE  6U
 #define WE_FLASH_FONT_GLYPH_DESC_SIZE  14U
+
+/* 单字形 scratch 缓冲上限（字节），we_user_config.h 可覆盖 */
+#ifndef WE_FLASH_FONT_SCRATCH_MAX
 #define WE_FLASH_FONT_SCRATCH_MAX     ((((SCREEN_WIDTH) * 4U) + 7U) >> 3U)
+#endif
 
 /* --------------------------------------------------------------------------
  * 字体描述符（Font Face）

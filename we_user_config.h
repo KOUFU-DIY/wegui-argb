@@ -15,17 +15,10 @@
 /* LCD 输出色深 */
 #define LCD_DEEP (DEEP_RGB565)
 
-/* 屏幕宽高
- * AD14N 目标板接 ST7796S 480x320 横屏，用原生分辨率；
- * 其余目标统一 280x240（demo 均按 280x240 固定布局编写，
- * 480x320 下 demo 内容锚定左上角显示）。 */
-#if defined(WE_PLATFORM_AD14N)
-#define SCREEN_WIDTH (480)
-#define SCREEN_HEIGHT (320)
-#else
+/* 屏幕宽高（demo 均按 280x240 固定布局编写；
+ * 更大的屏幕上 demo 内容锚定左上角显示） */
 #define SCREEN_WIDTH (280)
 #define SCREEN_HEIGHT (240)
-#endif
 
 /* 屏幕显存
  * 最小设置 1 行；
@@ -78,8 +71,22 @@
  * 0: 裁掉该解码器与图片控件分发路径（只剩未压缩 A1/A2/A4/A8） */
 #define WE_CFG_ENABLE_INDEXQOI_MASK (1)
 
+/* 1: 保留渲染计帧计数器（stat_render_frames，FPS 显示/帧率观测的数据源）
+ * 0: 从 we_lcd_t 裁掉该字段并消除计帧自增，RAM 敏感的量产固件可关 */
+// #define WE_CFG_ENABLE_RENDER_STATS (1)
+
+/* ------------------------- 诊断断言 ------------------------- */
+/* 内核冷入口（创建/挂载/初始化等生命周期 API）的参数断言，默认空操作。
+ * 移植调试期可定义为死循环/打印，放大"参数明显非法"类误用；
+ * 断言后的静默判空守卫始终保留，发布档行为不受影响 */
+// #define WE_ASSERT(expr) do { if (!(expr)) { for (;;); } } while (0)
+
 /* --------------------------- GUI 定时器配置 --------------------------- */
 /* 用户定时器已改为调用方持有的侵入式节点（we_gui_timer_t）：无槽位上限 */
+
+/* 定时器单帧补偿上限：主循环长时间阻塞（flash 擦写/长中断）后恢复的
+ * 那一帧，每个周期定时器最多补发的节拍数；超出部分丢弃并从当前重新计时 */
+// #define WE_CFG_TIMER_CATCHUP_MAX (4)
 
 /* -------------------------- 输入接口 -------------------------- */
 /* 输入接口(按键或触摸)开关
@@ -121,8 +128,8 @@
  * 另有逐控件开关 WE_BTN_USE_KEY / WE_CHECKBOX_USE_KEY / WE_TOGGLE_USE_KEY /
  * WE_INDICATOR_USE_KEY / WE_SLIDER_USE_KEY / WE_STEPPER_USE_KEY /
  * WE_ROLLER_USE_KEY / WE_LIST_USE_KEY / WE_SCROLL_PANEL_USE_KEY /
- * WE_DROPDOWN_USE_KEY（默认 1，置 0 单独裁掉该控件的按键回调与
- * 可聚焦性，定义处见各控件头文件） */
+ * WE_DROPDOWN_USE_KEY / WE_IMGBTN_USE_KEY（默认 1，置 0 单独裁掉该
+ * 控件的按键回调与可聚焦性，定义处见各控件头文件） */
 // #define WE_CFG_FOCUS_EDIT (0)
 // #define WE_CFG_FOCUS_NESTED (0)
 
@@ -132,6 +139,9 @@
 // #define WE_CFG_FOCUS_CURSOR_R (92)        /* 光标颜色 RGB888 */
 // #define WE_CFG_FOCUS_CURSOR_G (181)
 // #define WE_CFG_FOCUS_CURSOR_B (255)
+// #define WE_CFG_FOCUS_EDIT_R (255)         /* 编辑态光标颜色 RGB888（值类控件 OK 进入编辑后换色） */
+// #define WE_CFG_FOCUS_EDIT_G (150)
+// #define WE_CFG_FOCUS_EDIT_B (60)
 // #define WE_CFG_FOCUS_FLASH_MS (90U)       /* OK 最短按压窗口（毫秒，≤255） */
 // #define WE_CFG_KEY_QUEUE_LEN (8)          /* 语义键环形队列深度（2 的幂，容量=深度-1，默认 8） */
 
@@ -214,6 +224,10 @@
  * 1: 使用精细包围盒，减少无效刷新 */
 // #define WE_IMG_EX_USE_TIGHT_BBOX (1)
 
+/* RGB565 专用快速混色
+ * 自动跟随 LCD_DEEP（RGB565 时为 1，其余色深为 0），一般无需改 */
+// #define WE_IMG_EX_ENABLE_FAST_RGB565_BLEND (1)
+
 /* ----------------------- label_ex 控件 ----------------------- */
 /* 单次绘制时栈缓存的字形数上限
  * 单字形约 16 字节栈；UTF-8 多字节字符算 1 字形；超出部分不会渲染。
@@ -279,11 +293,7 @@
 /* 幻灯片最大页数 */
 // #define WE_SLIDESHOW_PAGE_MAX (8)
 
-/* 幻灯片内最多挂载的子控件数量（所有页面合计） */
-
 /* ---------------------- scroll_panel 控件 ---------------------- */
-/* 面板最多挂载的子控件数量 */
-
 /* 右缘滚动条宽度（像素） */
 // #define WE_SCROLL_PANEL_SCROLLBAR_W (4U)
 
@@ -611,5 +621,30 @@
 
 /* 默认停留时长（毫秒，show 传 0 时使用） */
 // #define WE_TOAST_DEF_DURATION (1500U)
+
+/* ------------------------- imgbtn 控件 ------------------------- */
+/* 不透明图（RGB565 等）的按压变暗遮罩透明度（无按压态图时生效，0~255） */
+// #define WE_IMGBTN_DIM_OPA (90U)
+
+/* 带透明通道的图（ARGB8565 / A1~A8）按压时的整体透明度缩放系数
+ * （0~255，255 = 不变暗）：按 opacity * SCALE / 255 压低，避免方形黑影 */
+// #define WE_IMGBTN_DIM_SCALE (165U)
+
+/* ------------------------- segdisp 控件 ------------------------- */
+/* 位数上限（含冒号位；参与结构体布局，覆盖必须放在本文件保证全工程一致） */
+// #define WE_SEGDISP_MAX_CHARS (8)
+
+/* 鬼影段透明度（0~255，会再与控件整体 opacity 相乘） */
+// #define WE_SEGDISP_GHOST_OPA (70U)
+
+/* 默认亮段色 RGB（青绿 LED 风格） */
+// #define WE_SEGDISP_DEF_ON_R (96)
+// #define WE_SEGDISP_DEF_ON_G (226)
+// #define WE_SEGDISP_DEF_ON_B (200)
+
+/* 默认灭段鬼影色 RGB（深灰蓝） */
+// #define WE_SEGDISP_DEF_OFF_R (66)
+// #define WE_SEGDISP_DEF_OFF_G (78)
+// #define WE_SEGDISP_DEF_OFF_B (96)
 
 #endif
