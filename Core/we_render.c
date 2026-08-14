@@ -511,23 +511,25 @@ void we_img_render_indexqoi_mask(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const 
 #endif /* WE_CFG_ENABLE_INDEXQOI_MASK */
 
 /* --------------------------------------------------------------------------
- * 索引 QOI 绘制入口（V2 流：14 字节索引头 0x0E + 三档跳转索引 + 静态调色盘）
+ * 索引 QOI 绘制入口（V3 流：14 字节索引头 0x0F + u16/u32 行索引表 + 行去重
+ * + 静态调色盘）
  *
  * 当前工程只保留“索引 QOI”这一条图片解码路径。
  * 原始 QOI 已经在编译期开关里裁掉，目的有三点：
  * 1. 减少 Flash 占用
  * 2. 简化图片控件的格式分发逻辑
  * 3. 只保留当前实际会用到的解码能力
- * 段首（索引点）op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
- * 因此从任意索引点跳入解码自包含；调色盘全局有效、解码中永不修改。
+ * V3 行自包含：行首 op 只会是调色盘 op 或 0xFF 原始全量、RUN 不跨行，
+ * 因此每行经行索引空降解码，与 PFB 按行切片天然契合；内容相同的行共享
+ * 同一偏移（编码侧行去重，解码器无感知）；调色盘全局有效、永不修改。
  * -------------------------------------------------------------------------- */
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 /* --------------------------------------------------------------------------
  * 索引 QOI 解码上下文
  *
- * RGB565 与 ARGB8565 两条解码路径共用同一套“头部解析 + 索引跳转 + 裁剪参数”
- * 前置逻辑，这里用一个上下文结构体收口，避免两个入口函数各维护一份完全相同
- * 的约 70 行解析代码，显著压缩 Flash 占用。
+ * RGB565 与 ARGB8565 两条解码路径共用同一套“头部解析 + 行索引定位 + 裁剪
+ * 参数”前置逻辑，这里用一个上下文结构体收口，避免两个入口函数各维护一份
+ * 完全相同的解析代码，显著压缩 Flash 占用。
  * -------------------------------------------------------------------------- */
 typedef struct
 {
@@ -540,27 +542,46 @@ typedef struct
     int16_t base_dest_x;
     int16_t base_dest_y;
     uint16_t dst_stride;
-    const uint8_t *arry;     /* 解码起点指针（已跳到最近的字节偏移） */
-    const uint8_t *data_end; /* 解码字节流保守硬上界（最坏 4 字节/像素），防越界读 */
+    const uint8_t *idx_u16;  /* u16 行索引表起点（前 u16_rows 行） */
+    const uint8_t *idx_u32;  /* u32 行索引表起点（其余行） */
+    uint16_t u16_rows;       /* m16：u16 表行数 */
     const uint8_t *palette;  /* 静态调色盘起点（每项 = 完整原始格式像素，全局有效） */
     uint8_t pal_count;       /* 调色盘条目数 0..64（0 = 无调色盘） */
-    uint16_t cur_x;
-    uint16_t cur_y;
-    uint32_t decoded_pixels;
-    uint32_t max_pixels;
+    const uint8_t *qoi_start; /* QOI 数据流起点 */
+    uint32_t stream_max;     /* 解码字节流保守硬上界（最坏 4 字节/像素），防越界读 */
 } _we_qoi_dec_t;
 
 /**
- * @brief 解析索引 QOI V2 头部、按目标区域跳转解码起点并算好裁剪参数
+ * @brief 查第 row 行数据相对 QOI 数据流起点的字节偏移
+ * @param dec 传入：解码上下文
+ * @param row 传入：行号（0 起）
+ * @return 字节偏移（行去重后可能与更早的行相同）
+ */
+static uint32_t _we_qoi_row_offset(const _we_qoi_dec_t *dec, uint16_t row)
+{
+    if (row < dec->u16_rows)
+    {
+        const uint8_t *e = dec->idx_u16 + ((uint32_t)row << 1);
+        return ((uint32_t)e[0] << 8) | e[1];
+    }
+    else
+    {
+        const uint8_t *e = dec->idx_u32 + (((uint32_t)(row - dec->u16_rows)) << 2);
+        return ((uint32_t)e[0] << 24) | ((uint32_t)e[1] << 16) | ((uint32_t)e[2] << 8) | e[3];
+    }
+}
+
+/**
+ * @brief 解析索引 QOI V3 头部并算好裁剪参数与各区指针
  * @param p_lcd 传入：GUI 屏幕上下文指针
  * @param x0 传入：图片左上角屏幕 X 坐标
  * @param y0 传入：图片左上角屏幕 Y 坐标
  * @param img 传入：索引 QOI 图片资源描述
  * @param px_bytes 传入：目标格式每像素字节数（rgb565=2，argb8565=3；用于定位调色盘尾）
- * @param dec 传出：解码上下文（裁剪范围、起点指针、调色盘、起始像素坐标等）
+ * @param dec 传出：解码上下文（裁剪范围、行索引表、调色盘、数据流起点等）
  * @return 1 表示需要继续解码，0 表示整图不在当前 PFB 切片内或数据非法
  * @note RGB565 / ARGB8565 两条解码路径共用本函数完成全部前置准备。
- *       payload 布局：[14字节索引头][u16区][u24区][u32区][静态调色盘][QOI数据流]。
+ *       payload 布局：[14字节索引头][u16行索引表][u32行索引表][静态调色盘][QOI数据流]。
  */
 static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
                                       const uint8_t *img, uint8_t px_bytes, _we_qoi_dec_t *dec)
@@ -568,7 +589,7 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     uint16_t img_w = IMG_DAT_WIDTH(img);
     uint16_t img_h = IMG_DAT_HEIGHT(img);
 
-    /* 防御：宽或高为 0 视为损坏资源，直接拒绝（同时避免后面 % img_w 除零）。 */
+    /* 防御：宽或高为 0 视为损坏资源，直接拒绝。 */
     if (img_w == 0U || img_h == 0U)
         return 0U;
 
@@ -589,64 +610,22 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     if (dat == 0)
         return 0U;
 
-    uint8_t head_size = dat[0];
-
-    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）。 */
-    if (head_size != 0x0EU)
+    /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
+     * 0x0D 均不支持）。 */
+    if (dat[0] != 0x0FU)
         return 0U;
 
-    uint16_t interval = (dat[5] << 8) | dat[6];
-    uint16_t u16_size = (dat[7] << 8) | dat[8];
-    uint16_t u24_size = (dat[9] << 8) | dat[10];
-    uint16_t u32_size = (dat[11] << 8) | dat[12];
+    uint16_t u16_rows = (dat[5] << 8) | dat[6];
     uint8_t pal_count = dat[13];
 
-    /* 调色盘条目数上限 64，超出视为损坏流。 */
-    if (pal_count > 64U)
+    /* m16 不可能超过行数；调色盘条目数上限 64，超出视为损坏流。 */
+    if (u16_rows > img_h || pal_count > 64U)
         return 0U;
 
-    uint16_t num_u16 = u16_size / 2;
-    uint16_t num_u24 = u24_size / 3;
-    uint16_t num_u32 = u32_size / 4;
-    uint32_t total_indices = num_u16 + num_u24 + num_u32;
-
-    const uint8_t *idx_u16 = dat + head_size;
-    const uint8_t *idx_u24 = idx_u16 + u16_size;
-    const uint8_t *idx_u32 = idx_u24 + u24_size;
-    const uint8_t *palette = idx_u32 + u32_size;
+    const uint8_t *idx_u16 = dat + 14U;
+    const uint8_t *idx_u32 = idx_u16 + ((uint32_t)u16_rows << 1);
+    const uint8_t *palette = idx_u32 + (((uint32_t)(img_h - u16_rows)) << 2);
     const uint8_t *qoi_start = palette + (uint16_t)pal_count * px_bytes;
-
-    uint32_t first_needed_pixel = (uint32_t)iy_start * img_w + ix_start;
-    uint32_t skip_intervals = (interval > 0) ? (first_needed_pixel / interval) : 0;
-    uint32_t byte_offset = 0;
-
-    if (skip_intervals > 0)
-    {
-        uint32_t target_idx = skip_intervals;
-
-        /* 索引越界保护，避免错误头部导致读取越界。 */
-        if (target_idx >= total_indices)
-        {
-            target_idx = (total_indices > 0) ? (total_indices - 1) : 0;
-            skip_intervals = target_idx;
-        }
-
-        if (target_idx < num_u16)
-        {
-            uint32_t i = target_idx * 2;
-            byte_offset = (idx_u16[i] << 8) | idx_u16[i + 1];
-        }
-        else if (target_idx < num_u16 + num_u24)
-        {
-            uint32_t i = (target_idx - num_u16) * 3;
-            byte_offset = (idx_u24[i] << 16) | (idx_u24[i + 1] << 8) | idx_u24[i + 2];
-        }
-        else
-        {
-            uint32_t i = (target_idx - num_u16 - num_u24) * 4;
-            byte_offset = (idx_u32[i] << 24) | (idx_u32[i + 1] << 16) | (idx_u32[i + 2] << 8) | idx_u32[i + 3];
-        }
-    }
 
     /* 防御：资源头没有总长度字段，这里用"最坏 4 字节/像素 + 余量"的保守流长上界，
      * 拦截损坏索引表带来的任意地址跳转，并给解码循环一个硬性越界停止线。
@@ -654,11 +633,6 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     uint32_t max_pixels = (uint32_t)img_w * img_h;
     if (max_pixels > ((0xFFFFFFFFUL - 16UL) >> 2))
         return 0U;
-    uint32_t stream_max = (max_pixels << 2) + 16UL;
-    if (byte_offset >= stream_max)
-        return 0U;
-
-    uint32_t jump_pixel_idx = skip_intervals * interval;
 
     dec->img_w = img_w;
     dec->img_h = img_h;
@@ -669,14 +643,13 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
     dec->base_dest_x = (int16_t)(x0 - p_lcd->pfb_area.x0);
     dec->base_dest_y = (int16_t)(y0 - p_lcd->pfb_y_start);
     dec->dst_stride = p_lcd->pfb_width;
-    dec->arry = qoi_start + byte_offset;
-    dec->data_end = qoi_start + stream_max;
+    dec->idx_u16 = idx_u16;
+    dec->idx_u32 = idx_u32;
+    dec->u16_rows = u16_rows;
     dec->palette = palette;
     dec->pal_count = pal_count;
-    dec->cur_x = (uint16_t)(jump_pixel_idx % img_w);
-    dec->cur_y = (uint16_t)(jump_pixel_idx / img_w);
-    dec->decoded_pixels = jump_pixel_idx;
-    dec->max_pixels = max_pixels;
+    dec->qoi_start = qoi_start;
+    dec->stream_max = (max_pixels << 2) + 16UL;
     return 1U;
 }
 
@@ -692,163 +665,120 @@ static uint8_t _we_qoi_parse_and_seek(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
 void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
 {
     _we_qoi_dec_t dec;
-    uint16_t img_w;
-    uint16_t ix_start;
-    uint16_t iy_start;
-    uint16_t clip_x_end;
-    uint16_t clip_y_end;
-    int16_t base_dest_x;
-    int16_t base_dest_y;
-    uint16_t dst_stride;
-    const uint8_t *arry;
-    const uint8_t *data_end;
-    const uint8_t *palette;
-    uint8_t pal_count;
-    uint16_t cur_x;
-    uint16_t cur_y;
-    uint32_t decoded_pixels;
-    uint32_t max_pixels;
 
     opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
-    /* 头部解析 + 索引跳转 + 裁剪参数，与 ARGB8565 共用同一前置逻辑。 */
+    /* 头部解析 + 行索引定位 + 裁剪参数，与 ARGB8565 共用同一前置逻辑。 */
     if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, 2U, &dec))
         return;
 
-    img_w = dec.img_w;
-    ix_start = dec.ix_start;
-    iy_start = dec.iy_start;
-    clip_x_end = dec.clip_x_end;
-    clip_y_end = dec.clip_y_end;
-    base_dest_x = dec.base_dest_x;
-    base_dest_y = dec.base_dest_y;
-    dst_stride = dec.dst_stride;
-    arry = dec.arry;
-    data_end = dec.data_end;
-    palette = dec.palette;
-    pal_count = dec.pal_count;
-    cur_x = dec.cur_x;
-    cur_y = dec.cur_y;
-    decoded_pixels = dec.decoded_pixels;
-    max_pixels = dec.max_pixels;
-
-    uint8_t flag;
-    uint8_t r = 0, g = 0, b = 0;
-    uint16_t cur_pixel = 0;
+    uint16_t ix_start = dec.ix_start;
+    uint16_t clip_x_end = dec.clip_x_end;
+    const uint8_t *data_end = dec.qoi_start + dec.stream_max;
 
     /* opacity 整次绘制为常量，预先分类，省掉每像素混色分支 */
     uint8_t opaque = (uint8_t)(opacity >= 250U);
-    /* 行指针缓存：同一行内复用，避免每像素重算 (cur_y*dst_stride) 乘法。
-     * 仅在通过裁剪判定后才计算，保证偏移非负（不会出现越界回绕） */
-    colour_t *row_dst = 0;
-    int32_t row_dst_y = -1;
 
-    /* ---------------- 主解码循环 ----------------
+    /* ---------------- 行循环 ----------------
+     * V3 每行自包含：逐可见行经行索引空降解码，行内越过裁剪右缘立即停止；
      * arry < data_end 是损坏资源的硬性越界停止线（保守上界，正常码流不受影响）。 */
-    while ((decoded_pixels < max_pixels) && (arry < data_end))
+    for (uint16_t cur_y = dec.iy_start; cur_y < dec.clip_y_end; cur_y++)
     {
-        flag = *arry++;
+        uint32_t row_off = _we_qoi_row_offset(&dec, cur_y);
+        const uint8_t *arry;
+        colour_t *row_dst;
+        uint16_t cur_x = 0;
+        uint8_t flag;
+        uint8_t r = 0, g = 0, b = 0;
+        uint16_t cur_pixel = 0;
 
-        if ((flag == 0xFF) || (flag == 0xFE))
-        {
-            /* 0xFF 原始全量（rgb565 流只用 0xFF；0xFE 容错按全量处理） */
-            uint8_t h = *arry++;
-            uint8_t l = *arry++;
-            cur_pixel = (h << 8) | l;
-            r = h >> 3;
-            g = ((h & 0x07) << 3) | (l >> 5);
-            b = l & 0x1F;
-        }
-        else if ((flag & 0xC0) == 0x40)
-        {
-            r = (r + ((flag >> 4) & 0x03) - 2) & 0x1F;
-            g = (g + ((flag >> 2) & 0x03) - 2) & 0x3F;
-            b = (b + (flag & 0x03) - 2) & 0x1F;
-            cur_pixel = (r << 11) | (g << 5) | b;
-        }
-        else if ((flag & 0xC0) == 0x80)
-        {
-            int8_t vg = (flag & 0x3F) - 32;
-            uint8_t next_byte = *arry++;
-            r = (r + vg - 8 + ((next_byte >> 4) & 0x0F)) & 0x1F;
-            g = (g + vg) & 0x3F;
-            b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
-            cur_pixel = (r << 11) | (g << 5) | b;
-        }
-        else if (flag < 0x40)
-        {
-            /* 0x00..0x3F：静态调色盘 op（V2）。条目 = 2 字节大端 RGB565，
-             * 全局有效、解码中永不修改；查到即成为后续 DIFF/LUMA 的前像素。 */
-            const uint8_t *pe;
-            uint8_t h;
-            uint8_t l;
+        if (row_off >= dec.stream_max)
+            return; /* 损坏索引表 */
 
-            if (flag >= pal_count)
-                return; /* 超出条目数视为损坏流 */
-            pe = palette + ((uint16_t)flag << 1);
-            h = pe[0];
-            l = pe[1];
-            cur_pixel = (h << 8) | l;
-            r = h >> 3;
-            g = ((h & 0x07) << 3) | (l >> 5);
-            b = l & 0x1F;
-        }
-        else /* 0xC0..0xFD：RUN */
+        arry = dec.qoi_start + row_off;
+        row_dst = p_lcd->pfb_gram + ((dec.base_dest_y + cur_y) * dec.dst_stride) + dec.base_dest_x;
+
+        while ((cur_x < clip_x_end) && (arry < data_end))
         {
-            uint8_t run = (flag & 0x3F) + 1;
+            flag = *arry++;
 
-            colour_t fg = we_color_from_rgb565(cur_pixel);
-
-            while (run--)
+            if ((flag == 0xFF) || (flag == 0xFE))
             {
-                if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
+                /* 0xFF 原始全量（rgb565 流只用 0xFF；0xFE 容错按全量处理） */
+                uint8_t h = *arry++;
+                uint8_t l = *arry++;
+                cur_pixel = (h << 8) | l;
+                r = h >> 3;
+                g = ((h & 0x07) << 3) | (l >> 5);
+                b = l & 0x1F;
+            }
+            else if ((flag & 0xC0) == 0x40)
+            {
+                r = (r + ((flag >> 4) & 0x03) - 2) & 0x1F;
+                g = (g + ((flag >> 2) & 0x03) - 2) & 0x3F;
+                b = (b + (flag & 0x03) - 2) & 0x1F;
+                cur_pixel = (r << 11) | (g << 5) | b;
+            }
+            else if ((flag & 0xC0) == 0x80)
+            {
+                int8_t vg = (flag & 0x3F) - 32;
+                uint8_t next_byte = *arry++;
+                r = (r + vg - 8 + ((next_byte >> 4) & 0x0F)) & 0x1F;
+                g = (g + vg) & 0x3F;
+                b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
+                cur_pixel = (r << 11) | (g << 5) | b;
+            }
+            else if (flag < 0x40)
+            {
+                /* 0x00..0x3F：静态调色盘 op。条目 = 2 字节大端 RGB565，
+                 * 全局有效、解码中永不修改；查到即成为后续 DIFF/LUMA 的前像素。 */
+                const uint8_t *pe;
+                uint8_t h;
+                uint8_t l;
+
+                if (flag >= dec.pal_count)
+                    return; /* 超出条目数视为损坏流 */
+                pe = dec.palette + ((uint16_t)flag << 1);
+                h = pe[0];
+                l = pe[1];
+                cur_pixel = (h << 8) | l;
+                r = h >> 3;
+                g = ((h & 0x07) << 3) | (l >> 5);
+                b = l & 0x1F;
+            }
+            else /* 0xC0..0xFD：RUN（不跨行） */
+            {
+                uint8_t run = (flag & 0x3F) + 1;
+
+                colour_t fg = we_color_from_rgb565(cur_pixel);
+
+                while (run--)
                 {
-                    if (row_dst_y != (int32_t)cur_y)
+                    if (cur_x >= ix_start && cur_x < clip_x_end)
                     {
-                        row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-                        row_dst_y = (int32_t)cur_y;
+                        if (opaque)
+                            we_store_color(row_dst + cur_x, fg);
+                        else
+                            we_store_blended_color(row_dst + cur_x, fg, opacity);
                     }
-                    if (opaque)
-                        we_store_color(row_dst + cur_x, fg);
-                    else
-                        we_store_blended_color(row_dst + cur_x, fg, opacity);
+                    cur_x++;
+                    if (cur_x >= clip_x_end)
+                        break; /* 行内右缘截断：本行剩余像素不可见 */
                 }
-                decoded_pixels++;
-                cur_x++;
-                if (cur_x >= img_w)
-                {
-                    cur_x = 0;
-                    cur_y++;
-                    if (cur_y >= clip_y_end)
-                        return;
-                }
+                continue;
             }
-            continue;
-        }
 
-        if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
-        {
-            if (row_dst_y != (int32_t)cur_y)
+            if (cur_x >= ix_start && cur_x < clip_x_end)
             {
-                row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-                row_dst_y = (int32_t)cur_y;
+                colour_t fg = we_color_from_rgb565(cur_pixel);
+                if (opaque)
+                    we_store_color(row_dst + cur_x, fg);
+                else
+                    we_store_blended_color(row_dst + cur_x, fg, opacity);
             }
-            colour_t fg = we_color_from_rgb565(cur_pixel);
-            if (opaque)
-                we_store_color(row_dst + cur_x, fg);
-            else
-                we_store_blended_color(row_dst + cur_x, fg, opacity);
-        }
-        decoded_pixels++;
-        cur_x++;
-        if (cur_x >= img_w)
-        {
-            cur_x = 0;
-            cur_y++;
-            if (cur_y >= clip_y_end)
-                return;
+            cur_x++;
         }
     }
 }
@@ -859,12 +789,14 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
  * 与 RGB565 版本的差异：
  * 1. 像素格式为 24 位：[A(8)][R5G6B5_高(8)][R5G6B5_低(8)]
  * 2. 解码状态额外维护 cur_alpha（当前像素 alpha，0~255）
- * 3. 操作码（V2）：
+ * 3. 操作码：
  *    - 0x00..0x3F：静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha）
  *    - 0xFF：读 3 字节 [A][H][L]，更新 alpha + RGB565
  *    - 0xFE：读 2 字节 [H][L]，alpha 不变
  *    - 0x40 / 0x80：RGB delta，alpha 不变
- *    - 0xC0..0xFD：RLE，混色时使用 cur_alpha × opacity / 255
+ *    - 0xC0..0xFD：RLE（不跨行），混色时使用 cur_alpha × opacity / 255
+ * V3 行首 op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
+ * 每行空降解码即自包含重建完整状态（包括 cur_alpha；调色盘全局有效）。
  * -------------------------------------------------------------------------- */
 /**
  * @brief  在局部帧缓冲(PFB)中绘制索引 QOI 压缩的 ARGB8565 图片
@@ -878,176 +810,132 @@ void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, c
 void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity)
 {
     _we_qoi_dec_t dec;
-    uint16_t img_w;
-    uint16_t ix_start;
-    uint16_t iy_start;
-    uint16_t clip_x_end;
-    uint16_t clip_y_end;
-    int16_t base_dest_x;
-    int16_t base_dest_y;
-    uint16_t dst_stride;
-    const uint8_t *arry;
-    const uint8_t *data_end;
-    const uint8_t *palette;
-    uint8_t pal_count;
-    uint16_t cur_x;
-    uint16_t cur_y;
-    uint32_t decoded_pixels;
-    uint32_t max_pixels;
 
     opacity = we_opa_apply(p_lcd, opacity); /* 容器透明度级联 */
     if (opacity == 0)
         return;
 
-    /* 头部解析 + 索引跳转 + 裁剪参数，与 RGB565 共用同一前置逻辑。 */
+    /* 头部解析 + 行索引定位 + 裁剪参数，与 RGB565 共用同一前置逻辑。 */
     if (!_we_qoi_parse_and_seek(p_lcd, x0, y0, img, 3U, &dec))
         return;
 
-    img_w = dec.img_w;
-    ix_start = dec.ix_start;
-    iy_start = dec.iy_start;
-    clip_x_end = dec.clip_x_end;
-    clip_y_end = dec.clip_y_end;
-    base_dest_x = dec.base_dest_x;
-    base_dest_y = dec.base_dest_y;
-    dst_stride = dec.dst_stride;
-    arry = dec.arry;
-    data_end = dec.data_end;
-    palette = dec.palette;
-    pal_count = dec.pal_count;
-    cur_x = dec.cur_x;
-    cur_y = dec.cur_y;
-    decoded_pixels = dec.decoded_pixels;
-    max_pixels = dec.max_pixels;
+    uint16_t ix_start = dec.ix_start;
+    uint16_t clip_x_end = dec.clip_x_end;
+    const uint8_t *data_end = dec.qoi_start + dec.stream_max;
 
-    uint8_t flag;
-    uint8_t r = 0, g = 0, b = 0;
-    uint8_t cur_alpha = 255; // ARGB8565 额外维护当前像素 alpha
-    uint16_t cur_pixel = 0;
-
-    /* final_alpha = cur_alpha*opacity/255，只在 cur_alpha 变化时重算，
-     * 用 we_div255 近似去掉每像素一次软件除法（M0 ~90+ cycle） */
-    uint8_t final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-    /* 行指针缓存：同一行内复用，避免每像素重算 (cur_y*dst_stride) 乘法。
-     * 仅在通过裁剪判定后才计算，保证偏移非负（不会出现越界回绕） */
-    colour_t *row_dst = 0;
-    int32_t row_dst_y = -1;
-
-    /* ---------------- 主解码循环 ----------------
+    /* ---------------- 行循环 ----------------
+     * V3 每行自包含：逐可见行经行索引空降解码，行内越过裁剪右缘立即停止；
      * arry < data_end 是损坏资源的硬性越界停止线（保守上界，正常码流不受影响）。 */
-    while ((decoded_pixels < max_pixels) && (arry < data_end))
+    for (uint16_t cur_y = dec.iy_start; cur_y < dec.clip_y_end; cur_y++)
     {
-        flag = *arry++;
+        uint32_t row_off = _we_qoi_row_offset(&dec, cur_y);
+        const uint8_t *arry;
+        colour_t *row_dst;
+        uint16_t cur_x = 0;
+        uint8_t flag;
+        uint8_t r = 0, g = 0, b = 0;
+        uint8_t cur_alpha = 255; /* 行首 op 必然重建 alpha，这里只是缺省值 */
+        uint16_t cur_pixel = 0;
+        /* final_alpha = cur_alpha*opacity/255，只在 cur_alpha 变化时重算，
+         * 用 we_div255 近似去掉每像素一次软件除法（M0 ~90+ cycle） */
+        uint8_t final_alpha = we_div255((uint32_t)cur_alpha * opacity);
 
-        if (flag == 0xFF)
-        {
-            /* 新像素：alpha + RGB565（3 字节） */
-            cur_alpha = *arry++;
-            final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-            uint8_t h = *arry++;
-            uint8_t l = *arry++;
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = ((h & 0x07) << 3) | (l >> 5);
-            b = l & 0x1F;
-        }
-        else if (flag == 0xFE)
-        {
-            /* 新 RGB565，alpha 不变（2 字节） */
-            uint8_t h = *arry++;
-            uint8_t l = *arry++;
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = ((h & 0x07) << 3) | (l >> 5);
-            b = l & 0x1F;
-        }
-        else if ((flag & 0xC0) == 0x40)
-        {
-            /* RGB 小差值，alpha 不变 */
-            r = (r + ((flag >> 4) & 0x03) - 2) & 0x1F;
-            g = (g + ((flag >> 2) & 0x03) - 2) & 0x3F;
-            b = (b + (flag & 0x03) - 2) & 0x1F;
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if ((flag & 0xC0) == 0x80)
-        {
-            /* RGB luma 差值，alpha 不变 */
-            int8_t vg = (int8_t)(flag & 0x3F) - 32;
-            uint8_t next_byte = *arry++;
-            r = (r + vg - 8 + ((next_byte >> 4) & 0x0F)) & 0x1F;
-            g = (g + vg) & 0x3F;
-            b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if (flag < 0x40)
-        {
-            /* 0x00..0x3F：静态调色盘 op（V2）。条目 = 3 字节 [A][RGB565 大端]，
-             * 含 Alpha 可表达透明度变化；全局有效、解码中永不修改。 */
-            const uint8_t *pe;
-            uint8_t h;
-            uint8_t l;
+        if (row_off >= dec.stream_max)
+            return; /* 损坏索引表 */
 
-            if (flag >= pal_count)
-                return; /* 超出条目数视为损坏流 */
-            pe = palette + (uint16_t)flag * 3U;
-            cur_alpha = pe[0];
-            final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-            h = pe[1];
-            l = pe[2];
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = ((h & 0x07) << 3) | (l >> 5);
-            b = l & 0x1F;
-        }
-        else /* 0xC0..0xFD：RUN */
-        {
-            /* RLE：重复当前 ARGB 像素，final_alpha 已在变 alpha 时算好 */
-            uint8_t run = (flag & 0x3F) + 1;
-            colour_t fg = we_color_from_rgb565(cur_pixel);
+        arry = dec.qoi_start + row_off;
+        row_dst = p_lcd->pfb_gram + ((dec.base_dest_y + cur_y) * dec.dst_stride) + dec.base_dest_x;
 
-            while (run--)
+        while ((cur_x < clip_x_end) && (arry < data_end))
+        {
+            flag = *arry++;
+
+            if (flag == 0xFF)
             {
-                if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
+                /* 新像素：alpha + RGB565（3 字节） */
+                cur_alpha = *arry++;
+                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+                uint8_t h = *arry++;
+                uint8_t l = *arry++;
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = ((h & 0x07) << 3) | (l >> 5);
+                b = l & 0x1F;
+            }
+            else if (flag == 0xFE)
+            {
+                /* 新 RGB565，alpha 不变（2 字节） */
+                uint8_t h = *arry++;
+                uint8_t l = *arry++;
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = ((h & 0x07) << 3) | (l >> 5);
+                b = l & 0x1F;
+            }
+            else if ((flag & 0xC0) == 0x40)
+            {
+                /* RGB 小差值，alpha 不变 */
+                r = (r + ((flag >> 4) & 0x03) - 2) & 0x1F;
+                g = (g + ((flag >> 2) & 0x03) - 2) & 0x3F;
+                b = (b + (flag & 0x03) - 2) & 0x1F;
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if ((flag & 0xC0) == 0x80)
+            {
+                /* RGB luma 差值，alpha 不变 */
+                int8_t vg = (int8_t)(flag & 0x3F) - 32;
+                uint8_t next_byte = *arry++;
+                r = (r + vg - 8 + ((next_byte >> 4) & 0x0F)) & 0x1F;
+                g = (g + vg) & 0x3F;
+                b = (b + vg - 8 + (next_byte & 0x0F)) & 0x1F;
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if (flag < 0x40)
+            {
+                /* 0x00..0x3F：静态调色盘 op。条目 = 3 字节 [A][RGB565 大端]，
+                 * 含 Alpha 可表达透明度变化；全局有效、解码中永不修改。 */
+                const uint8_t *pe;
+                uint8_t h;
+                uint8_t l;
+
+                if (flag >= dec.pal_count)
+                    return; /* 超出条目数视为损坏流 */
+                pe = dec.palette + (uint16_t)flag * 3U;
+                cur_alpha = pe[0];
+                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+                h = pe[1];
+                l = pe[2];
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = ((h & 0x07) << 3) | (l >> 5);
+                b = l & 0x1F;
+            }
+            else /* 0xC0..0xFD：RUN（不跨行） */
+            {
+                /* RLE：重复当前 ARGB 像素，final_alpha 已在变 alpha 时算好 */
+                uint8_t run = (flag & 0x3F) + 1;
+                colour_t fg = we_color_from_rgb565(cur_pixel);
+
+                while (run--)
                 {
-                    if (row_dst_y != (int32_t)cur_y)
+                    if (cur_x >= ix_start && cur_x < clip_x_end)
                     {
-                        row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-                        row_dst_y = (int32_t)cur_y;
+                        we_store_blended_color(row_dst + cur_x, fg, final_alpha);
                     }
-                    we_store_blended_color(row_dst + cur_x, fg, final_alpha);
+                    cur_x++;
+                    if (cur_x >= clip_x_end)
+                        break; /* 行内右缘截断：本行剩余像素不可见 */
                 }
-                decoded_pixels++;
-                cur_x++;
-                if (cur_x >= img_w)
-                {
-                    cur_x = 0;
-                    cur_y++;
-                    if (cur_y >= clip_y_end)
-                        return;
-                }
+                continue;
             }
-            continue;
-        }
 
-        /* 单像素输出，final_alpha 已在变 alpha 时算好 */
-        if (cur_y >= iy_start && cur_x >= ix_start && cur_x < clip_x_end)
-        {
-            if (row_dst_y != (int32_t)cur_y)
+            /* 单像素输出，final_alpha 已在变 alpha 时算好 */
+            if (cur_x >= ix_start && cur_x < clip_x_end)
             {
-                row_dst = p_lcd->pfb_gram + ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-                row_dst_y = (int32_t)cur_y;
+                colour_t fg = we_color_from_rgb565(cur_pixel);
+                we_store_blended_color(row_dst + cur_x, fg, final_alpha);
             }
-            colour_t fg = we_color_from_rgb565(cur_pixel);
-            we_store_blended_color(row_dst + cur_x, fg, final_alpha);
-        }
-        decoded_pixels++;
-        cur_x++;
-        if (cur_x >= img_w)
-        {
-            cur_x = 0;
-            cur_y++;
-            if (cur_y >= clip_y_end)
-                return;
+            cur_x++;
         }
     }
 }

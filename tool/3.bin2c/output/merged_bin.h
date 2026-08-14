@@ -2,7 +2,7 @@
 #ifndef MERGED_BIN_H
 #define MERGED_BIN_H
 
-#define MERGED_BIN_SIZE ((unsigned long)2607670)
+#define MERGED_BIN_SIZE ((unsigned long)2607651)
 
 typedef enum
 {
@@ -19,12 +19,12 @@ typedef enum
 } bin_id_t;
 
 #define GBSN00LP_2_16_4BPP_SIZE ((unsigned long)2562276)
-#define DEMO_ARGB8565_INDEXQOI_BE_80X80_SIZE ((unsigned long)3261)
+#define DEMO_ARGB8565_INDEXQOI_BE_80X80_SIZE ((unsigned long)3244)
 #define DEMO_ARGB8565_RAW_BE_80X80_SIZE ((unsigned long)19206)
 #define DEMO_BACKSPACE_A8_INDEXQOIMASK_BE_48X48_SIZE ((unsigned long)663)
 #define DEMO_CHAT_A8_INDEXQOIMASK_BE_48X48_SIZE ((unsigned long)591)
 #define DEMO_POWERDRILL_A8_RAW_BE_48X48_SIZE ((unsigned long)2310)
-#define DEMO_RGB565_INDEXQOI_BE_128X64_SIZE ((unsigned long)6807)
+#define DEMO_RGB565_INDEXQOI_BE_128X64_SIZE ((unsigned long)6805)
 #define DEMO_RGB565_RAW_BE_64X80_SIZE ((unsigned long)10246)
 #define DEMO_WINDOWS_A8_RAW_BE_48X48_SIZE ((unsigned long)2310)
 
@@ -32,12 +32,12 @@ extern const unsigned long bin_addr_table[bin_COUNT];
 
 #define GBSN00LP_2_16_4BPP_ADDR ((unsigned long)0)
 #define DEMO_ARGB8565_INDEXQOI_BE_80X80_ADDR ((unsigned long)2562276)
-#define DEMO_ARGB8565_RAW_BE_80X80_ADDR ((unsigned long)2565537)
-#define DEMO_BACKSPACE_A8_INDEXQOIMASK_BE_48X48_ADDR ((unsigned long)2584743)
-#define DEMO_CHAT_A8_INDEXQOIMASK_BE_48X48_ADDR ((unsigned long)2585406)
-#define DEMO_POWERDRILL_A8_RAW_BE_48X48_ADDR ((unsigned long)2585997)
-#define DEMO_RGB565_INDEXQOI_BE_128X64_ADDR ((unsigned long)2588307)
-#define DEMO_RGB565_RAW_BE_64X80_ADDR ((unsigned long)2595114)
-#define DEMO_WINDOWS_A8_RAW_BE_48X48_ADDR ((unsigned long)2605360)
+#define DEMO_ARGB8565_RAW_BE_80X80_ADDR ((unsigned long)2565520)
+#define DEMO_BACKSPACE_A8_INDEXQOIMASK_BE_48X48_ADDR ((unsigned long)2584726)
+#define DEMO_CHAT_A8_INDEXQOIMASK_BE_48X48_ADDR ((unsigned long)2585389)
+#define DEMO_POWERDRILL_A8_RAW_BE_48X48_ADDR ((unsigned long)2585980)
+#define DEMO_RGB565_INDEXQOI_BE_128X64_ADDR ((unsigned long)2588290)
+#define DEMO_RGB565_RAW_BE_64X80_ADDR ((unsigned long)2595095)
+#define DEMO_WINDOWS_A8_RAW_BE_48X48_ADDR ((unsigned long)2605341)
 
 #endif

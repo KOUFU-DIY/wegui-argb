@@ -140,8 +140,10 @@ we_store_blended_color(dst, fg, opacity);
 /* --------------------------------------------------------------------------
  * IMG_RGB565_INDEXQOI Flash 渲染器
  *
- * 与 we_img_render_indexed_qoi_rgb565 逻辑完全相同，
+ * 与 we_img_render_indexed_qoi_rgb565 逻辑完全相同（V3 行索引 + 行去重），
  * 差别仅在于：数据来自 flash_stream，而非内存指针。
+ * 每个可见行：读一条行索引（2/4 字节）→ seek 流 → 解码一行，
+ * 行内越过裁剪右缘立即停止；去重行回指旧偏移对 flash 只是普通随机读。
  * -------------------------------------------------------------------------- */
 
 /**
@@ -154,22 +156,16 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
                                               we_flash_img_obj_t *obj,
                                               uint8_t opacity)
 {
-    /* 每次绘制时读取 14 字节 V2 索引头，省去结构体缓存字段 */
+    /* 每次绘制时读取 14 字节 V3 索引头，省去结构体缓存字段 */
     uint8_t  inner[14];
     p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
     uint8_t  head_size = inner[0];
-    uint16_t interval  = ((uint16_t)inner[5]  << 8) | inner[6];
-    uint16_t u16_size  = ((uint16_t)inner[7]  << 8) | inner[8];
-    uint16_t u24_size  = ((uint16_t)inner[9]  << 8) | inner[10];
-    uint16_t u32_size  = ((uint16_t)inner[11] << 8) | inner[12];
+    uint16_t u16_rows  = ((uint16_t)inner[5] << 8) | inner[6];
     uint8_t  pal_count = inner[13];
-    uint32_t idx_off   = head_size;
-    uint32_t pal_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
-    uint32_t dat_off   = pal_off + (uint32_t)pal_count * 2U;
 
-    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）；
-     * 调色盘条目数上限 64，超出视为损坏流。 */
-    if (head_size != 0x0EU || pal_count > 64U)
+    /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
+     * 0x0D 均不支持）；调色盘条目数上限 64，超出视为损坏流。 */
+    if (head_size != 0x0FU || pal_count > 64U)
         return;
 
     int16_t  x0    = obj->base.x;
@@ -178,6 +174,10 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
     uint16_t img_h = (uint16_t)obj->base.h;
     int16_t  x1    = x0 + (int16_t)img_w - 1;
     int16_t  y1    = y0 + (int16_t)img_h - 1;
+
+    /* m16 不可能超过行数，超出视为损坏流 */
+    if (u16_rows > img_h)
+        return;
 
     /* 与当前 PFB 切片的可见性检查 */
     if ((x0 > (int16_t)p_lcd->pfb_area.x1) || (x1 < (int16_t)p_lcd->pfb_area.x0) ||
@@ -204,56 +204,11 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
     int16_t  base_dest_y = y0 - (int16_t)p_lcd->pfb_y_start;
     uint16_t dst_stride  = p_lcd->pfb_width;
 
-    /* ---- 读索引表中的单条条目，得到 byte_offset ---- */
-    uint32_t first_needed   = (uint32_t)iy_start * img_w + ix_start;
-    uint32_t skip_intervals = (interval > 0U) ?
-                              (first_needed / interval) : 0U;
-    uint32_t byte_offset    = 0U;
-
-    if (skip_intervals > 0U)
-    {
-        uint32_t num_u16 = u16_size / 2U;
-        uint32_t num_u24 = u24_size / 3U;
-        uint32_t num_u32 = u32_size / 4U;
-        uint32_t total   = num_u16 + num_u24 + num_u32;
-        uint32_t ti      = skip_intervals;
-        uint8_t  idx_buf[4];
-
-        if (ti >= total)
-        {
-            ti = (total > 0U) ? (total - 1U) : 0U;
-            skip_intervals = ti;
-        }
-
-        if (ti < num_u16)
-        {
-            uint32_t addr = obj->flash_addr + 6U + idx_off + ti * 2U;
-            p_lcd->storage_read_cb(addr, idx_buf, 2U);
-            byte_offset = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
-        }
-        else if (ti < num_u16 + num_u24)
-        {
-            uint32_t i    = ti - num_u16;
-            uint32_t addr = obj->flash_addr + 6U + idx_off + u16_size + i * 3U;
-            p_lcd->storage_read_cb(addr, idx_buf, 3U);
-            byte_offset = ((uint32_t)idx_buf[0] << 16) |
-                          ((uint32_t)idx_buf[1] << 8)  | idx_buf[2];
-        }
-        else
-        {
-            uint32_t i    = ti - num_u16 - num_u24;
-            uint32_t addr = obj->flash_addr + 6U + idx_off +
-                            u16_size + u24_size + i * 4U;
-            p_lcd->storage_read_cb(addr, idx_buf, 4U);
-            byte_offset = ((uint32_t)idx_buf[0] << 24) |
-                          ((uint32_t)idx_buf[1] << 16) |
-                          ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
-        }
-    }
-
-    uint32_t jump_pixel = skip_intervals * interval;
-    uint16_t cur_x      = (uint16_t)(jump_pixel % img_w);
-    uint16_t cur_y      = (uint16_t)(jump_pixel / img_w);
+    /* ---- payload 各区偏移（相对 6 字节通用头之后） ---- */
+    uint32_t idx_off = 14U;
+    uint32_t u32_off = idx_off + (uint32_t)u16_rows * 2U;
+    uint32_t pal_off = u32_off + ((uint32_t)(img_h - u16_rows)) * 4U;
+    uint32_t dat_off = pal_off + (uint32_t)pal_count * 2U;
 
     /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 2 字节 = 128B）：
      * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
@@ -261,118 +216,113 @@ static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
     if (pal_count > 0U)
         p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 2U);
 
-    /* ---- 初始化流，定位到解码起点 ---- */
+    /* 防御：用"最坏 4 字节/像素 + 余量"的保守流长上界拦截损坏索引表的
+     * 任意偏移跳转，并给解码循环一个硬性停止线（合法码流必然短于上界）。 */
+    uint32_t max_pixels = (uint32_t)img_w * img_h;
+    uint32_t stream_max = (max_pixels << 2) + 16U;
+
     flash_stream_t stream;
     flash_stream_init(&stream, p_lcd->storage_read_cb,
                       obj->flash_addr + 6U + dat_off);
-flash_stream_seek(&stream, byte_offset);
 
-    uint8_t  flag;
-    uint8_t  r = 0, g = 0, b = 0;
-    uint16_t cur_pixel   = 0;
-    uint32_t max_pixels  = (uint32_t)img_w * img_h;
-    uint32_t decoded     = jump_pixel;
-
-    /* 防御：用"最坏 4 字节/像素 + 余量"的保守流长上界拦截损坏索引表的
-     * 任意偏移跳转，并给解码循环一个硬性停止线（合法码流必然短于上界）。 */
-    uint32_t stream_max  = (max_pixels << 2) + 16U;
-    if (byte_offset >= stream_max)
-        return;
-
-    /* ---- 主解码循环（与 RAM 版本完全相同，只是读字节换成 flash_stream_get） ---- */
-    while ((decoded < max_pixels) && (stream.cur_pos < stream_max))
+    /* ---- 行循环：逐可见行经行索引空降解码（RUN 不跨行、行自包含） ---- */
+    for (uint16_t cur_y = iy_start; cur_y < clip_y_end; cur_y++)
     {
+        uint8_t  idx_buf[4];
+        uint32_t row_off;
+
+        if (cur_y < u16_rows)
+        {
+            p_lcd->storage_read_cb(obj->flash_addr + 6U + idx_off + (uint32_t)cur_y * 2U, idx_buf, 2U);
+            row_off = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
+        }
+        else
+        {
+            p_lcd->storage_read_cb(obj->flash_addr + 6U + u32_off +
+                                   ((uint32_t)(cur_y - u16_rows)) * 4U, idx_buf, 4U);
+            row_off = ((uint32_t)idx_buf[0] << 24) | ((uint32_t)idx_buf[1] << 16) |
+                      ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
+        }
+        if (row_off >= stream_max)
+            return; /* 损坏索引表 */
+
+flash_stream_seek(&stream, row_off);
+
+        colour_t *row_dst = p_lcd->pfb_gram +
+                            ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+        uint16_t cur_x = 0U;
+        uint8_t  flag;
+        uint8_t  r = 0, g = 0, b = 0;
+        uint16_t cur_pixel = 0;
+
+        while ((cur_x < clip_x_end) && (stream.cur_pos < stream_max))
+        {
 flag = flash_stream_get(&stream);
 
-        if ((flag == 0xFFU) || (flag == 0xFEU))
-        {
+            if ((flag == 0xFFU) || (flag == 0xFEU))
+            {
 uint8_t h = flash_stream_get(&stream);
 uint8_t l = flash_stream_get(&stream);
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-            b = l & 0x1FU;
-        }
-        else if ((flag & 0xC0U) == 0x40U)
-        {
-            r = (uint8_t)((r + ((flag >> 4) & 0x03U) - 2U) & 0x1FU);
-            g = (uint8_t)((g + ((flag >> 2) & 0x03U) - 2U) & 0x3FU);
-            b = (uint8_t)((b + ( flag       & 0x03U) - 2U) & 0x1FU);
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if ((flag & 0xC0U) == 0x80U)
-        {
-            int8_t  vg   = (int8_t)((flag & 0x3FU) - 32U);
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+                b = l & 0x1FU;
+            }
+            else if ((flag & 0xC0U) == 0x40U)
+            {
+                r = (uint8_t)((r + ((flag >> 4) & 0x03U) - 2U) & 0x1FU);
+                g = (uint8_t)((g + ((flag >> 2) & 0x03U) - 2U) & 0x3FU);
+                b = (uint8_t)((b + ( flag       & 0x03U) - 2U) & 0x1FU);
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if ((flag & 0xC0U) == 0x80U)
+            {
+                int8_t  vg   = (int8_t)((flag & 0x3FU) - 32U);
 uint8_t nb   = flash_stream_get(&stream);
-            r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
-            g = (uint8_t)((g + vg)                            & 0x3FU);
-            b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if (flag < 0x40U)
-        {
-            /* 0x00..0x3F：静态调色盘 op（V2），查栈缓存的调色盘 */
-            uint8_t h;
-            uint8_t l;
+                r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
+                g = (uint8_t)((g + vg)                            & 0x3FU);
+                b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if (flag < 0x40U)
+            {
+                /* 0x00..0x3F：静态调色盘 op，查栈缓存的调色盘 */
+                uint8_t h;
+                uint8_t l;
 
-            if (flag >= pal_count)
-                return; /* 超出条目数视为损坏流 */
-            h = pal[(uint16_t)flag << 1];
-            l = pal[((uint16_t)flag << 1) + 1U];
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-            b = l & 0x1FU;
-        }
-        else /* 0xC0..0xFD：RUN */
-        {
-            uint8_t run = (flag & 0x3FU) + 1U;
+                if (flag >= pal_count)
+                    return; /* 超出条目数视为损坏流 */
+                h = pal[(uint16_t)flag << 1];
+                l = pal[((uint16_t)flag << 1) + 1U];
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+                b = l & 0x1FU;
+            }
+            else /* 0xC0..0xFD：RUN（不跨行） */
+            {
+                uint8_t run = (flag & 0x3FU) + 1U;
 colour_t fg = we_color_from_rgb565(cur_pixel);
 
-            while (run--)
-            {
-                if (cur_y >= iy_start)
+                while (run--)
                 {
                     if (cur_x >= ix_start && cur_x < clip_x_end)
                     {
-                        colour_t *dst = p_lcd->pfb_gram +
-                                        ((base_dest_y + cur_y) * dst_stride) +
-                                        (base_dest_x + cur_x);
-we_store_blended_color(dst, fg, opacity);
+we_store_blended_color(row_dst + cur_x, fg, opacity);
                     }
+                    cur_x++;
+                    if (cur_x >= clip_x_end)
+                        break; /* 行内右缘截断：本行剩余像素不可见 */
                 }
-                decoded++;
-                cur_x++;
-                if (cur_x >= img_w)
-                {
-                    cur_x = 0;
-                    cur_y++;
-                    if (cur_y >= clip_y_end)
-                        return;
-                }
+                continue;
             }
-            continue;
-        }
 
-        if (cur_y >= iy_start)
-        {
             if (cur_x >= ix_start && cur_x < clip_x_end)
             {
-                colour_t *dst = p_lcd->pfb_gram +
-                                ((base_dest_y + cur_y) * dst_stride) +
-                                (base_dest_x + cur_x);
 colour_t fg = we_color_from_rgb565(cur_pixel);
-we_store_blended_color(dst, fg, opacity);
+we_store_blended_color(row_dst + cur_x, fg, opacity);
             }
-        }
-        decoded++;
-        cur_x++;
-        if (cur_x >= img_w)
-        {
-            cur_x = 0;
-            cur_y++;
-            if (cur_y >= clip_y_end)
-                return;
+            cur_x++;
         }
     }
 }
@@ -386,8 +336,8 @@ we_store_blended_color(dst, fg, opacity);
  *   0xFE → 读 2 字节 [H][L]，alpha 不变
  *   输出时 final_alpha = cur_alpha × opacity / 255
  *
- * V2 段首（索引点）op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
- * 解码器 seek 后即可自包含重建完整状态（包括 cur_alpha；调色盘全局有效）。
+ * V3 行首 op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
+ * 每行 seek 后即自包含重建完整状态（包括 cur_alpha；调色盘全局有效）。
  * -------------------------------------------------------------------------- */
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 
@@ -401,22 +351,16 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
                                                we_flash_img_obj_t *obj,
                                                uint8_t opacity)
 {
-    /* 每次绘制时读取 14 字节 V2 索引头，省去结构体缓存字段 */
+    /* 每次绘制时读取 14 字节 V3 索引头，省去结构体缓存字段 */
     uint8_t  inner[14];
     p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
     uint8_t  head_size = inner[0];
-    uint16_t interval  = ((uint16_t)inner[5]  << 8) | inner[6];
-    uint16_t u16_size  = ((uint16_t)inner[7]  << 8) | inner[8];
-    uint16_t u24_size  = ((uint16_t)inner[9]  << 8) | inner[10];
-    uint16_t u32_size  = ((uint16_t)inner[11] << 8) | inner[12];
+    uint16_t u16_rows  = ((uint16_t)inner[5] << 8) | inner[6];
     uint8_t  pal_count = inner[13];
-    uint32_t idx_off   = head_size;
-    uint32_t pal_off   = (uint32_t)head_size + u16_size + u24_size + u32_size;
-    uint32_t dat_off   = pal_off + (uint32_t)pal_count * 3U;
 
-    /* V2 索引头固定 14 字节，byte0=0x0E 兼作版本标识（V1 的 0x0D 不支持）；
-     * 调色盘条目数上限 64，超出视为损坏流。 */
-    if (head_size != 0x0EU || pal_count > 64U)
+    /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
+     * 0x0D 均不支持）；调色盘条目数上限 64，超出视为损坏流。 */
+    if (head_size != 0x0FU || pal_count > 64U)
         return;
 
     int16_t  x0    = obj->base.x;
@@ -425,6 +369,10 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
     uint16_t img_h = (uint16_t)obj->base.h;
     int16_t  x1    = x0 + (int16_t)img_w - 1;
     int16_t  y1    = y0 + (int16_t)img_h - 1;
+
+    /* m16 不可能超过行数，超出视为损坏流 */
+    if (u16_rows > img_h)
+        return;
 
     if ((x0 > (int16_t)p_lcd->pfb_area.x1) || (x1 < (int16_t)p_lcd->pfb_area.x0) ||
         (y0 > (int16_t)p_lcd->pfb_y_end)   || (y1 < (int16_t)p_lcd->pfb_y_start))
@@ -450,54 +398,11 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
     int16_t  base_dest_y = y0 - (int16_t)p_lcd->pfb_y_start;
     uint16_t dst_stride  = p_lcd->pfb_width;
 
-    uint32_t first_needed   = (uint32_t)iy_start * img_w + ix_start;
-    uint32_t skip_intervals = (interval > 0U) ? (first_needed / interval) : 0U;
-    uint32_t byte_offset    = 0U;
-
-    if (skip_intervals > 0U)
-    {
-        uint32_t num_u16 = u16_size / 2U;
-        uint32_t num_u24 = u24_size / 3U;
-        uint32_t num_u32 = u32_size / 4U;
-        uint32_t total   = num_u16 + num_u24 + num_u32;
-        uint32_t ti      = skip_intervals;
-        uint8_t  idx_buf[4];
-
-        if (ti >= total)
-        {
-            ti = (total > 0U) ? (total - 1U) : 0U;
-            skip_intervals = ti;
-        }
-
-        if (ti < num_u16)
-        {
-            uint32_t addr = obj->flash_addr + 6U + idx_off + ti * 2U;
-            p_lcd->storage_read_cb(addr, idx_buf, 2U);
-            byte_offset = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
-        }
-        else if (ti < num_u16 + num_u24)
-        {
-            uint32_t i    = ti - num_u16;
-            uint32_t addr = obj->flash_addr + 6U + idx_off + u16_size + i * 3U;
-            p_lcd->storage_read_cb(addr, idx_buf, 3U);
-            byte_offset = ((uint32_t)idx_buf[0] << 16) |
-                          ((uint32_t)idx_buf[1] << 8)  | idx_buf[2];
-        }
-        else
-        {
-            uint32_t i    = ti - num_u16 - num_u24;
-            uint32_t addr = obj->flash_addr + 6U + idx_off +
-                            u16_size + u24_size + i * 4U;
-            p_lcd->storage_read_cb(addr, idx_buf, 4U);
-            byte_offset = ((uint32_t)idx_buf[0] << 24) |
-                          ((uint32_t)idx_buf[1] << 16) |
-                          ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
-        }
-    }
-
-    uint32_t jump_pixel = skip_intervals * interval;
-    uint16_t cur_x      = (uint16_t)(jump_pixel % img_w);
-    uint16_t cur_y      = (uint16_t)(jump_pixel / img_w);
+    /* ---- payload 各区偏移（相对 6 字节通用头之后） ---- */
+    uint32_t idx_off = 14U;
+    uint32_t u32_off = idx_off + (uint32_t)u16_rows * 2U;
+    uint32_t pal_off = u32_off + ((uint32_t)(img_h - u16_rows)) * 4U;
+    uint32_t dat_off = pal_off + (uint32_t)pal_count * 3U;
 
     /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 3 字节 = 192B）：
      * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
@@ -505,133 +410,131 @@ static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
     if (pal_count > 0U)
         p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 3U);
 
+    /* 防御：与 RGB565 版本相同的保守流长上界，拦截损坏索引表 + 停止越界解码。 */
+    uint32_t max_pixels = (uint32_t)img_w * img_h;
+    uint32_t stream_max = (max_pixels << 2) + 16U;
+
     flash_stream_t stream;
     flash_stream_init(&stream, p_lcd->storage_read_cb,
                       obj->flash_addr + 6U + dat_off);
-flash_stream_seek(&stream, byte_offset);
 
-    uint8_t  flag;
-    uint8_t  r = 0, g = 0, b = 0;
-    uint8_t  cur_alpha  = 255U;
-    uint16_t cur_pixel  = 0U;
-    uint32_t max_pixels = (uint32_t)img_w * img_h;
-    uint32_t decoded    = jump_pixel;
-
-    /* 防御：与 RGB565 版本相同的保守流长上界，拦截损坏索引表 + 停止越界解码。 */
-    uint32_t stream_max = (max_pixels << 2) + 16U;
-    if (byte_offset >= stream_max)
-        return;
-
-    while ((decoded < max_pixels) && (stream.cur_pos < stream_max))
+    /* ---- 行循环：逐可见行经行索引空降解码（RUN 不跨行、行自包含） ---- */
+    for (uint16_t cur_y = iy_start; cur_y < clip_y_end; cur_y++)
     {
+        uint8_t  idx_buf[4];
+        uint32_t row_off;
+
+        if (cur_y < u16_rows)
+        {
+            p_lcd->storage_read_cb(obj->flash_addr + 6U + idx_off + (uint32_t)cur_y * 2U, idx_buf, 2U);
+            row_off = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
+        }
+        else
+        {
+            p_lcd->storage_read_cb(obj->flash_addr + 6U + u32_off +
+                                   ((uint32_t)(cur_y - u16_rows)) * 4U, idx_buf, 4U);
+            row_off = ((uint32_t)idx_buf[0] << 24) | ((uint32_t)idx_buf[1] << 16) |
+                      ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
+        }
+        if (row_off >= stream_max)
+            return; /* 损坏索引表 */
+
+flash_stream_seek(&stream, row_off);
+
+        colour_t *row_dst = p_lcd->pfb_gram +
+                            ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
+        uint16_t cur_x = 0U;
+        uint8_t  flag;
+        uint8_t  r = 0, g = 0, b = 0;
+        uint8_t  cur_alpha   = 255U; /* 行首 op 必然重建 alpha，这里只是缺省值 */
+        uint16_t cur_pixel   = 0U;
+        uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+
+        while ((cur_x < clip_x_end) && (stream.cur_pos < stream_max))
+        {
 flag = flash_stream_get(&stream);
 
-        if (flag == 0xFFU)
-        {
-            /* 新像素：alpha + RGB565（3 字节） */
-cur_alpha = flash_stream_get(&stream);
-uint8_t h = flash_stream_get(&stream);
-uint8_t l = flash_stream_get(&stream);
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-            b = l & 0x1FU;
-        }
-        else if (flag == 0xFEU)
-        {
-            /* 新 RGB565，alpha 不变（2 字节） */
-uint8_t h = flash_stream_get(&stream);
-uint8_t l = flash_stream_get(&stream);
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-            b = l & 0x1FU;
-        }
-        else if ((flag & 0xC0U) == 0x40U)
-        {
-            r = (uint8_t)((r + ((flag >> 4) & 0x03U) - 2U) & 0x1FU);
-            g = (uint8_t)((g + ((flag >> 2) & 0x03U) - 2U) & 0x3FU);
-            b = (uint8_t)((b + ( flag       & 0x03U) - 2U) & 0x1FU);
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if ((flag & 0xC0U) == 0x80U)
-        {
-            int8_t  vg = (int8_t)((flag & 0x3FU) - 32U);
-uint8_t nb = flash_stream_get(&stream);
-            r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
-            g = (uint8_t)((g + vg)                            & 0x3FU);
-            b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
-            cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-        }
-        else if (flag < 0x40U)
-        {
-            /* 0x00..0x3F：静态调色盘 op（V2），条目 3 字节 [A][H][L]（含 Alpha） */
-            uint16_t pi;
-            uint8_t h;
-            uint8_t l;
-
-            if (flag >= pal_count)
-                return; /* 超出条目数视为损坏流 */
-            pi = (uint16_t)flag * 3U;
-            cur_alpha = pal[pi];
-            h = pal[pi + 1U];
-            l = pal[pi + 2U];
-            cur_pixel = ((uint16_t)h << 8) | l;
-            r = h >> 3;
-            g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-            b = l & 0x1FU;
-        }
-        else /* 0xC0..0xFD：RUN */
-        {
-            uint8_t  run         = (flag & 0x3FU) + 1U;
-            uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-colour_t fg          = we_color_from_rgb565(cur_pixel);
-
-            while (run--)
+            if (flag == 0xFFU)
             {
-                if (cur_y >= iy_start)
+                /* 新像素：alpha + RGB565（3 字节） */
+cur_alpha = flash_stream_get(&stream);
+                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+uint8_t h = flash_stream_get(&stream);
+uint8_t l = flash_stream_get(&stream);
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+                b = l & 0x1FU;
+            }
+            else if (flag == 0xFEU)
+            {
+                /* 新 RGB565，alpha 不变（2 字节） */
+uint8_t h = flash_stream_get(&stream);
+uint8_t l = flash_stream_get(&stream);
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+                b = l & 0x1FU;
+            }
+            else if ((flag & 0xC0U) == 0x40U)
+            {
+                r = (uint8_t)((r + ((flag >> 4) & 0x03U) - 2U) & 0x1FU);
+                g = (uint8_t)((g + ((flag >> 2) & 0x03U) - 2U) & 0x3FU);
+                b = (uint8_t)((b + ( flag       & 0x03U) - 2U) & 0x1FU);
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if ((flag & 0xC0U) == 0x80U)
+            {
+                int8_t  vg = (int8_t)((flag & 0x3FU) - 32U);
+uint8_t nb = flash_stream_get(&stream);
+                r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
+                g = (uint8_t)((g + vg)                            & 0x3FU);
+                b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
+                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
+            }
+            else if (flag < 0x40U)
+            {
+                /* 0x00..0x3F：静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha） */
+                uint16_t pi;
+                uint8_t h;
+                uint8_t l;
+
+                if (flag >= pal_count)
+                    return; /* 超出条目数视为损坏流 */
+                pi = (uint16_t)flag * 3U;
+                cur_alpha = pal[pi];
+                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
+                h = pal[pi + 1U];
+                l = pal[pi + 2U];
+                cur_pixel = ((uint16_t)h << 8) | l;
+                r = h >> 3;
+                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
+                b = l & 0x1FU;
+            }
+            else /* 0xC0..0xFD：RUN（不跨行） */
+            {
+                uint8_t  run = (flag & 0x3FU) + 1U;
+colour_t fg  = we_color_from_rgb565(cur_pixel);
+
+                while (run--)
                 {
                     if (cur_x >= ix_start && cur_x < clip_x_end)
                     {
-                        colour_t *dst = p_lcd->pfb_gram +
-                                        ((base_dest_y + cur_y) * dst_stride) +
-                                        (base_dest_x + cur_x);
-we_store_blended_color(dst, fg, final_alpha);
+we_store_blended_color(row_dst + cur_x, fg, final_alpha);
                     }
+                    cur_x++;
+                    if (cur_x >= clip_x_end)
+                        break; /* 行内右缘截断：本行剩余像素不可见 */
                 }
-                decoded++;
-                cur_x++;
-                if (cur_x >= img_w)
-                {
-                    cur_x = 0;
-                    cur_y++;
-                    if (cur_y >= clip_y_end)
-                        return;
-                }
+                continue;
             }
-            continue;
-        }
 
-        if (cur_y >= iy_start)
-        {
             if (cur_x >= ix_start && cur_x < clip_x_end)
             {
-                uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-                colour_t *dst = p_lcd->pfb_gram +
-                                ((base_dest_y + cur_y) * dst_stride) +
-                                (base_dest_x + cur_x);
 colour_t fg = we_color_from_rgb565(cur_pixel);
-we_store_blended_color(dst, fg, final_alpha);
+we_store_blended_color(row_dst + cur_x, fg, final_alpha);
             }
-        }
-        decoded++;
-        cur_x++;
-        if (cur_x >= img_w)
-        {
-            cur_x = 0;
-            cur_y++;
-            if (cur_y >= clip_y_end)
-                return;
+            cur_x++;
         }
     }
 }
