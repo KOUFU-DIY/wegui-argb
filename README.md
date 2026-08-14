@@ -20,58 +20,72 @@
 
 | 目标 | ROM | RAM | 口径 |
 |---|---|---|---|
-| STM32F103（Cortex-M3，72 MHz） | **24.21 KB** | **6.10 KB** | dropdown 最小可交互应用（= 逐 demo 表第 19 号，F103 实测） |
-| STM32F030（Cortex-M0，48 MHz，DMA 双缓冲） | **23.5 KB** | **6.06 KB** | 同口径（= 下方逐 demo 表第 19 号） |
+| STM32F103（Cortex-M3，72 MHz） | **24.21 KB** | **6.10 KB** | dropdown 最小可交互应用（= 下方逐 demo 表第 19 号） |
+| STM32F030（Cortex-M0，48 MHz，DMA 双缓冲） | **23.5 KB** | **6.06 KB** | 同口径（V0.3.0 全表 F030 实测，整体约比 F103 小 0.7 KB） |
 
-- 280×240 RGB565，PFB 8 行（4.48 KB，仅整屏显存的 3.3%）；ROM 含约 3.5 KB 字体资产 + LCD/输入/存储端口 + 启动代码，GUI 库本体约 10 KB
+- 280×240 RGB565，PFB 8 行（4.48 KB，仅整屏显存的 3.3%）；ROM 含 3.21 KB 字体资产与约 6.7 KB 端口/启动/C 库，GUI 本体（内核 + 控件）占用见下表逐 demo 分项
 - 共享配置实测口径：聚焦/按键导航（`WE_CFG_ENABLE_KEY_INPUT=1`）等默认功能全开——纯触摸工程关掉裁剪宏还能再瘦
 - 零 malloc、零浮点路径，Cortex-M0（无硬件除法、无 FPU）原生可用
 
-### 各 demo 单独占用（STM32F030 / Cortex-M0 实测）
+### 各 demo 单独占用与效果图（STM32F103 / Cortex-M3 实测）
 
-每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器 `--gc-sections` 剔除未引用控件）后的 Keil `.map` 实测（**V0.3.0 beta 全表重测**）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
+每个 demo 单独编译（`DEMO_ID` 选中该 demo，链接器剔除未引用部分）后的 Keil AC5 `.map` 实测（**indexQOI V3 当前代码全表重测**）。每个 demo = **该主控件 + `label`（标题/FPS）**，复合类额外含子控件；第 1 号 `label` 即"最小 GUI + 字体 + 端口 + 启动"的底座。
 
-| DEMO_ID | demo / 主要控件 | ROM | RAM | 备注 |
-|---|---|---|---|---|
-| 1 | label | 17.3 KB | 5.84 KB | 基准底座（含约 3.5 KB 字体资产） |
-| 2 | btn | 18.9 KB | 6.00 KB | |
-| 3 | img | 49.2 KB | 5.91 KB | ⚠ 含 demo 内嵌图片资产 ~29 KB（indexqoi V2 ×2 + argb8565 raw） |
-| 4 | img_ex（旋转/缩放） | 28.6 KB | 5.86 KB | ⚠ 含 demo 内嵌 RGB565 raw 图 ~10 KB |
-| 5 | arc | 20.1 KB | 5.90 KB | |
-| 6 | group（含子控件） | 20.4 KB | 6.02 KB | |
-| 7 | slideshow（group + 分页） | 25.0 KB | 6.25 KB | |
-| 8 | concentric arc（同心圆弧） | 20.0 KB | 5.95 KB | |
-| 9 | checkbox | 19.9 KB | 6.21 KB | |
-| 10 | label_ex（旋转缩放文字） | 19.0 KB | 5.89 KB | |
-| 11 | chart（实时波形） | 19.4 KB | 6.41 KB | RAM 最高（波形环形缓冲） |
-| 12 | toggle | 19.3 KB | 6.17 KB | |
-| 13 | progress（含 btn） | 20.6 KB | 6.00 KB | |
-| 14 | msgbox（含 btn） | 22.1 KB | 6.02 KB | |
-| 15 | flash img（img_flash） | 20.4 KB | 5.95 KB | 需外挂 SPI flash 存储 |
-| 16 | flash font（font_flash） | 19.9 KB | 6.06 KB | 需外挂 SPI flash 存储 |
-| 17 | slider | 20.2 KB | 6.06 KB | |
-| 18 | scroll_panel（含子控件） | 22.0 KB | 6.27 KB | |
-| 19 | dropdown | 23.5 KB | 6.06 KB | 同上方汇总表 F030 行 |
-| 20 | stepper | 20.0 KB | 6.10 KB | |
-| 21 | indicator | 19.6 KB | 6.20 KB | |
-| 22 | line | 20.3 KB | 6.34 KB | |
-| 23 | box | 20.7 KB | 6.02 KB | 动画默认编译期关闭（`WE_BOX_USE_ANIM`） |
-| 24 | gauge（仪表盘） | 20.1 KB | 5.98 KB | |
-| 25 | list（列表菜单） | 20.9 KB | 5.88 KB | |
-| 26 | roller（滚轮选值） | 21.1 KB | 6.14 KB | |
-| 27 | marquee（跑马灯） | 22.1 KB | 6.12 KB | |
-| 28 | toast（轻提示） | 20.3 KB | 5.86 KB | |
-| 29 | focus（聚焦导航） | 22.5 KB | 6.12 KB | btn/checkbox/toggle/indicator/group 组合 |
-| 30 | focus2（聚焦编辑态） | 27.9 KB | 6.19 KB | slider/stepper/roller/list 组合 |
-| 31 | img_alpha（透明位图） | 28.7 KB | 6.14 KB | ⚠ 含 A8 raw + 索引QOI_MASK 位图资产 ~7.2 KB |
-| 32 | imgbtn（图片按钮） | 35.8 KB | 5.93 KB | ⚠ 含 demo 内嵌图片资产 ~14 KB（RGB565 raw + A8 raw + 索引QOI_MASK ×2） |
-| 33 | segdisp（数码管） | 18.8 KB | 5.95 KB | 控件全功能本体仅 ~1.66 KB，无字库/图片资产 |
+分项四列均为 ROM 占用（Code + RO-data + RW-data，单位 KB，四列相加 = 总 ROM）：
+
+- **内核** — GUI 引擎本体（`we_gui_driver` / `we_render` / `we_font_text` / `dirty_driver` / `we_scroll`）；未引用的内核函数会被链接器剔除，所以逐 demo 不同——纯控件类 demo 约 7.3~9.7 KB，图片类 demo 链入索引 QOI / QOI_MASK 解码器后约 11 KB
+- **控件** — 该 demo 链入的全部 `we_widget_*` 本体
+- **资源** — 字体点阵与 demo 内嵌图片数组；其中约 3.21 KB 是各 demo 共有的 ASCII 字体资产
+- **其他** — demo 代码 + LCD/输入/外挂存储端口 + 启动文件 + C 库，约 6.4~7.6 KB 基本恒定
+- 总 RAM = RW-data + ZI-data，含 4.48 KB PFB 显存（各 demo 共有）
+
+> 效果图为 SimLite 模拟器无头渲染第 120 帧导出（280×240，与硬件同一套渲染内核、逐像素一致）；
+> 画面中的 FPS 数字是无头快进渲染的计数残影，不代表硬件帧率。
+
+| 效果图 | DEMO_ID · demo | 总 ROM | 总 RAM | 内核 | 控件 | 资源 | 其他 | 备注 |
+|---|---|---|---|---|---|---|---|---|
+| <img src="docs/shots/01_label.png" width="140"> | 1 label | 18.00 | 5.88 | 7.63 | 0.55 | 3.21 | 6.61 | 基准底座：最小 GUI + 字体 + 端口 + 启动 |
+| <img src="docs/shots/02_btn.png" width="140"> | 2 btn | 19.62 | 6.04 | 8.44 | 1.22 | 3.21 | 6.75 |  |
+| <img src="docs/shots/03_img.png" width="140"> | 3 img | 50.00 | 5.94 | 11.02 | 0.64 | 31.78 | 6.55 | 内嵌图片资产（indexqoi V3 ×2 + argb8565 raw） |
+| <img src="docs/shots/04_img_ex.png" width="140"> | 4 img_ex | 29.01 | 5.90 | 7.63 | 1.73 | 13.22 | 6.43 | 内嵌 RGB565 raw 图（img_ex 仅收 raw） |
+| <img src="docs/shots/05_arc.png" width="140"> | 5 arc | 20.77 | 5.93 | 8.07 | 2.87 | 3.21 | 6.63 |  |
+| <img src="docs/shots/06_group.png" width="140"> | 6 group | 21.18 | 6.05 | 9.11 | 1.94 | 3.21 | 6.91 | 含 btn/label 子控件 |
+| <img src="docs/shots/07_slideshow.png" width="140"> | 7 slideshow | 25.73 | 6.28 | 9.20 | 5.79 | 3.21 | 7.53 | group + 分页指示 |
+| <img src="docs/shots/08_concentric_arc.png" width="140"> | 8 concentric_arc | 20.75 | 5.98 | 8.07 | 2.80 | 3.21 | 6.67 |  |
+| <img src="docs/shots/09_checkbox.png" width="140"> | 9 checkbox | 20.63 | 6.24 | 8.83 | 1.42 | 3.21 | 7.17 |  |
+| <img src="docs/shots/10_label_ex.png" width="140"> | 10 label_ex | 19.36 | 5.93 | 7.69 | 1.97 | 3.21 | 6.49 |  |
+| <img src="docs/shots/11_chart.png" width="140"> | 11 chart | 20.14 | 6.45 | 7.63 | 2.77 | 3.21 | 6.54 | RAM 偏高（波形环形缓冲） |
+| <img src="docs/shots/12_toggle.png" width="140"> | 12 toggle | 20.09 | 6.20 | 8.52 | 1.36 | 3.21 | 7.00 |  |
+| <img src="docs/shots/13_progress.png" width="140"> | 13 progress | 21.38 | 6.04 | 8.71 | 2.59 | 3.21 | 6.86 | 含 btn |
+| <img src="docs/shots/14_msgbox.png" width="140"> | 14 msgbox | 22.93 | 6.05 | 9.05 | 3.66 | 3.21 | 7.00 | 含 btn；顶层非模态弹窗 |
+| <img src="docs/shots/15_flash_img.png" width="140"> | 15 flash_img | 20.46 | 5.98 | 7.63 | 2.88 | 3.25 | 6.71 | 图片数据在外挂 SPI flash，片内仅地址表 |
+| <img src="docs/shots/16_flash_font.png" width="140"> | 16 flash_font | 20.57 | 6.10 | 7.63 | 2.68 | 3.26 | 7.00 | 字形数据在外挂 SPI flash，片内仅索引与地址表 |
+| <img src="docs/shots/17_slider.png" width="140"> | 17 slider | 21.03 | 6.09 | 8.38 | 2.45 | 3.21 | 6.99 |  |
+| <img src="docs/shots/18_scroll_panel.png" width="140"> | 18 scroll_panel | 22.75 | 6.31 | 8.71 | 3.27 | 3.21 | 7.55 |  |
+| <img src="docs/shots/19_dropdown.png" width="140"> | 19 dropdown | 24.21 | 6.10 | 9.47 | 4.83 | 3.21 | 6.70 | 同上方汇总表 F103 行 |
+| <img src="docs/shots/20_stepper.png" width="140"> | 20 stepper | 20.79 | 6.14 | 8.51 | 2.46 | 3.21 | 6.60 |  |
+| <img src="docs/shots/21_indicator.png" width="140"> | 21 indicator | 20.36 | 6.23 | 8.62 | 1.61 | 3.21 | 6.92 |  |
+| <img src="docs/shots/22_line.png" width="140"> | 22 line | 20.96 | 6.38 | 9.06 | 1.77 | 3.21 | 6.92 |  |
+| <img src="docs/shots/23_box.png" width="140"> | 23 box | 21.32 | 6.06 | 8.15 | 3.12 | 3.21 | 6.84 | 动画默认编译期关闭（`WE_BOX_USE_ANIM`） |
+| <img src="docs/shots/24_gauge.png" width="140"> | 24 gauge | 20.89 | 6.02 | 9.08 | 2.21 | 3.21 | 6.40 |  |
+| <img src="docs/shots/25_list.png" width="140"> | 25 list | 21.56 | 5.91 | 9.10 | 2.81 | 3.21 | 6.43 |  |
+| <img src="docs/shots/26_roller.png" width="140"> | 26 roller | 21.85 | 6.17 | 8.58 | 3.13 | 3.21 | 6.92 |  |
+| <img src="docs/shots/27_marquee.png" width="140"> | 27 marquee | 22.68 | 6.16 | 8.29 | 4.43 | 3.21 | 6.75 |  |
+| <img src="docs/shots/28_toast.png" width="140"> | 28 toast | 21.01 | 5.89 | 8.69 | 2.48 | 3.21 | 6.63 |  |
+| <img src="docs/shots/29_focus.png" width="140"> | 29 focus | 23.26 | 6.16 | 9.51 | 3.64 | 3.21 | 6.89 | btn/checkbox/toggle/indicator/group 组合 |
+| <img src="docs/shots/30_focus2.png" width="140"> | 30 focus2 | 28.59 | 6.22 | 9.10 | 9.30 | 3.21 | 6.97 | slider/stepper/roller/list 组合 |
+| <img src="docs/shots/31_img_alpha.png" width="140"> | 31 img_alpha | 28.76 | 6.18 | 11.02 | 0.64 | 10.44 | 6.66 | A8 raw 与索引QOI_MASK 压缩对比 |
+| <img src="docs/shots/32_imgbtn.png" width="140"> | 32 imgbtn | 35.77 | 5.97 | 10.79 | 1.10 | 17.12 | 6.75 | 全图片格式可作按钮皮肤 |
+| <img src="docs/shots/33_segdisp.png" width="140"> | 33 segdisp | 19.53 | 5.98 | 7.30 | 2.08 | 3.21 | 6.93 | 无字库外资产；控件本体极小 |
 
 > 内核里没被引用的 API 不进固件：新增 `we_obj_set_size` 后全表逐行零变化，
 > 同口径的 F103 dropdown 更是逐字节相同（Code/RO/RW/ZI 四项全等），
 > 说明链接器把未引用的内核函数整体剔除了——按需付费，加 API 不涨底座。
 >
-> ROM = Code + RO-data + RW-data；RAM = RW-data + ZI-data（含 4.48 KB PFB 显存，各 demo 共有）。`img`/`img_ex`/`img_alpha` 的 ROM 偏大是 demo 内嵌了图片资产、与控件代码无关。`showcase`（仅模拟器、需 800×480）无法烧录到 MCU，故不在此表；其余 1..33 均可单独烧录到 F030。F103 同口径约再大 0.7 KB（多一份外挂 flash 端口实现）。
+> `img`/`img_ex`/`img_alpha`/`imgbtn` 的总 ROM 偏大源自**资源列**的 demo 内嵌图片资产，
+> 与控件代码无关（控件列 0.6~1.7 KB）。`showcase`（仅模拟器、需 800×480）无法烧录到
+> MCU，故不在此表；其余 1..33 均可单独烧录。F030 同口径整体约小 0.7 KB（少一份外挂
+> flash 端口实现）。
 
 ## 当前控件状态
 
