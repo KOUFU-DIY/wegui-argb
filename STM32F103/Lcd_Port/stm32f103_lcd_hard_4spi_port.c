@@ -81,25 +81,23 @@ void lcd_hw_init(void)
     spi.SPI_Mode      = SPI_Mode_Master;
     spi.SPI_DataSize  = SPI_DataSize_8b;
 
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
+#if ((LCD_TYPE == HW_LCD_OLED) || (LCD_TYPE == HW_LCD_GRAY))
     /* OLED: SCL 默认高，第二个跳变沿有效 */
     spi.SPI_CPOL = SPI_CPOL_High;
     spi.SPI_CPHA = SPI_CPHA_2Edge;
-#elif ((LCD_DEEP == DEEP_RGB111) || (LCD_DEEP == DEEP_RGB332) || \
-       (LCD_DEEP == DEEP_RGB444) || (LCD_DEEP == DEEP_RGB565) || \
-       (LCD_DEEP == DEEP_RGB888))
+#else
     /* TFT: SCL 默认低，第一个跳变沿有效 */
     spi.SPI_CPOL = SPI_CPOL_Low;
     spi.SPI_CPHA = SPI_CPHA_1Edge;
 #endif
 
     spi.SPI_NSS              = SPI_NSS_Soft;
-    spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
+    spi.SPI_BaudRatePrescaler = LCD_SPI_BaudRatePrescaler_x; /* hw_config 3.2 节配置 */
     spi.SPI_FirstBit         = SPI_FirstBit_MSB;
     spi.SPI_CRCPolynomial    = 7;
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPIx, ENABLE);
-    RCC_PCLK2Config(RCC_HCLK_Div2);
+    RCC_PCLK2Config(RCC_HCLK_Divx); /* hw_config 3.2 节配置 */
     SPI_Init(LCD_SPIx, &spi);
     SPI_Cmd(LCD_SPIx, ENABLE);
 
@@ -126,7 +124,7 @@ void lcd_send_1Cmd(uint8_t dat)
 /* 发送命令帧：p[0] 为命令，p[1..] 为跟随数据 */
 void lcd_send_nCmd(uint8_t *p, uint16_t num)
 {
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
+#if ((LCD_TYPE == HW_LCD_OLED) || (LCD_TYPE == HW_LCD_GRAY))
     uint16_t i = 0;
     send_lcd_spi_done();
     LCD_DC_Clr();
@@ -140,9 +138,7 @@ void lcd_send_nCmd(uint8_t *p, uint16_t num)
     send_lcd_spi_done();
     LCD_CS_Set();
 
-#elif ((LCD_DEEP == DEEP_RGB111) || (LCD_DEEP == DEEP_RGB332) || \
-       (LCD_DEEP == DEEP_RGB444) || (LCD_DEEP == DEEP_RGB565) || \
-       (LCD_DEEP == DEEP_RGB888))
+#else
     send_lcd_spi_done();
     spi_set_8b();
 
@@ -165,11 +161,6 @@ void lcd_send_nCmd(uint8_t *p, uint16_t num)
     wait_lcd_spi_txtemp_free();
     send_lcd_spi_done();
     LCD_CS_Set();
-
-#else
-    while (1)
-    {
-    }
 #endif
 }
 
@@ -202,23 +193,121 @@ void lcd_send_nDat(uint8_t *p, uint16_t num)
     LCD_CS_Set();
 }
 
-/* OLED 刷屏接口 (预留, 按需实现) */
-void lcd_oled_port(uint16_t x0, uint16_t x1, uint16_t page, uint8_t *page_gram)
+#if ((LCD_TYPE == HW_LCD_OLED) || (LCD_TYPE == HW_LCD_GRAY))
+
+/* ---- OLED / 灰度屏共用刷新窗口状态 ----
+ * 页式单色 OLED 无硬件刷新窗口，靠这里的游标逐页寻址；
+ * 灰度 OLED（SSD1327 类）有硬件窗口自增，lcd_set_windows 转发真窗口
+ * 命令，端口只留窗口宽度供打包使用。 */
+
+static uint16_t lcd_win_x0;
+static uint16_t lcd_win_x1;
+#if (LCD_TYPE == HW_LCD_OLED)
+static uint16_t lcd_win_cur_y; /* 页游标：页式 IC 无硬件窗口，跨 flush 切片续传用 */
+#endif
+
+/* 记录本轮刷新窗口（内核契约：每个脏矩形调用一次，随后按 PFB 切片连续 flush） */
+void lcd_set_windows(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
-    (void)x0;
-    (void)x1;
-    (void)page;
-    (void)page_gram;
+    lcd_win_x0 = x0;
+    lcd_win_x1 = x1;
+#if (LCD_TYPE == HW_LCD_GRAY)
+    gray_set_addr(x0, y0, x1, y1); /* 灰度 IC 有硬件窗口，转发真窗口命令 */
+    (void)y0;
+#else
+    lcd_win_cur_y = y0;
+    (void)y1;
+#endif
 }
 
-/* 灰度 OLED 刷屏接口 (预留, 按需实现) */
-void lcd_gray_port(uint16_t x0, uint16_t x1, uint16_t page, uint8_t *page_gram)
+#endif /* OLED || GRAY */
+
+#if (LCD_TYPE == HW_LCD_OLED)
+
+/* ---- 页式单色 OLED 刷屏 ----
+ * lcd_oled_port 按整页切片逐页 oled_set_addr 寻址后，阈值二值化 +
+ * 垂直 8 像素打包成页字节，边转换边发送（无中间行缓冲）。
+ * 依赖 WE_LCD_FLUSH_ALIGN_Y = 8（脏矩形与 PFB 切片整页对齐）。 */
+
+/* GRAY8 切片 -> 页字节流（行主序，宽 = 窗口宽，1 字节亮度/像素） */
+void lcd_oled_port(uint8_t *gram, uint32_t pix_size)
 {
-    (void)x0;
-    (void)x1;
-    (void)page;
-    (void)page_gram;
+    uint16_t width = (uint16_t)(lcd_win_x1 - lcd_win_x0 + 1U);
+    uint16_t rows, pages, pg, x;
+
+    if ((gram == 0) || (width == 0U))
+        return;
+
+    rows = (uint16_t)(pix_size / width);
+    pages = (uint16_t)(rows >> 3);
+
+    for (pg = 0; pg < pages; pg++)
+    {
+        uint8_t *base = gram + ((uint32_t)pg * 8U * width);
+
+        oled_set_addr((uint8_t)((lcd_win_cur_y >> 3) + pg), (uint8_t)lcd_win_x0);
+
+        send_lcd_spi_done();
+        LCD_DC_Set();
+        LCD_CS_Clr();
+        for (x = 0; x < width; x++)
+        {
+            uint8_t byte = 0U;
+            uint8_t bit;
+
+            for (bit = 0U; bit < 8U; bit++)
+            {
+                if (base[(uint32_t)bit * width + x] >= WE_OLED_GRAY_THRESHOLD)
+                    byte |= (uint8_t)(1U << bit);
+            }
+            wait_lcd_spi_txtemp_free();
+            send_lcd_spi_dat(byte);
+        }
+        wait_lcd_spi_txtemp_free();
+        send_lcd_spi_done();
+        LCD_CS_Set();
+    }
+
+    lcd_win_cur_y = (uint16_t)(lcd_win_cur_y + rows);
 }
+
+#endif /* LCD_TYPE == HW_LCD_OLED */
+
+#if (LCD_TYPE == HW_LCD_GRAY)
+
+/* ---- 灰度 OLED（SSD1327 类）刷屏：GRAY8 -> 4bpp 双像素打包 ----
+ * 窗口寻址由 lcd_set_windows 转发，IC 窗口内自动递增，跨 flush 切片连续；
+ * 每字节 2 像素：高 4 位 = 左像素（与屏厂例程一致），ALIGN_X=2 保证偶数宽。 */
+void lcd_gray_port(uint8_t *gram, uint32_t pix_size)
+{
+    uint16_t width = (uint16_t)(lcd_win_x1 - lcd_win_x0 + 1U);
+    uint16_t rows, row, pairs, x;
+
+    if ((gram == 0) || (width == 0U))
+        return;
+
+    rows  = (uint16_t)(pix_size / width);
+    pairs = (uint16_t)(width >> 1);
+
+    send_lcd_spi_done();
+    LCD_DC_Set();
+    LCD_CS_Clr();
+    for (row = 0; row < rows; row++)
+    {
+        uint8_t *src = gram + ((uint32_t)row * width);
+
+        for (x = 0; x < pairs; x++)
+        {
+            wait_lcd_spi_txtemp_free();
+            send_lcd_spi_dat((uint8_t)((src[2U * x] & 0xF0U) | (src[2U * x + 1U] >> 4)));
+        }
+    }
+    wait_lcd_spi_txtemp_free();
+    send_lcd_spi_done();
+    LCD_CS_Set();
+}
+
+#endif /* LCD_TYPE == HW_LCD_GRAY */
 
 /* RGB565 刷屏: 16 位 SPI 推流 */
 void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
@@ -242,10 +331,6 @@ void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
 /* RGB888 刷屏: 逐像素转 RGB565 后推流 */
 void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
 {
-    uint32_t pixel_count;
-    uint8_t  r, g, b;
-    uint16_t rgb565;
-
     if (gram == NULL)
     {
         return;
@@ -253,28 +338,20 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
 
     wait_lcd_spi_txtemp_free();
     send_lcd_spi_done();
-    spi_set_16b();
+    spi_set_8b();
     LCD_DC_Set();
     LCD_CS_Clr();
 
-    /* pix_size 为 RGB888 字节数，每 3 字节转 1 个 RGB565 */
-    pixel_count = pix_size / 3U;
-    while (pixel_count--)
+    /* pix_size 为 RGB888 字节数，R/G/B 3 字节原样直出 */
+    while (pix_size--)
     {
-        r = *gram++;
-        g = *gram++;
-        b = *gram++;
-        rgb565 = (uint16_t)(((uint16_t)(r & 0xF8U) << 8) |
-                            ((uint16_t)(g & 0xFCU) << 3) |
-                            ((uint16_t)b >> 3));
         wait_lcd_spi_txtemp_free();
-        send_lcd_spi_dat(rgb565);
+        send_lcd_spi_dat(*gram++);
     }
 
     wait_lcd_spi_txtemp_free();
     send_lcd_spi_done();
     LCD_CS_Set();
-    spi_set_8b();
 }
 
 #endif

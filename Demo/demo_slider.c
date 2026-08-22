@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t slider_title;
 static we_label_obj_t slider_hint;
 static we_label_obj_t slider_fps;
@@ -152,3 +154,123 @@ void we_slider_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     _slider_update_text();
     we_demo_update_fps(lcd, &slider_fps, &slider_fps_timer, &slider_last_frames, slider_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t slider_title;
+static we_label_obj_t slider_h_value;
+static we_label_obj_t slider_auto_value;
+static we_slider_obj_t slider_h;
+static we_slider_obj_t slider_auto;
+static uint32_t slider_auto_acc_ms;
+static char slider_h_buf[12];
+static char slider_auto_buf[12];
+static uint8_t slider_last_h;
+static uint8_t slider_last_auto;
+static int8_t slider_auto_dir;
+
+/**
+ * @brief 刷新滑条当前值显示文本。
+ * @return 无。
+ */
+static void _slider_update_text(void)
+{
+    uint8_t h_val;
+    uint8_t auto_val;
+
+    h_val = we_slider_get_value(&slider_h);
+    auto_val = we_slider_get_value(&slider_auto);
+
+    if (h_val != slider_last_h)
+    {
+        slider_last_h = h_val;
+        sprintf(slider_h_buf, "%03u", (unsigned)h_val);
+        we_label_set_text(&slider_h_value, slider_h_buf);
+    }
+
+    if (auto_val != slider_last_auto)
+    {
+        slider_last_auto = auto_val;
+        sprintf(slider_auto_buf, "%03u", (unsigned)auto_val);
+        we_label_set_text(&slider_auto_value, slider_auto_buf);
+    }
+}
+
+/**
+ * @brief 初始化 slider simple demo（128x64 布局）。
+ * @param lcd GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_slider_simple_demo_init(we_lcd_t *lcd)
+{
+    slider_auto_acc_ms = 0U;
+    slider_auto_dir = 1;
+    memset(slider_h_buf, 0, sizeof(slider_h_buf));
+    memset(slider_auto_buf, 0, sizeof(slider_auto_buf));
+    slider_last_h = 0xFFU;
+    slider_last_auto = 0xFFU;
+
+    we_label_obj_init(&slider_title, lcd, 2, 2, "SLIDER", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
+
+    /* 手动滑条 + 自动往返滑条各一根，右侧显示当前值 */
+    we_slider_obj_init(&slider_h, lcd, 2, 16, 98, 20, WE_SLIDER_ORIENT_HOR, 20U, 220U, 96U,
+                       RGB888TODEV(58, 66, 82), RGB888TODEV(74, 166, 255), RGB888TODEV(240, 244, 250), 255);
+    we_slider_set_thumb_size(&slider_h, 16U);
+    we_slider_set_track_thickness(&slider_h, 6U);
+
+    we_slider_obj_init(&slider_auto, lcd, 2, 40, 98, 20, WE_SLIDER_ORIENT_HOR, 20U, 220U, 64U,
+                       RGB888TODEV(58, 66, 82), RGB888TODEV(122, 214, 120), RGB888TODEV(240, 244, 250), 255);
+    we_slider_set_thumb_size(&slider_auto, 16U);
+    we_slider_set_track_thickness(&slider_auto, 6U);
+
+    we_label_obj_init(&slider_h_value, lcd, 104, 20, "096", we_font_consolas_18, RGB888TODEV(245, 214, 120), 255);
+    we_label_obj_init(&slider_auto_value, lcd, 104, 44, "064", we_font_consolas_18, RGB888TODEV(122, 236, 168), 255);
+
+    _slider_update_text();
+}
+
+/**
+ * @brief slider simple demo 周期更新（128x64 布局）。
+ * @param lcd GUI 屏幕上下文指针。
+ * @param ms_tick 本轮累计毫秒数。
+ * @return 无。
+ */
+void we_slider_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    slider_auto_acc_ms += ms_tick;
+    while (slider_auto_acc_ms >= 16U)
+    {
+        uint8_t auto_val = we_slider_get_value(&slider_auto);
+        slider_auto_acc_ms -= 16U;
+
+        if (slider_auto_dir > 0)
+        {
+            if (auto_val >= 220U)
+            {
+                slider_auto_dir = -1;
+            }
+            else
+            {
+                we_slider_add_value(&slider_auto, 1U);
+            }
+        }
+        else
+        {
+            if (auto_val <= 20U)
+            {
+                slider_auto_dir = 1;
+            }
+            else
+            {
+                we_slider_sub_value(&slider_auto, 1U);
+            }
+        }
+    }
+
+    _slider_update_text();
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

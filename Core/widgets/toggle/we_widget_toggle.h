@@ -22,6 +22,13 @@
 #define WE_TOGGLE_USE_ANIM 1
 #endif
 
+/* 单色样式下开关为描边/反白两态跳变，滑动动画取消
+ * （滑动中途反白翻转观感差，且省去动画节点） */
+#if (WE_CFG_MONO_STYLE == 1) && (WE_TOGGLE_USE_ANIM == 1)
+#undef WE_TOGGLE_USE_ANIM
+#define WE_TOGGLE_USE_ANIM 0
+#endif
+
 /* --------------------------------------------------------------------------
  * 动画总步数（仅 WE_TOGGLE_USE_ANIM == 1 时有效）
  *

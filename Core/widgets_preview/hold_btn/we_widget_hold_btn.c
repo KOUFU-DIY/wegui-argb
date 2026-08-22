@@ -26,34 +26,6 @@
 static const colour_t _hb_white = RGB888_CONST(255, 255, 255);
 
 /**
- * @brief 比较两个颜色值是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static uint8_t _hb_color_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#else
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _hb_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
-/**
  * @brief 触发充满：置锁定态、点燃闪亮反馈并回调一次。
  * @param obj 传入：控件对象指针。
  * @return 无。
@@ -148,19 +120,12 @@ static void _hb_anim_step_cb(void *owner, uint16_t elapsed_ms)
 static void _hb_draw_label_clipped(we_hold_btn_obj_t *obj, colour_t color)
 {
     we_lcd_t *lcd = obj->base.lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     uint16_t txt_w;
     int8_t y_top;
     int8_t y_bot;
     int16_t cx;
     int16_t cy;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
 
     if (obj->label == NULL)
         return;
@@ -171,34 +136,16 @@ static void _hb_draw_label_clipped(we_hold_btn_obj_t *obj, colour_t color)
     cx = (int16_t)(obj->base.x + obj->base.w / 2);
     cy = (int16_t)(obj->base.y + obj->base.h / 2);
 
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
-
-    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-    clip_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    we_pfb_clip_save(lcd, &sv);
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                       (int16_t)(obj->base.x + obj->base.w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
     {
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (clip_x0 - old_pfb_area.x0);
-
         we_draw_string(lcd, (int16_t)(cx - (int16_t)(txt_w / 2U)),
                        (int16_t)(cy - (y_top + y_bot) / 2),
                        obj->font, obj->label, color, obj->opacity);
     }
-
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 }
 
 /**
@@ -265,7 +212,7 @@ static void _hb_draw_cb(void *ptr)
         int16_t yo = (int16_t)(cy + ((sa * ro) >> 15));
         uint8_t seg_opa = (seg < lit_cnt)
                         ? obj->opacity
-                        : _hb_scale_opa(WE_HOLD_BTN_TRACK_OPA, obj->opacity);
+                        : we_opa_scale(WE_HOLD_BTN_TRACK_OPA, obj->opacity);
 
         we_draw_line_round(lcd, xi, yi, xo, yo, (uint8_t)lw,
                            obj->ring_color, seg_opa);
@@ -443,9 +390,9 @@ void we_hold_btn_set_colors(we_hold_btn_obj_t *obj,
 {
     if (obj == NULL)
         return;
-    if (_hb_color_eq(obj->bg_color, bg) &&
-        _hb_color_eq(obj->ring_color, ring) &&
-        _hb_color_eq(obj->text_color, text))
+    if (we_colour_eq(obj->bg_color, bg) &&
+        we_colour_eq(obj->ring_color, ring) &&
+        we_colour_eq(obj->text_color, text))
         return;
 
     obj->bg_color = bg;

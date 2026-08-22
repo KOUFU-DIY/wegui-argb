@@ -77,9 +77,9 @@
 - `Demo/preview/demo_ime_pinyin.c`（DEMO_ID 113：textarea 输入框 + 弹层 IME（点击呼出/收回）；自动演示脚本循环敲 `ni`→你、`hao`→好、`shi`→世、`jie`→界再退格清空，真实触摸全程可用）
 
 ## 弹层模式（2026-07-27 新增，keyboard 弹层同款壳）
-- `we_ime_pinyin_popup_init(obj, lcd, h, font)` —— 面板与内嵌键盘均不挂对象链表，弹层统一承载；h = 回显条(WE_KEYBOARD_ECHO_H) + 拼音条 + 候选栏 + 键盘区
+- `we_ime_pinyin_popup_init(obj, lcd, h, font)` —— 面板与内嵌键盘均不挂对象链表，顶层链 + 模态统一承载；h = 回显条(WE_KEYBOARD_ECHO_H) + 拼音条 + 候选栏 + 键盘区
 - `we_ime_pinyin_popup_show(obj, target_textarea)` / `we_ime_pinyin_popup_hide(obj)` —— 屏底 Q8 滑入/收回；收回途径：点面板上方 / BACK / hide API；被其他弹层顶掉经 close_cb 自动复位
 - `we_ime_pinyin_bind_textarea(ta, ime)` —— 点击输入框呼出（textarea 通用编辑器绑定的输入法特化）
 - 顶部回显条实时镜像目标输入框内容（键盘挡住输入框也能看到输入）；候选上屏/透传键经 _ime_emit 直接 we_textarea_input 注入目标
-- 弹层键通道：BACK 收回，其余转发 `we_keyboard_key_nav`（方向键移键光标、OK 双沿击键）
+- 模态键通道：BACK 收回，其余转发 `we_keyboard_key_nav`（方向键移键光标、OK 双沿击键）
 - 弹层触摸按"按下时的区域"路由整个触摸序列（候选栏/键盘区不串台）

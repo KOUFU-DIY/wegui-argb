@@ -41,4 +41,4 @@
 - 无 disabled 行、无逐行独立配色
 
 ## 对应 demo
-- `Demo/preview/demo_radio.c`（DEMO_ID 105：Low/Mid/High 三选项 + 顶部回显）
+- `Demo/preview/demo_radio.c`（DEMO_ID 116：Low/Mid/High 三选项 + 顶部回显）

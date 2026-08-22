@@ -59,4 +59,4 @@
 - 滚动条可加淡出动画（参考 dropdown 滚动条渐隐）
 
 ## 对应 demo
-- `Demo/preview/demo_logview.c`（DEMO_ID 120：200x150 日志窗占中部，每 400ms push 一条模拟日志（循环模板 + 递增序号），演示自动滚底与拖拽暂停跟随；顶部说明 label "drag to pause follow"）
+- `Demo/preview/demo_logview.c`（DEMO_ID 105：200x150 日志窗占中部，每 400ms push 一条模拟日志（循环模板 + 递增序号），演示自动滚底与拖拽暂停跟随；顶部说明 label "drag to pause follow"）

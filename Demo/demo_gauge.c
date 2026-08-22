@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_gauge_obj_t gg_gauge;
 static we_label_obj_t gg_title;
 static we_label_obj_t gg_fps_label;
@@ -123,3 +125,94 @@ void we_gauge_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &gg_fps_label, &gg_fps_timer,
                        &gg_last_frames, gg_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_gauge_obj_t gg_gauge;
+static we_label_obj_t gg_title;
+static we_label_obj_t gg_value_label;
+
+static char     gg_val_buf[8];
+static uint32_t gg_acc_ms;
+static uint32_t gg_seed;
+static int32_t  gg_last_disp;
+
+#define GG_PERIOD  1500U
+#define GG_SWEEP_MS 900U
+
+/**
+ * @brief 取下一个伪随机扫动目标（0~100，保证与当前目标不同）。
+ * @return 目标值。
+ */
+static int32_t _gg_next_target(void)
+{
+    int32_t target;
+
+    gg_seed = gg_seed * 1103515245UL + 12345UL;
+    target  = (int32_t)((gg_seed >> 16) % 101UL);
+    if (target == we_gauge_get_value(&gg_gauge))
+        target = (target + 41) % 101;
+    return target;
+}
+
+/**
+ * @brief 初始化 gauge demo（128x64 布局）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_gauge_simple_demo_init(we_lcd_t *lcd)
+{
+    gg_acc_ms    = 0U;
+    gg_seed      = 20260720UL;
+    gg_last_disp = -1;
+    memset(gg_val_buf, 0, sizeof(gg_val_buf));
+
+    we_label_obj_init(&gg_title, lcd, 2, 2,
+                      "GAUGE", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* 表盘居右，数值 label 放左侧中部 */
+    we_gauge_obj_init(&gg_gauge, lcd, 64, 2, 60, 60);
+    we_gauge_set_range(&gg_gauge, 0, 100);
+    we_gauge_set_colors(&gg_gauge,
+                        RGB888TODEV(150, 168, 196),  /* 刻度：灰蓝 */
+                        RGB888TODEV(255, 106, 90));  /* 指针：亮红 */
+
+    we_label_obj_init(&gg_value_label, lcd, 12, 32,
+                      "  0", we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    /* 先来一次开场扫动，画面立即有动作 */
+    we_gauge_anim_value(&gg_gauge, _gg_next_target(), GG_SWEEP_MS);
+}
+
+/**
+ * @brief gauge demo 周期更新（128x64 布局）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_gauge_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int32_t disp;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    gg_acc_ms += ms_tick;
+    if (gg_acc_ms >= GG_PERIOD)
+    {
+        gg_acc_ms = 0U;
+        we_gauge_anim_value(&gg_gauge, _gg_next_target(), GG_SWEEP_MS);
+    }
+
+    disp = we_gauge_get_disp_value(&gg_gauge);
+    if (disp != gg_last_disp)
+    {
+        gg_last_disp = disp;
+        sprintf(gg_val_buf, "%3ld", (long)disp);
+        we_label_set_text(&gg_value_label, gg_val_buf);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

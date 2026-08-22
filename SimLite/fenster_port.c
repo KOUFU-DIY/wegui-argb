@@ -18,6 +18,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 单色预览：按页式 OLED 硬件端口同款阈值把 GRAY8 显示二值化（窗口与
+ * --shot 导出同生效），所见即所得地调 MONO 样式；默认跟随
+ * WE_CFG_MONO_STYLE，可在 we_sim_port_config.h 单独定义覆盖。 */
+#ifndef WE_SIM_MONO_PREVIEW
+#define WE_SIM_MONO_PREVIEW WE_CFG_MONO_STYLE
+#endif
+#ifndef WE_SIM_MONO_THRESHOLD
+#define WE_SIM_MONO_THRESHOLD 128U
+#endif
+
 /* ---------------- 帧缓冲与窗口 ---------------- */
 static uint32_t gui_fb[SCREEN_WIDTH * SCREEN_HEIGHT];
 static uint32_t *win_buf = NULL;
@@ -117,23 +127,91 @@ static uint32_t rgb565_to_argb8888(uint16_t rgb565)
 void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
 {
     uint16_t rect_w;
-    uint32_t i;
+    uint16_t local_x;
+    uint16_t local_y;
+    uint32_t i = 0;
 
     if (gram == NULL)
         return;
 
+    /* 按行推进：%/ 只在进入时算一次，行内直拷（越界钳制提升到行级）。 */
     rect_w = (uint16_t)(current_addr.x1 - current_addr.x0 + 1U);
+    local_x = (uint16_t)(pixel_offset % rect_w);
+    local_y = (uint16_t)(pixel_offset / rect_w);
 
-    for (i = 0; i < pix_size; i++)
+    while (i < pix_size)
     {
-        uint32_t total_idx = pixel_offset + i;
-        uint16_t local_x = (uint16_t)(total_idx % rect_w);
-        uint16_t local_y = (uint16_t)(total_idx / rect_w);
         uint16_t x = (uint16_t)(current_addr.x0 + local_x);
         uint16_t y = (uint16_t)(current_addr.y0 + local_y);
+        uint32_t run = (uint32_t)(rect_w - local_x); /* 本行剩余像素 */
 
-        if (x < SCREEN_WIDTH && y < SCREEN_HEIGHT)
-            gui_fb[(uint32_t)y * SCREEN_WIDTH + x] = rgb565_to_argb8888(gram[i]);
+        if (run > pix_size - i)
+            run = pix_size - i;
+
+        if (y < SCREEN_HEIGHT && x < SCREEN_WIDTH)
+        {
+            uint32_t *dst = &gui_fb[(uint32_t)y * SCREEN_WIDTH + x];
+            uint32_t vis = ((uint32_t)x + run > SCREEN_WIDTH) ? (uint32_t)(SCREEN_WIDTH - x) : run;
+            uint32_t k;
+
+            for (k = 0; k < vis; k++)
+                dst[k] = rgb565_to_argb8888(gram[i + k]);
+        }
+
+        i += run;
+        local_x = 0;
+        local_y++;
+    }
+
+    pixel_offset += pix_size;
+}
+
+/**
+ * @brief GRAY8 刷屏端口：亮度字节复制到 R/G/B 三通道（灰度 OLED 模拟）
+ */
+void lcd_gray8_port(uint8_t *gram, uint32_t pix_size)
+{
+    uint16_t rect_w;
+    uint16_t local_x;
+    uint16_t local_y;
+    uint32_t i = 0;
+
+    if (gram == NULL)
+        return;
+
+    /* 按行推进：%/ 只在进入时算一次，行内直拷（越界钳制提升到行级）。 */
+    rect_w = (uint16_t)(current_addr.x1 - current_addr.x0 + 1);
+    local_x = (uint16_t)(pixel_offset % rect_w);
+    local_y = (uint16_t)(pixel_offset / rect_w);
+
+    while (i < pix_size)
+    {
+        uint16_t x = (uint16_t)(current_addr.x0 + local_x);
+        uint16_t y = (uint16_t)(current_addr.y0 + local_y);
+        uint32_t run = (uint32_t)(rect_w - local_x); /* 本行剩余像素 */
+
+        if (run > pix_size - i)
+            run = pix_size - i;
+
+        if (y < SCREEN_HEIGHT && x < SCREEN_WIDTH)
+        {
+            uint32_t *dst = &gui_fb[(uint32_t)y * SCREEN_WIDTH + x];
+            uint32_t vis = ((uint32_t)x + run > SCREEN_WIDTH) ? (uint32_t)(SCREEN_WIDTH - x) : run;
+            uint32_t k;
+
+            for (k = 0; k < vis; k++)
+            {
+                uint32_t v = gram[i + k];
+#if (WE_SIM_MONO_PREVIEW == 1)
+                v = (v >= WE_SIM_MONO_THRESHOLD) ? 255U : 0U;
+#endif
+                dst[k] = 0xFF000000U | (v << 16) | (v << 8) | v;
+            }
+        }
+
+        i += run;
+        local_x = 0;
+        local_y++;
     }
 
     pixel_offset += pix_size;

@@ -1,5 +1,5 @@
 #include "we_widget_menu.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 /* 滚动物理参数（沿用本控件既有宏值；快扫用自有 kick 模型，slice 占位不用） */
 static const we_scroll_cfg_t _menu_scroll_cfg = {
@@ -8,7 +8,7 @@ static const we_scroll_cfg_t _menu_scroll_cfg = {
     128,
 };
 #include "we_render.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * menu —— 多级菜单（preview 孵化区）
@@ -24,34 +24,6 @@ static const we_scroll_cfg_t _menu_scroll_cfg = {
  * 滚动：像素级硬夹紧（list 同款），拖拽跟手 + 松手简化惯性
  * （速度每步衰减 7/8，独立动画节点推进直到归零）。
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _menu_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
-/**
- * @brief 比较两个颜色是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _menu_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
 
 /**
  * @brief 取当前页（栈顶帧的页指针）。
@@ -384,7 +356,7 @@ static void _menu_push(we_menu_obj_t *obj, const we_menu_page_t *page)
 static void _menu_draw_chevron_right(we_menu_obj_t *obj, int16_t cx, int16_t cy)
 {
     we_lcd_t *lcd = obj->base.lcd;
-    uint8_t opa = _menu_scale_opa(255U, obj->opacity);
+    uint8_t opa = we_opa_scale(255U, obj->opacity);
 
     we_draw_line_round(lcd, (int16_t)(cx - 2), (int16_t)(cy - 4),
                        (int16_t)(cx + 2), cy, 2U, obj->arrow_color, opa);
@@ -402,7 +374,7 @@ static void _menu_draw_chevron_right(we_menu_obj_t *obj, int16_t cx, int16_t cy)
 static void _menu_draw_back_arrow(we_menu_obj_t *obj, int16_t cx, int16_t cy)
 {
     we_lcd_t *lcd = obj->base.lcd;
-    uint8_t opa = _menu_scale_opa(255U, obj->opacity);
+    uint8_t opa = we_opa_scale(255U, obj->opacity);
 
     we_draw_line_round(lcd, (int16_t)(cx + 3), (int16_t)(cy - 5),
                        (int16_t)(cx - 2), cy, 2U, obj->arrow_color, opa);
@@ -465,9 +437,18 @@ static void _menu_draw_page_rows(we_menu_obj_t *obj, const we_menu_page_t *page,
         {
             we_get_text_bbox(obj->font, item->label, &y_top, &y_bot);
             ty = (int16_t)(iy + (int16_t)obj->row_h / 2 - (y_top + y_bot) / 2);
+#if (WE_CFG_MONO_STYLE == 1)
+            we_draw_string(lcd, (int16_t)(base_x + WE_MENU_TEXT_PAD), ty,
+                           obj->font, item->label,
+                           (show_press && (int16_t)idx == obj->pressed_row)
+                               ? RGB888TODEV(0, 0, 0) /* 反白行挖空字 */
+                               : obj->text_color,
+                           we_opa_scale(255U, obj->opacity));
+#else
             we_draw_string(lcd, (int16_t)(base_x + WE_MENU_TEXT_PAD), ty,
                            obj->font, item->label, obj->text_color,
-                           _menu_scale_opa(255U, obj->opacity));
+                           we_opa_scale(255U, obj->opacity));
+#endif
         }
 
         /* 带子页的行：右侧 ">" 提示（避开滚动条保留带） */
@@ -485,7 +466,7 @@ static void _menu_draw_page_rows(we_menu_obj_t *obj, const we_menu_page_t *page,
                          (int16_t)(iy + (int16_t)obj->row_h - 1),
                          (uint16_t)(obj->base.w - 2 * WE_MENU_TEXT_PAD), 1U,
                          obj->sep_color,
-                         _menu_scale_opa(WE_MENU_SEP_OPA, obj->opacity));
+                         we_opa_scale(WE_MENU_SEP_OPA, obj->opacity));
         }
 
         iy = (int16_t)(iy + (int16_t)obj->row_h);
@@ -520,29 +501,15 @@ static void _menu_draw_scrollbar(we_menu_obj_t *obj)
     if (track_h < (int16_t)obj->row_h)
         track_h = rows_h; /* 圆角过大时退化为整高轨道 */
 
-    thumb_h = (int16_t)(((int32_t)track_h * (int32_t)rows_h) / content_h);
-    if (thumb_h < 8)
-        thumb_h = 8;
-    if (thumb_h > track_h)
-        thumb_h = track_h;
-
-    {
-        /* 过冲期间按夹紧后的滚动值计算，滑块不越出轨道（list 同款） */
-        int32_t sb_scroll = _menu_cur_scroll(obj);
-
-        if (sb_scroll < 0)
-            sb_scroll = 0;
-        if (sb_scroll > max_scroll)
-            sb_scroll = max_scroll;
-        thumb_y = (int16_t)(track_y0 +
-                  (int32_t)(track_h - thumb_h) * sb_scroll / max_scroll);
-    }
+    /* 滑块几何：高按行区比例（下限 8px），位置按夹紧后的滚动进度插值。 */
+    we_scroll_bar_geom(track_y0, track_h, rows_h, content_h,
+                       _menu_cur_scroll(obj), max_scroll, 8, &thumb_y, &thumb_h);
 
     we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y,
                                      (uint16_t)WE_MENU_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_MENU_SB_WIDTH / 2),
                                      obj->sb_color,
-                                     _menu_scale_opa(WE_MENU_SB_OPA, obj->opacity));
+                                     we_opa_scale(WE_MENU_SB_OPA, obj->opacity));
 }
 
 /**
@@ -595,7 +562,7 @@ static void _menu_draw_title_bar(we_menu_obj_t *obj)
         we_get_text_bbox(obj->font, page->title, &y_top, &y_bot);
         ty = (int16_t)(cy - (y_top + y_bot) / 2);
         we_draw_string(lcd, tx, ty, obj->font, page->title,
-                       obj->title_text_color, _menu_scale_opa(255U, obj->opacity));
+                       obj->title_text_color, we_opa_scale(255U, obj->opacity));
     }
 }
 
@@ -610,15 +577,8 @@ static void _menu_draw_cb(void *ptr)
 {
     we_menu_obj_t *obj = (we_menu_obj_t *)ptr;
     we_lcd_t *lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     int16_t rows_y;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -626,10 +586,18 @@ static void _menu_draw_cb(void *ptr)
     if (lcd == NULL)
         return;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 1. 单色样式面板：黑底 + 1px 白描边 */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    obj->radius, RGB888TODEV(255, 255, 255),
+                                    obj->bg_color, obj->opacity);
+#else
     /* 1. 面板背景（radius 为 0 时解析填充自动退化为直角矩形） */
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      obj->radius, obj->bg_color, obj->opacity);
+#endif
 
     /* 2. 标题栏（当前页 title + 非根页返回箭头） */
     _menu_draw_title_bar(obj);
@@ -638,27 +606,14 @@ static void _menu_draw_cb(void *ptr)
         return;
 
     /* 3. PFB 窗口收窄：把行内容裁剪在行区矩形内（save/restore 套路） */
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
+    we_pfb_clip_save(lcd, &sv);
 
     rows_y = _menu_rows_y(obj);
-    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-    clip_y0 = WE_MAX((int16_t)old_y_start, rows_y);
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, rows_y,
+                       (int16_t)(obj->base.x + obj->base.w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
     {
         int16_t ofs = _menu_trans_ofs(obj);
-
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (clip_x0 - old_pfb_area.x0);
 
         if (obj->transitioning && obj->trans_prev_page != NULL)
         {
@@ -668,12 +623,8 @@ static void _menu_draw_cb(void *ptr)
         }
         _menu_draw_page_rows(obj, _menu_cur_page(obj), _menu_cur_scroll(obj),
                              ofs, (uint8_t)(!obj->transitioning));
-
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
     }
+    we_pfb_clip_restore(lcd, &sv);
 
     /* 4. 内容溢出时叠加右缘常显滚动条（过渡期间隐藏） */
     if (!obj->transitioning)
@@ -1072,6 +1023,17 @@ void we_menu_obj_init(we_menu_obj_t *obj, we_lcd_t *lcd,
     obj->radius = WE_MENU_DEF_RADIUS;
     obj->opacity = 255U;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式默认配色：黑底白字，按压行反白（行字色在绘制处按行反转） */
+    obj->bg_color = RGB888TODEV(0, 0, 0);
+    obj->title_bg_color = RGB888TODEV(0, 0, 0);
+    obj->title_text_color = RGB888TODEV(255, 255, 255);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+    obj->sep_color = RGB888TODEV(255, 255, 255);
+    obj->press_color = RGB888TODEV(255, 255, 255);
+    obj->arrow_color = RGB888TODEV(255, 255, 255);
+    obj->sb_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bg_color = RGB888TODEV(32, 38, 50);
     obj->title_bg_color = RGB888TODEV(44, 54, 72);
     obj->title_text_color = RGB888TODEV(236, 241, 248);
@@ -1080,6 +1042,7 @@ void we_menu_obj_init(we_menu_obj_t *obj, we_lcd_t *lcd,
     obj->press_color = RGB888TODEV(62, 92, 132);
     obj->arrow_color = RGB888TODEV(150, 164, 186);
     obj->sb_color = RGB888TODEV(200, 210, 226);
+#endif
     obj->action_cb = NULL;
 
     obj->pressed_row = -1;
@@ -1186,13 +1149,13 @@ void we_menu_set_colors(we_menu_obj_t *obj, colour_t bg, colour_t title_bg,
 {
     if (obj == NULL)
         return;
-    if (_menu_colour_eq(obj->bg_color, bg) &&
-        _menu_colour_eq(obj->title_bg_color, title_bg) &&
-        _menu_colour_eq(obj->text_color, text) &&
-        _menu_colour_eq(obj->title_text_color, title_text) &&
-        _menu_colour_eq(obj->press_color, press) &&
-        _menu_colour_eq(obj->arrow_color, accent) &&
-        _menu_colour_eq(obj->sb_color, accent))
+    if (we_colour_eq(obj->bg_color, bg) &&
+        we_colour_eq(obj->title_bg_color, title_bg) &&
+        we_colour_eq(obj->text_color, text) &&
+        we_colour_eq(obj->title_text_color, title_text) &&
+        we_colour_eq(obj->press_color, press) &&
+        we_colour_eq(obj->arrow_color, accent) &&
+        we_colour_eq(obj->sb_color, accent))
         return;
 
     obj->bg_color = bg;

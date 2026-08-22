@@ -6,6 +6,19 @@ void we_dropdown_close(we_dropdown_obj_t *obj); /* overlay MODAL_CLOSE 用前向
 #include "we_render.h"
 
 /* 内置配色（通过 RGB888TODEV 兼容 RGB565 / RGB888 两种色深）。 */
+#if (WE_CFG_MONO_STYLE == 1)
+/* 单色样式：黑底白字白边，主框按下/展开反白，高亮行反白挖空字 */
+#define _DD_COL_BG          RGB888TODEV(0, 0, 0)       /* 主框背景 */
+#define _DD_COL_BG_PRESSED  RGB888TODEV(255, 255, 255) /* 主框按下/展开反白 */
+#define _DD_COL_POPUP_BG    RGB888TODEV(0, 0, 0)       /* 弹出列表背景 */
+#define _DD_COL_BORDER      RGB888TODEV(255, 255, 255) /* 边框 */
+#define _DD_COL_TEXT        RGB888TODEV(255, 255, 255) /* 正常文本 */
+#define _DD_COL_TEXT_DIS    RGB888TODEV(255, 255, 255) /* 禁用文本（单色无灰阶） */
+#define _DD_COL_SEL_BG      RGB888TODEV(255, 255, 255) /* 选中/高亮项反白条 */
+#define _DD_COL_SEL_TEXT    RGB888TODEV(0, 0, 0)       /* 高亮项挖空字 */
+#define _DD_COL_ARROW       RGB888TODEV(255, 255, 255) /* 箭头 */
+#define _DD_COL_SCROLLBAR   RGB888TODEV(255, 255, 255) /* 滚动条滑块色 */
+#else
 #define _DD_COL_BG          RGB888TODEV(46, 52, 64)    /* 主框背景 */
 #define _DD_COL_BG_PRESSED  RGB888TODEV(64, 72, 88)    /* 主框按下态背景（稍亮） */
 #define _DD_COL_POPUP_BG    RGB888TODEV(58, 66, 82)    /* 弹出列表背景（比主框更亮，呈悬浮感） */
@@ -16,6 +29,7 @@ void we_dropdown_close(we_dropdown_obj_t *obj); /* overlay MODAL_CLOSE 用前向
 #define _DD_COL_SEL_TEXT    RGB888TODEV(255, 255, 255) /* 高亮项文本 */
 #define _DD_COL_ARROW       RGB888TODEV(160, 168, 184) /* 箭头 */
 #define _DD_COL_SCROLLBAR   RGB888TODEV(210, 218, 232) /* 滚动条滑块色（半透明叠加） */
+#endif
 
 /* 滚动条几何与透明度（无轨道，仅半透明胶囊滑块）。 */
 #define _DD_SB_WIDTH        5   /* 滑块宽度（像素）；圆角=宽度/2，需≥4 两头半圆才明显 */
@@ -107,12 +121,9 @@ static void _dropdown_draw_text_clipped(we_lcd_t *lcd, const unsigned char *font
                                         int16_t box_w, int16_t box_h,
                                         int16_t pad, uint8_t opacity)
 {
-    we_area_t old_pfb_area;
-    uint16_t old_y_start, old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     int8_t y_top, y_bot;
     int16_t txt_x, txt_y;
-    int16_t cx0, cy0, cx1, cy1;
 
     if (text == NULL || font == NULL)
         return;
@@ -121,32 +132,13 @@ static void _dropdown_draw_text_clipped(we_lcd_t *lcd, const unsigned char *font
     txt_x = (int16_t)(box_x + pad);
     txt_y = (int16_t)(box_y + box_h / 2 - (y_top + y_bot) / 2);
 
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
-
-    cx0 = WE_MAX(old_pfb_area.x0, box_x);
-    cy0 = WE_MAX((int16_t)old_y_start, box_y);
-    cx1 = WE_MIN(old_pfb_area.x1, (int16_t)(box_x + box_w - 1));
-    cy1 = WE_MIN((int16_t)old_y_end, (int16_t)(box_y + box_h - 1));
-
-    if (cx0 <= cx1 && cy0 <= cy1)
+    we_pfb_clip_save(lcd, &sv);
+    if (we_pfb_clip_to(lcd, &sv, box_x, box_y,
+                       (int16_t)(box_x + box_w - 1), (int16_t)(box_y + box_h - 1)))
     {
-        lcd->pfb_area.x0 = cx0;
-        lcd->pfb_area.x1 = cx1;
-        lcd->pfb_y_start = (uint16_t)cy0;
-        lcd->pfb_y_end = (uint16_t)cy1;
-        lcd->pfb_gram = old_gram + (cy0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (cx0 - old_pfb_area.x0);
-
         we_draw_string(lcd, txt_x, txt_y, font, text, color, opacity);
     }
-
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 }
 
 /**
@@ -243,6 +235,13 @@ static void _dropdown_draw_cb(void *ptr)
     we_draw_round_rect_analytic_fill(lcd, d->base.x, d->base.y, d->base.w, d->base.h,
                                      d->radius, bg, 255U);
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：常态给主框补 1px 白描边（黑底黑框否则不可见） */
+    if (!(d->pressed || d->opened))
+        we_draw_round_rect_outline_fill(lcd, d->base.x, d->base.y, d->base.w, d->base.h,
+                                        d->radius, _DD_COL_BORDER, _DD_COL_BG, 255U);
+#endif
+
     if (d->selected_idx >= 0 && d->selected_idx < (int16_t)d->option_cnt &&
         d->options != NULL)
     {
@@ -250,7 +249,11 @@ static void _dropdown_draw_cb(void *ptr)
     }
     if (txt != NULL)
     {
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t tc = (d->pressed || d->opened) ? _DD_COL_SEL_TEXT : _DD_COL_TEXT; /* 反白态挖空字 */
+#else
         colour_t tc = d->enabled ? _DD_COL_TEXT : _DD_COL_TEXT_DIS;
+#endif
         _dropdown_draw_text_clipped(lcd, d->font, txt, tc,
                                     d->base.x, d->base.y,
                                     (int16_t)(d->base.w - 22), d->base.h, 8, 255U);
@@ -605,25 +608,9 @@ static void _dropdown_draw_scrollbar(we_dropdown_obj_t *d, const we_area_t *a)
     if (track_h < (int16_t)d->item_h)
         track_h = ph; /* 圆角过大时退化为整高轨道 */
 
-    /* 滑块高度 = 轨道高 * 可视高 / 内容总高，下限保证可见。 */
-    thumb_h = (int16_t)((int32_t)track_h * ph / content_h);
-    if (thumb_h < 8)
-        thumb_h = 8;
-    if (thumb_h > track_h)
-        thumb_h = track_h;
-
-    /* 滑块位置 = 在 [0, track_h - thumb_h] 内按滚动像素进度插值。 */
-    {
-        /* 过冲期间按夹紧后的滚动值计算，滑块不越出轨道（list 同款） */
-        int32_t sb_scroll = d->scroll_px;
-
-        if (sb_scroll < 0)
-            sb_scroll = 0;
-        if (sb_scroll > max_scroll)
-            sb_scroll = max_scroll;
-        thumb_y = (int16_t)(track_y0 +
-                  (int32_t)(track_h - thumb_h) * sb_scroll / max_scroll);
-    }
+    /* 滑块几何：高按可视比例（下限 8px），位置按夹紧后的滚动进度插值。 */
+    we_scroll_bar_geom(track_y0, track_h, ph, content_h,
+                       d->scroll_px, max_scroll, 8, &thumb_y, &thumb_h);
 
     /* 仅绘制半透明胶囊滑块，不画轨道；圆角=半宽 → 两头自然收成半圆。
      * 透明度取当前淡出值 sb_alpha（由滚动条淡出动画节点推进）。 */
@@ -656,11 +643,9 @@ static void _dropdown_popup_draw(void *owner)
     uint16_t idx;
     /* 行循环期间把 PFB 带纵向收窄到 popup 内，半露行的文本/高亮即便其
      * box 超出 popup 上/下边，也不会越过 popup 边缘渗到 gap 或主框上。 */
-    uint16_t saved_ys = lcd->pfb_y_start;
-    uint16_t saved_ye = lcd->pfb_y_end;
-    colour_t *saved_gram = lcd->pfb_gram;
-    int16_t clip_y0 = WE_MAX((int16_t)saved_ys, a->y0);
-    int16_t clip_y1 = WE_MIN((int16_t)saved_ye, a->y1);
+    we_pfb_clip_t sv;
+
+    we_pfb_clip_save(lcd, &sv);
 
     /* 列表整体背景：用比主框更亮的悬浮色，圆角与主框一致。 */
     we_draw_round_rect_analytic_fill(lcd, a->x0, a->y0, (uint16_t)pw, (uint16_t)ph,
@@ -671,12 +656,9 @@ static void _dropdown_popup_draw(void *owner)
     top_ofs = (int16_t)(d->scroll_px % (int32_t)d->item_h);
     iy = (int16_t)(a->y0 - top_ofs);
 
-    if (clip_y0 <= clip_y1)
+    if (we_pfb_clip_to(lcd, &sv, (int16_t)sv.area.x0, (int16_t)a->y0,
+                       (int16_t)sv.area.x1, (int16_t)a->y1))
     {
-        lcd->pfb_gram = saved_gram + (clip_y0 - (int16_t)saved_ys) * lcd->pfb_width;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-
         /* 从首项起逐行向下绘制，直到行顶超出 popup 底边。 */
         for (idx = (uint16_t)first; idx < d->option_cnt; idx++)
         {
@@ -709,11 +691,8 @@ static void _dropdown_popup_draw(void *owner)
 
             iy = (int16_t)(iy + (int16_t)d->item_h);
         }
-
-        lcd->pfb_y_start = saved_ys;
-        lcd->pfb_y_end = saved_ye;
-        lcd->pfb_gram = saved_gram;
     }
+    we_pfb_clip_restore(lcd, &sv);
 
     /* 内容超出可视高度时，叠加半透明滚动条。 */
     _dropdown_draw_scrollbar(d, a);

@@ -188,6 +188,24 @@ static void _lt_at_diagnostics(int frame, uint32_t crc)
     }
 }
 
+const char *lite_autotest_cfg_fingerprint(void)
+{
+#if (LCD_DEEP == DEEP_GRAY8)
+#define _LT_AT_DEPTH "gray8"
+#elif (LCD_DEEP == DEEP_RGB888)
+#define _LT_AT_DEPTH "rgb888"
+#else
+#define _LT_AT_DEPTH "rgb565"
+#endif
+    static char fp[48];
+
+    if (fp[0] == 0)
+        sprintf(fp, "%dx%d-" _LT_AT_DEPTH "-mono%d-dma%d",
+                (int)SCREEN_WIDTH, (int)SCREEN_HEIGHT,
+                (int)(WE_CFG_MONO_STYLE), (int)(GRAM_DMA_BUFF_EN));
+    return fp;
+}
+
 void lite_autotest_parse_args(int argc, char *argv[], lite_autotest_cfg_t *cfg)
 {
     int argi;

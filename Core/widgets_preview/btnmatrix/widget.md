@@ -37,4 +37,4 @@
 - 无 disabled 态、无每键独立配色/字体
 
 ## 对应 demo
-- `Demo/preview/demo_btnmatrix.c`（DEMO_ID 104：4x3 数字键盘 + 顶部回显）
+- `Demo/preview/demo_btnmatrix.c`（DEMO_ID 115：4x3 数字键盘 + 顶部回显）

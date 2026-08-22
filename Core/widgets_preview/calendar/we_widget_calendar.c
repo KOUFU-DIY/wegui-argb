@@ -87,34 +87,6 @@ static uint8_t _cal_first_wday(uint16_t year, uint8_t month)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色是否相等（按当前色深比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _cal_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _cal_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
-/**
  * @brief 重新格式化标题文本缓存（"YYYY-MM"，纯整数拆位）。
  * @param obj 传入：控件对象指针。
  * @return 无。
@@ -324,7 +296,7 @@ static void _cal_draw_ring(we_calendar_obj_t *obj, int16_t bx, int16_t by,
             uint8_t ring = (a_out > a_in) ? (uint8_t)(a_out - a_in) : 0U;
 
             if (ring != 0U)
-                we_draw_pixel(lcd, px, py, color, _cal_scale_opa(ring, obj->opacity));
+                we_draw_pixel(lcd, px, py, color, we_opa_scale(ring, obj->opacity));
         }
     }
 }
@@ -426,7 +398,7 @@ static void _calendar_draw_cb(void *ptr)
         we_draw_round_rect_analytic_fill(obj->base.lcd, (int16_t)(zx + 2), (int16_t)(y0 + 2),
                                          (uint16_t)(2 * cw - 4), (uint16_t)(rh - 4),
                                          (uint16_t)((rh - 4) / 2), obj->sel_bg_color,
-                                         _cal_scale_opa(WE_CALENDAR_PRESS_OPA, obj->opacity));
+                                         we_opa_scale(WE_CALENDAR_PRESS_OPA, obj->opacity));
     }
     _cal_draw_text_center(obj, "<", x0, y0, (int16_t)(2 * cw), rh, obj->title_color);
     _cal_draw_text_center(obj, ">", (int16_t)(x0 + 5 * cw), y0, (int16_t)(2 * cw), rh,
@@ -486,7 +458,7 @@ static void _calendar_draw_cb(void *ptr)
                                              (int16_t)(dy + (dh - bh) / 2),
                                              (uint16_t)bw, (uint16_t)bh, br,
                                              obj->sel_bg_color,
-                                             _cal_scale_opa(WE_CALENDAR_PRESS_OPA, obj->opacity));
+                                             we_opa_scale(WE_CALENDAR_PRESS_OPA, obj->opacity));
         }
 
         if (today_here && day == obj->today_day)
@@ -892,11 +864,11 @@ void we_calendar_set_colors(we_calendar_obj_t *obj, colour_t title, colour_t wee
 {
     if (obj == NULL)
         return;
-    if (_cal_colour_eq(obj->title_color, title) &&
-        _cal_colour_eq(obj->weekday_color, weekday) &&
-        _cal_colour_eq(obj->day_color, day_text) &&
-        _cal_colour_eq(obj->sel_bg_color, sel_bg) &&
-        _cal_colour_eq(obj->today_ring_color, today_ring))
+    if (we_colour_eq(obj->title_color, title) &&
+        we_colour_eq(obj->weekday_color, weekday) &&
+        we_colour_eq(obj->day_color, day_text) &&
+        we_colour_eq(obj->sel_bg_color, sel_bg) &&
+        we_colour_eq(obj->today_ring_color, today_ring))
         return;
 
     obj->title_color = title;

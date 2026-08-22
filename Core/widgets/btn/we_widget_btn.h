@@ -39,9 +39,7 @@ typedef uint8_t (*we_btn_event_cb_t)(void *obj, we_event_t event, we_indev_data_
 typedef struct
 {
     colour_t bg_color;
-    colour_t border_color;
     colour_t text_color;
-    uint8_t border_w;
 } we_btn_style_t;
 
 typedef struct
@@ -110,13 +108,10 @@ void we_btn_set_text(we_btn_obj_t *obj, const char *text);
  * @param obj 目标控件对象指针。
  * @param state 目标状态枚举值。
  * @param bg 按钮背景色。
- * @param border 按钮边框色。
  * @param text 按钮文字颜色。
- * @param border_w 边框宽度（像素）。
  * @return 无。
  */
-void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colour_t border, colour_t text,
-                      uint8_t border_w);
+void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colour_t text);
 
 /**
  * @brief 设置按钮圆角半径并刷新显示。
@@ -125,13 +120,5 @@ void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colo
  * @return 无。
  */
 void we_btn_set_radius(we_btn_obj_t *obj, uint16_t radius);
-
-/**
- * @brief 统一设置各状态边框宽度并按需刷新。
- * @param obj 目标控件对象指针。
- * @param border_w 新的边框宽度（像素）。
- * @return 无。
- */
-void we_btn_set_border_width(we_btn_obj_t *obj, uint8_t border_w);
 
 #endif

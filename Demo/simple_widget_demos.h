@@ -3,15 +3,31 @@
 
 #include "we_gui_driver.h"
 
-/* demo 层统一字体：资源头只在 demo 层包含（Core 无任何资源感知，
- * 控件字体一律经 init 显式传入）；历史别名 we_font_consolas_18
- * 供全部 demo 书写，指向 simli_16_2bpp 字库。 */
-#include "simli_16_2bpp.h"
-#ifndef we_font_consolas_18
-#define we_font_consolas_18 ((const unsigned char *)&simli_16_2bpp)
+/* 小屏 demo 判定：屏宽不超过 128 时，1~33 号 demo 编译各自的 128x64
+ * 参考布局小屏实现（每个 demo_xxx.c 内 #if !WE_DEMO_SMALL_SCREEN 大屏
+ * / #else 小屏，函数名不变）；更大的小屏上内容锚定左上角显示。 */
+#if (SCREEN_WIDTH <= 128)
+#define WE_DEMO_SMALL_SCREEN 1
+#else
+#define WE_DEMO_SMALL_SCREEN 0
 #endif
 
-/* 所有 simple demo 统一按固定 280x240 样式组织：
+/* demo 层统一字体：资源头只在 demo 层包含（Core 无任何资源感知，
+ * 控件字体一律经 init 显式传入）；历史别名 we_font_consolas_18
+ * 供全部 demo 书写——大屏指向 simli_16_2bpp，小屏指向 simsun_12_2bpp
+ * （宋体 12px 命中内嵌点阵，笔画落在像素格上，单色阈值二值化后最完整；
+ * 未引用的那份字库数组由链接器剔除，不占固件体积）。 */
+#include "simli_16_2bpp.h"
+#include "simsun_12_2bpp.h"
+#ifndef we_font_consolas_18
+#if WE_DEMO_SMALL_SCREEN
+#define we_font_consolas_18 ((const unsigned char *)&simsun_12_2bpp)
+#else
+#define we_font_consolas_18 ((const unsigned char *)&simli_16_2bpp)
+#endif
+#endif
+
+/* 所有 simple demo 统一按固定 280x240 样式组织（小屏实现按 128x64）：
  * 1. 先调用对应 init(...) 创建控件并完成固定布局；
  * 2. 再用 we_gui_timer_create(lcd, &节点, 对应 tick, 16U, 1U) 注册周期定时器；
  * 3. 主循环里继续调用 we_gui_tick_inc(...) 和 we_gui_task_handler(...)。 */

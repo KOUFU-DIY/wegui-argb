@@ -29,6 +29,8 @@
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t   f2_title;
 static we_label_obj_t   f2_hint;
 static we_label_obj_t   f2_fps;
@@ -153,6 +155,75 @@ void we_focus2_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
         return;
     we_demo_update_fps(lcd, &f2_fps, &f2_fps_timer, &f2_last_frames, f2_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t   f2_status;
+static we_slider_obj_t  f2_slider;
+static we_stepper_obj_t f2_stepper;
+
+static char f2_status_buf[20];
+
+/**
+ * @brief slider 数值改变回调：刷新状态行
+ */
+static void _f2_slider_changed(void *obj, uint8_t value)
+{
+    (void)obj;
+    snprintf(f2_status_buf, sizeof(f2_status_buf), "SLIDER %u", (unsigned)value);
+    we_label_set_text(&f2_status, f2_status_buf);
+}
+
+/**
+ * @brief stepper 数值改变回调（定点值，1 位小数）
+ */
+static void _f2_stepper_changed(struct we_stepper_obj_t *obj, int32_t value)
+{
+    (void)obj;
+    snprintf(f2_status_buf, sizeof(f2_status_buf), "TEMP %ld.%ld",
+             (long)(value / 10), (long)(value % 10));
+    we_label_set_text(&f2_status, f2_status_buf);
+}
+
+/**
+ * @brief 初始化聚焦编辑态演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @details OK 进入编辑（光标变橙），方向键调值；再按 OK/BACK 退出编辑。
+ */
+void we_focus2_simple_demo_init(we_lcd_t *lcd)
+{
+    memset(f2_status_buf, 0, sizeof(f2_status_buf));
+
+    we_slider_obj_init(&f2_slider, lcd, 4, 4, 90, 18, WE_SLIDER_ORIENT_HOR,
+                       0, 100, 40,
+                       RGB888TODEV(58, 66, 82), RGB888TODEV(92, 181, 255),
+                       RGB888TODEV(255, 255, 255), 255);
+    we_slider_set_changed_cb(&f2_slider, _f2_slider_changed);
+
+    /* 温度 16.0~30.0、步进 0.5、1 位小数 */
+    we_stepper_obj_init(&f2_stepper, lcd, 4, 30, 90, 22, we_font_consolas_18,
+                        1, 160, 300, 5, 230);
+    f2_stepper.changed_cb = _f2_stepper_changed;
+
+    we_label_obj_init(&f2_status, lcd, 4, 54, "OK=edit",
+                      we_font_consolas_18, RGB888TODEV(120, 230, 205), 255);
+
+    /* 初始焦点落在 slider 上，光标立即可见 */
+    we_focus_set(lcd, (we_obj_t *)&f2_slider);
+}
+
+/**
+ * @brief 聚焦编辑态演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_focus2_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */
 
 #else /* WE_CFG_ENABLE_KEY_INPUT == 0：降级桩，提示开启总开关 */
 

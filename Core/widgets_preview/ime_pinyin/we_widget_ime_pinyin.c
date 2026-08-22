@@ -29,21 +29,6 @@ static const char *const _ime_hint_no_cand = "无候选";
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _ime_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
  * @brief 重新派生提示灰字色（文字色向面板底色混合，弱化 5/8）。
  * @param obj 传入：控件对象指针。
  * @return 无。
@@ -591,29 +576,17 @@ static void _ime_pinyin_draw_cb(void *ptr)
         if (_ime_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
             const char *text = we_textarea_get_text((const we_textarea_obj_t *)obj->target);
-            we_area_t old_pfb_area = lcd->pfb_area;
-            uint16_t old_y_start = lcd->pfb_y_start;
-            uint16_t old_y_end = lcd->pfb_y_end;
-            colour_t *old_gram = lcd->pfb_gram;
-            int16_t new_x0 = WE_MAX(old_pfb_area.x0, inner_x);
-            int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-            int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(inner_x + inner_w - 1));
-            int16_t new_y1 = WE_MIN((int16_t)old_y_end,
-                                    (int16_t)(obj->base.y + WE_KEYBOARD_ECHO_H - 1));
+            we_pfb_clip_t sv;
 
-            if (new_x0 <= new_x1 && new_y0 <= new_y1)
+            we_pfb_clip_save(lcd, &sv);
+            if (we_pfb_clip_to(lcd, &sv, inner_x, obj->base.y,
+                               (int16_t)(inner_x + inner_w - 1),
+                               (int16_t)(obj->base.y + WE_KEYBOARD_ECHO_H - 1)))
             {
                 uint16_t line_h = we_font_get_line_height(obj->font);
                 int16_t text_y = (int16_t)(obj->base.y + ((int16_t)WE_KEYBOARD_ECHO_H -
                                                           (int16_t)line_h) / 2);
                 int16_t cursor_x = inner_x;
-
-                lcd->pfb_area.x0 = (uint16_t)new_x0;
-                lcd->pfb_area.x1 = (uint16_t)new_x1;
-                lcd->pfb_y_start = (uint16_t)new_y0;
-                lcd->pfb_y_end = (uint16_t)new_y1;
-                lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                                (new_x0 - (int16_t)old_pfb_area.x0);
 
                 if (text != NULL && text[0] != '\0')
                 {
@@ -630,11 +603,7 @@ static void _ime_pinyin_draw_cb(void *ptr)
                              (uint16_t)(WE_KEYBOARD_ECHO_H - 8), obj->press_color,
                              obj->opacity);
             }
-
-            lcd->pfb_area = old_pfb_area;
-            lcd->pfb_y_start = old_y_start;
-            lcd->pfb_y_end = old_y_end;
-            lcd->pfb_gram = old_gram;
+            we_pfb_clip_restore(lcd, &sv);
         }
     }
 
@@ -867,16 +836,36 @@ static void _ime_class_draw_cb(void *ptr)
     _ime_pinyin_draw_cb(ptr);
 }
 
+/**
+ * @brief 删除回调：拆自家资源——停滑动动画节点、删除内嵌键盘。
+ * @param ptr 控件对象指针。
+ * @return 无。
+ * @note 内嵌 kb 是本控件的成员资源（普通模式下作为独立对象挂在 LCD
+ *       根链上），必须在此摘除——否则经 we_obj_delete 基类入口删除面板
+ *       会留下继续绘制并吞噬触摸的键盘。delete_cb 执行时内核尚未开始
+ *       摘链遍历，删除成员对象安全（"不得删兄弟"针对的是父容器
+ *       子链遍历持有 next 的场景）。
+ */
+static void _ime_pinyin_delete_cb(void *ptr)
+{
+    we_ime_pinyin_obj_t *obj = (we_ime_pinyin_obj_t *)ptr;
+
+    if (obj->base.lcd != NULL)
+        we_anim_stop(obj->base.lcd, &obj->anim);
+    we_keyboard_obj_delete(&obj->kb);
+}
+
 static const we_class_t _ime_pinyin_class = {
     .draw_cb = _ime_class_draw_cb,
     .event_cb = _ime_pinyin_event_cb,
-    .set_pos_cb = NULL /* preview 限制：不支持移动（内嵌键盘坐标不跟随） */
+    .set_pos_cb = NULL, /* preview 限制：不支持移动（内嵌键盘坐标不跟随） */
+    .delete_cb = _ime_pinyin_delete_cb
 };
 
 /* --------------------------------------------------------------------------
  * 弹层模式：滑入/收回状态机 + 弹层回调（keyboard 弹层同款结构）
  *
- * 面板与内嵌键盘都不挂普通对象链表，由 LCD 弹层统一承载：弹层 draw
+ * 面板与内嵌键盘都不挂普通对象链表，由 LCD 顶层链 + 模态统一承载：弹层 draw
  * 依次画回显条/拼音条/候选栏（面板 draw_cb）与内嵌键盘（经类分发），
  * 弹层 event 按"本次触摸按下的区域"路由到键盘或面板的事件机。
  * -------------------------------------------------------------------------- */
@@ -907,7 +896,7 @@ static void _ime_slide_apply(we_ime_pinyin_obj_t *obj)
 }
 
 /**
- * @brief 滑动动画步进：推进 Q8 进度并落位；滑出到底释放弹层。
+ * @brief 滑动动画步进：推进 Q8 进度并落位；滑出到底解除模态并摘离顶层链。
  * @param owner 传入：控件对象指针（we_anim_t.owner 透传）。
  * @param elapsed_ms 传入：本次步进经过的毫秒数。
  * @return 无。
@@ -1256,7 +1245,7 @@ void we_ime_pinyin_popup_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 弹出拼音输入法：占用 LCD 弹层并从屏底滑入。
+ * @brief 弹出拼音输入法：挂 LCD 顶层链、声明模态，并从屏底滑入。
  * @param obj 控件对象指针（须为 popup_init 创建）。
  * @param target_textarea 绑定的目标输入框（we_textarea_obj_t*，可 NULL）。
  * @return 无。
@@ -1293,7 +1282,7 @@ void we_ime_pinyin_popup_show(we_ime_pinyin_obj_t *obj, void *target_textarea)
 }
 
 /**
- * @brief 收回拼音输入法：滑出到屏外后释放 LCD 弹层。
+ * @brief 收回拼音输入法：滑出到屏外后解除模态并摘离顶层链。
  * @param obj 控件对象指针。
  * @return 无。
  */
@@ -1458,10 +1447,10 @@ void we_ime_pinyin_set_colors(we_ime_pinyin_obj_t *obj, colour_t bg,
 {
     if (obj == NULL)
         return;
-    if (_ime_colour_eq(obj->bg_color, bg) &&
-        _ime_colour_eq(obj->buf_color, buf_bg) &&
-        _ime_colour_eq(obj->text_color, text) &&
-        _ime_colour_eq(obj->press_color, press))
+    if (we_colour_eq(obj->bg_color, bg) &&
+        we_colour_eq(obj->buf_color, buf_bg) &&
+        we_colour_eq(obj->text_color, text) &&
+        we_colour_eq(obj->press_color, press))
         return;
 
     obj->bg_color = bg;
@@ -1491,7 +1480,7 @@ void we_ime_pinyin_set_opacity(we_ime_pinyin_obj_t *obj, uint8_t opacity)
 }
 
 /**
- * @brief 删除控件：弹层模式先收弹层摘滑动节点，再删内嵌键盘与面板本体。
+ * @brief 删除控件（薄壳）：内嵌键盘与动画节点由类 delete_cb 统一拆除。
  * @param obj 控件对象指针。
  * @return 无。
  */
@@ -1499,10 +1488,5 @@ void we_ime_pinyin_obj_delete(we_ime_pinyin_obj_t *obj)
 {
     if (obj == NULL)
         return;
-
-    if (obj->base.lcd != NULL)
-        we_anim_stop(obj->base.lcd, &obj->anim);
-    we_keyboard_obj_delete(&obj->kb);
-    /* 弹层态的模态引用与顶层摘链由 we_obj_delete 的内核回收统一完成 */
     we_obj_delete((we_obj_t *)obj);
 }

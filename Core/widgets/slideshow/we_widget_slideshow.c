@@ -383,27 +383,17 @@ static void _slideshow_draw_cb(void *ptr)
                                      0U, obj->group.bg_color, obj->group.opacity);
 
     {
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
         uint8_t old_scale = lcd->opa_scale;
 
         /* 子控件透明度级联（嵌套自动链乘） */
         lcd->opa_scale = we_opa_apply(lcd, obj->group.opacity);
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->group.base.x);
-        int16_t new_y0 = WE_MAX(old_y_start, obj->group.base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, obj->group.base.x + obj->group.base.w - 1);
-        int16_t new_y1 = WE_MIN(old_y_end, obj->group.base.y + obj->group.base.h - 1);
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->group.base.x, obj->group.base.y,
+                           (int16_t)(obj->group.base.x + obj->group.base.w - 1),
+                           (int16_t)(obj->group.base.y + obj->group.base.h - 1)))
         {
             we_obj_t *child = obj->group.children_head;
-            lcd->pfb_area.x0 = new_x0;
-            lcd->pfb_area.x1 = new_x1;
-            lcd->pfb_y_start = new_y0;
-            lcd->pfb_y_end = new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - old_y_start) * lcd->pfb_width + (new_x0 - old_pfb_area.x0);
 
             while (child != NULL)
             {
@@ -414,10 +404,7 @@ static void _slideshow_draw_cb(void *ptr)
         }
 
         lcd->opa_scale = old_scale;
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 

@@ -12,7 +12,7 @@
 
 #include "we_widget_joystick.h"
 #include "we_render.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -37,21 +37,6 @@ static const colour_t _js_white = RGB888_CONST(255, 255, 255);
 /* --------------------------------------------------------------------------
  * 内部工具
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _js_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
 
 /**
  * @brief 整数平方根（向下取整），触点越界缩放求模长专用。
@@ -420,9 +405,9 @@ void we_joystick_set_colors(we_joystick_obj_t *obj, colour_t base_color,
 {
     if (obj == NULL)
         return;
-    if (_js_col_eq(obj->base_color, base_color) &&
-        _js_col_eq(obj->knob_color, knob_color) &&
-        _js_col_eq(obj->cross_color, cross_color))
+    if (we_colour_eq(obj->base_color, base_color) &&
+        we_colour_eq(obj->knob_color, knob_color) &&
+        we_colour_eq(obj->cross_color, cross_color))
         return;
 
     obj->base_color  = base_color;

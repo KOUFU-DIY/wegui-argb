@@ -18,21 +18,6 @@
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色值是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static uint8_t _qrcode_color_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#else
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 计算指定矩阵边长对应的控件像素边长（含两侧静区）。
  * @param obj 传入：控件对象指针。
  * @param modules 传入：矩阵边长（模块数）。
@@ -281,8 +266,8 @@ void we_qrcode_set_colors(we_qrcode_obj_t *obj, colour_t dark, colour_t light)
 {
     if (obj == NULL)
         return;
-    if (_qrcode_color_eq(obj->dark_color, dark) &&
-        _qrcode_color_eq(obj->light_color, light))
+    if (we_colour_eq(obj->dark_color, dark) &&
+        we_colour_eq(obj->light_color, light))
         return;
 
     obj->dark_color = dark;

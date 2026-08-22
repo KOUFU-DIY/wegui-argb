@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t concentric_arc_title;
 static we_label_obj_t concentric_arc_note;
 static we_label_obj_t concentric_arc_fps;
@@ -121,3 +123,88 @@ void we_concentric_arc_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
                        &concentric_arc_fps_timer, &concentric_arc_last_frames,
                        concentric_arc_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t concentric_arc_title;
+static we_label_obj_t concentric_arc_stat;
+static we_arc_obj_t   concentric_arc_outer;
+static we_arc_obj_t   concentric_arc_mid;
+static we_arc_obj_t   concentric_arc_inner;
+
+static uint32_t concentric_arc_ticks_ms;
+static char     concentric_arc_stat_buf[16];
+
+/**
+ * @brief 将正弦相位值映射到 0~255 区间
+ * @param angle 512 步进角度值
+ * @return 映射后的 8 位值
+ */
+static uint8_t _sin_to_u8(int16_t angle)
+{
+    return (uint8_t)(((uint32_t)(we_sin(angle) + 32768)) >> 8);
+}
+
+/**
+ * @brief 初始化同心圆弧演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_concentric_arc_simple_demo_init(we_lcd_t *lcd)
+{
+    concentric_arc_ticks_ms = 0U;
+    memset(concentric_arc_stat_buf, 0, sizeof(concentric_arc_stat_buf));
+
+    we_label_obj_init(&concentric_arc_title, lcd, 2, 2,
+                      "3-ARC", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+    we_label_obj_init(&concentric_arc_stat, lcd, 2, 50,
+                      "O 000 I 000", we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    /* 三环共心居右，左侧留给文字 */
+    we_arc_obj_init(&concentric_arc_outer, lcd, 92, 32,
+                    28, 6,
+                    WE_DEG(135), WE_DEG(405),
+                    RGB888TODEV(255, 154, 102), RGB888TODEV(46, 58, 72), 128);
+    we_arc_obj_init(&concentric_arc_mid, lcd, 92, 32,
+                    19, 5,
+                    WE_DEG(135), WE_DEG(405),
+                    RGB888TODEV(120, 230, 205), RGB888TODEV(40, 52, 64), 180);
+    we_arc_obj_init(&concentric_arc_inner, lcd, 92, 32,
+                    11, 4,
+                    WE_DEG(135), WE_DEG(405),
+                    RGB888TODEV(196, 170, 255), RGB888TODEV(36, 44, 58), 180);
+}
+
+/**
+ * @brief 同心圆弧演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_concentric_arc_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t outer_value;
+    uint8_t mid_value;
+    uint8_t inner_value;
+    int16_t t;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    concentric_arc_ticks_ms += ms_tick;
+    t = (int16_t)((concentric_arc_ticks_ms * 5U / 100U) & 0x1FFU);
+
+    outer_value = _sin_to_u8(t);
+    mid_value   = _sin_to_u8((int16_t)((t + 128) & 0x1FF));
+    inner_value = _sin_to_u8((int16_t)((t + 256) & 0x1FF));
+
+    we_arc_set_value(&concentric_arc_outer, outer_value);
+    we_arc_set_value(&concentric_arc_mid, mid_value);
+    we_arc_set_value(&concentric_arc_inner, inner_value);
+
+    sprintf(concentric_arc_stat_buf, "O %03u I %03u",
+            (unsigned)outer_value, (unsigned)inner_value);
+    we_label_set_text(&concentric_arc_stat, concentric_arc_stat_buf);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

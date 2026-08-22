@@ -54,4 +54,4 @@ N 根竖直电平频谱柱 + 可选峰值保持帽。调用方周期 `we_spectru
 - 柱体上冲可选短平滑（当前瞬时取 max，硬上冲），电平剧烈跳变时略生硬
 
 ## 对应 demo
-- `Demo/preview/demo_spectrum.c`（DEMO_ID 118：24 柱假音频包络，LCG 伪随机 + we_sin 合成，每 50ms push 一帧）
+- `Demo/preview/demo_spectrum.c`（DEMO_ID 104：24 柱假音频包络，LCG 伪随机 + we_sin 合成，每 50ms push 一帧）

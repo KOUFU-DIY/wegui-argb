@@ -11,6 +11,7 @@
  *   wegui_lite_dev [demo_id] --autotest N [--out f] [--script s.evt]
  *                                             headless 基准哈希回归（SimLite/autotest.ps1 驱动）
  *   wegui_lite_dev --list                     列出全部可用 demo
+ *   wegui_lite_dev --cfg                      输出配置指纹（autotest.ps1 选基准文件用）
  *
  * 构建：build_lite.ps1 -Dev [-Run -Demo N]   /   build_lite.sh --dev
  */
@@ -56,6 +57,11 @@ int main(int argc, char *argv[])
                 printf("%3d  %s\n", t[k].id, t[k].name);
             return 0;
         }
+        if (strcmp(argv[i], "--cfg") == 0)
+        {
+            printf("%s\n", lite_autotest_cfg_fingerprint());
+            return 0;
+        }
         if (strcmp(argv[i], "--shot") == 0 && i + 2 < argc)
         {
             shot_frames = strtol(argv[i + 1], NULL, 10);
@@ -79,8 +85,13 @@ int main(int argc, char *argv[])
     input_hw_init();
     storage_hw_init();
 
-    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lcd_set_addr, LCD_FLUSH_PORT,
+#if (LCD_DEEP == DEEP_GRAY8)
+    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_gray8_port,
                 we_input_port_read, we_storage_port_read);
+#else
+    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_rgb565_port,
+                we_input_port_read, we_storage_port_read);
+#endif
 
     entry = sim_demo_find(demo_id);
     if (entry == NULL)

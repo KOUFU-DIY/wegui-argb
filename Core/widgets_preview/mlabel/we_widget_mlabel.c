@@ -15,6 +15,7 @@
  */
 
 #include "we_widget_mlabel.h"
+#include "we_render.h" /* PFB 裁剪三件套 */
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -229,21 +230,6 @@ static uint32_t _mlabel_prefix_fit(const we_mlabel_obj_t *obj, const char *start
     return bytes;
 }
 
-/**
- * @brief 颜色相等比较（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _mlabel_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
 /* --------------------------------------------------------------------------
  * 绘制 / 事件
  * -------------------------------------------------------------------------- */
@@ -271,17 +257,12 @@ static void _mlabel_draw_cb(void *ptr)
 
     {
         /* marquee/group 同款 PFB 窗口收窄：窗口外的字形像素被自动裁掉 */
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
 
-        int16_t new_x0 = WE_MAX((int16_t)old_pfb_area.x0, obj->base.x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN((int16_t)old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             int16_t line_adv = (int16_t)(font_lh + obj->line_gap);
             int16_t y_end    = (int16_t)(obj->base.y + obj->base.h);
@@ -289,13 +270,6 @@ static void _mlabel_draw_cb(void *ptr)
             const char *p    = obj->text;
             char buf[WE_MLABEL_LINE_BUF];
             int32_t ell_w;
-
-            lcd->pfb_area.x0 = (uint16_t)new_x0;
-            lcd->pfb_area.x1 = (uint16_t)new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end   = (uint16_t)new_y1;
-            lcd->pfb_gram    = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                               (new_x0 - (int16_t)old_pfb_area.x0);
 
             ell_w = 3 * (int32_t)_mlabel_adv_w(obj->font, (uint16_t)'.');
 
@@ -351,10 +325,7 @@ static void _mlabel_draw_cb(void *ptr)
             }
         }
 
-        lcd->pfb_area  = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram  = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 
@@ -425,7 +396,7 @@ void we_mlabel_set_color(we_mlabel_obj_t *obj, colour_t color)
 {
     if (obj == NULL)
         return;
-    if (_mlabel_col_eq(obj->color, color))
+    if (we_colour_eq(obj->color, color))
         return;
 
     obj->color = color;

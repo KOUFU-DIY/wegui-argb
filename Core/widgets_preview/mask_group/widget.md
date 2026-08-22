@@ -48,4 +48,4 @@
 - 无动画节点，删除前不需要 we_anim_stop
 
 ## 对应 demo
-- `Demo/preview/demo_mask_group.c`（DEMO_ID 121：左侧四角混合样式 + 边框 + 滑动文字裁剪，右侧切角/圆角对角混搭 + 细边框 + 旋转渐变色块矩阵）
+- `Demo/preview/demo_mask_group.c`（DEMO_ID 125：左侧四角混合样式 + 边框 + 滑动文字裁剪，右侧切角/圆角对角混搭 + 细边框 + 旋转渐变色块矩阵）

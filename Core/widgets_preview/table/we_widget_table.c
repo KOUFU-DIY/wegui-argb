@@ -1,5 +1,5 @@
 #include "we_widget_table.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 /* 滚动物理参数：无惯性无过冲档（overscroll=0 时组件即硬跟手；
  * 惯性/回弹参数占位不使用——RELEASED 不启动动画） */
@@ -19,104 +19,10 @@ static const we_scroll_cfg_t _table_scroll_cfg = {
  * 超宽文本在列边界处被硬裁剪，不会溢出到相邻列。
  * -------------------------------------------------------------------------- */
 
-/* PFB 收窄现场保存（save/restore 套路，参考 list/scroll_panel） */
-typedef struct
-{
-    we_area_t area;
-    uint16_t y_start;
-    uint16_t y_end;
-    colour_t *gram;
-} _table_pfb_save_t;
-
 /* --------------------------------------------------------------------------
  * 内部辅助
  * -------------------------------------------------------------------------- */
 
-/**
- * @brief 比较两个颜色是否相等（按当前色深比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _tbl_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _tbl_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
-/**
- * @brief 保存当前 PFB 裁剪现场。
- * @param lcd 传入：GUI 屏幕上下文指针。
- * @param sv 传出：现场保存结构。
- * @return 无。
- */
-static void _table_pfb_save(const we_lcd_t *lcd, _table_pfb_save_t *sv)
-{
-    sv->area = lcd->pfb_area;
-    sv->y_start = lcd->pfb_y_start;
-    sv->y_end = lcd->pfb_y_end;
-    sv->gram = lcd->pfb_gram;
-}
-
-/**
- * @brief 恢复 PFB 裁剪现场。
- * @param lcd 传入：GUI 屏幕上下文指针。
- * @param sv 传入：之前保存的现场。
- * @return 无。
- */
-static void _table_pfb_restore(we_lcd_t *lcd, const _table_pfb_save_t *sv)
-{
-    lcd->pfb_area = sv->area;
-    lcd->pfb_y_start = sv->y_start;
-    lcd->pfb_y_end = sv->y_end;
-    lcd->pfb_gram = sv->gram;
-}
-
-/**
- * @brief 从"原始现场"出发把 PFB 窗口收窄到指定矩形（非嵌套，可反复调用）。
- * @param lcd 传入：GUI 屏幕上下文指针。
- * @param sv 传入：原始现场（收窄基准，始终相对它计算）。
- * @param x0 传入：目标矩形左缘（屏幕绝对坐标）。
- * @param y0 传入：目标矩形上缘。
- * @param x1 传入：目标矩形右缘（含）。
- * @param y1 传入：目标矩形下缘（含）。
- * @return 1 收窄后窗口非空，0 无交集（本次不必绘制）。
- */
-static uint8_t _table_clip_to(we_lcd_t *lcd, const _table_pfb_save_t *sv,
-                              int16_t x0, int16_t y0, int16_t x1, int16_t y1)
-{
-    int16_t cx0 = WE_MAX((int16_t)sv->area.x0, x0);
-    int16_t cy0 = WE_MAX((int16_t)sv->y_start, y0);
-    int16_t cx1 = WE_MIN((int16_t)sv->area.x1, x1);
-    int16_t cy1 = WE_MIN((int16_t)sv->y_end, y1);
-
-    if (cx0 > cx1 || cy0 > cy1)
-        return 0U;
-
-    lcd->pfb_area.x0 = (uint16_t)cx0;
-    lcd->pfb_area.x1 = (uint16_t)cx1;
-    lcd->pfb_y_start = (uint16_t)cy0;
-    lcd->pfb_y_end = (uint16_t)cy1;
-    lcd->pfb_gram = sv->gram + (int32_t)(cy0 - (int16_t)sv->y_start) * lcd->pfb_width +
-                    (cx0 - (int16_t)sv->area.x0);
-    return 1U;
-}
 
 /**
  * @brief 数据行区高度（控件高减去表头行，最小 0）。
@@ -272,7 +178,7 @@ static void _table_draw_scrollbar(we_table_obj_t *obj)
     we_draw_round_rect_analytic_fill(obj->base.lcd, track_x, thumb_y,
                                      (uint16_t)WE_TABLE_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_TABLE_SB_WIDTH / 2), obj->sb_color,
-                                     _tbl_scale_opa(WE_TABLE_SB_OPA, obj->opacity));
+                                     we_opa_scale(WE_TABLE_SB_OPA, obj->opacity));
 }
 
 /* --------------------------------------------------------------------------
@@ -291,7 +197,7 @@ static void _table_draw_cb(void *ptr)
 {
     we_table_obj_t *obj = (we_table_obj_t *)ptr;
     we_lcd_t *lcd;
-    _table_pfb_save_t sv;
+    we_pfb_clip_t sv;
     int16_t x0;
     int16_t y0;
     int16_t x1;
@@ -324,7 +230,7 @@ static void _table_draw_cb(void *ptr)
     we_fill_rect(lcd, x0, y0, (uint16_t)obj->base.w, (uint16_t)hdr_h,
                  obj->head_bg_color, obj->opacity);
 
-    _table_pfb_save(lcd, &sv);
+    we_pfb_clip_save(lcd, &sv);
 
     /* 2. 表头单元格文本（第 0 行，逐列收窄裁剪） */
     if (obj->cells != NULL && obj->row_cnt > 0U)
@@ -334,12 +240,12 @@ static void _table_draw_cb(void *ptr)
             int16_t cell_x = (int16_t)(x0 + obj->col_edge[c]);
             int16_t cell_x1 = (int16_t)(x0 + obj->col_edge[c + 1U] - 2);
 
-            if (!_table_clip_to(lcd, &sv, cell_x, y0, cell_x1, (int16_t)(y0 + hdr_h - 1)))
+            if (!we_pfb_clip_to(lcd, &sv, cell_x, y0, cell_x1, (int16_t)(y0 + hdr_h - 1)))
                 continue;
             _table_draw_cell_text(obj, _table_cell_text(obj, 0U, c),
                                   cell_x, y0, obj->head_text_color);
         }
-        _table_pfb_restore(lcd, &sv);
+        we_pfb_clip_restore(lcd, &sv);
     }
 
     /* 3. 数据行区（表头以下，滚动内容） */
@@ -349,7 +255,7 @@ static void _table_draw_cb(void *ptr)
         top_ofs = obj->scroll_px % rh; /* 首行被裁掉的顶部像素 */
 
         /* 3a. 斑马纹 + 行底 1px 分隔横线（数据区整宽收窄） */
-        if (_table_clip_to(lcd, &sv, x0, data_y0, x1, y1))
+        if (we_pfb_clip_to(lcd, &sv, x0, data_y0, x1, y1))
         {
             int16_t iy = (int16_t)(data_y0 - (int16_t)top_ofs);
             int32_t ri;
@@ -365,7 +271,7 @@ static void _table_draw_cb(void *ptr)
                 {
                     we_fill_rect(lcd, x0, (int16_t)(iy + rh - 1),
                                  (uint16_t)obj->base.w, 1U, obj->grid_color,
-                                 _tbl_scale_opa(WE_TABLE_GRID_OPA, obj->opacity));
+                                 we_opa_scale(WE_TABLE_GRID_OPA, obj->opacity));
                 }
             }
         }
@@ -378,7 +284,7 @@ static void _table_draw_cb(void *ptr)
             int16_t iy;
             int32_t ri;
 
-            if (!_table_clip_to(lcd, &sv, cell_x, data_y0, cell_x1, y1))
+            if (!we_pfb_clip_to(lcd, &sv, cell_x, data_y0, cell_x1, y1))
                 continue;
 
             iy = (int16_t)(data_y0 - (int16_t)top_ofs);
@@ -388,17 +294,17 @@ static void _table_draw_cb(void *ptr)
                                       cell_x, iy, obj->cell_text_color);
             }
         }
-        _table_pfb_restore(lcd, &sv);
+        we_pfb_clip_restore(lcd, &sv);
     }
 
     /* 4. 网格竖线（整控件高）+ 表头下沿线（稍强分隔） */
     for (c = 1U; c < obj->col_cnt; c++)
     {
         we_fill_rect(lcd, (int16_t)(x0 + obj->col_edge[c]), y0, 1U, (uint16_t)obj->base.h,
-                     obj->grid_color, _tbl_scale_opa(WE_TABLE_GRID_OPA, obj->opacity));
+                     obj->grid_color, we_opa_scale(WE_TABLE_GRID_OPA, obj->opacity));
     }
     we_fill_rect(lcd, x0, (int16_t)(y0 + hdr_h - 1), (uint16_t)obj->base.w, 1U,
-                 obj->grid_color, _tbl_scale_opa(120U, obj->opacity));
+                 obj->grid_color, we_opa_scale(120U, obj->opacity));
 
     /* 5. 内容超高时叠加右缘常显滚动条 */
     _table_draw_scrollbar(obj);
@@ -677,11 +583,11 @@ void we_table_set_colors(we_table_obj_t *obj, colour_t head_bg, colour_t head_te
 {
     if (obj == NULL)
         return;
-    if (_tbl_colour_eq(obj->head_bg_color, head_bg) &&
-        _tbl_colour_eq(obj->head_text_color, head_text) &&
-        _tbl_colour_eq(obj->cell_text_color, cell_text) &&
-        _tbl_colour_eq(obj->grid_color, grid) &&
-        _tbl_colour_eq(obj->zebra_color, zebra))
+    if (we_colour_eq(obj->head_bg_color, head_bg) &&
+        we_colour_eq(obj->head_text_color, head_text) &&
+        we_colour_eq(obj->cell_text_color, cell_text) &&
+        we_colour_eq(obj->grid_color, grid) &&
+        we_colour_eq(obj->zebra_color, zebra))
         return;
 
     obj->head_bg_color = head_bg;

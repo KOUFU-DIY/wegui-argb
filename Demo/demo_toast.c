@@ -19,6 +19,8 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t ts_title;
 static we_label_obj_t ts_note;
 static we_label_obj_t ts_fps;
@@ -130,3 +132,95 @@ void we_toast_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ts_fps, &ts_fps_timer,
                        &ts_last_frames, ts_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t ts_title;
+static we_btn_obj_t   ts_btn;
+static we_toast_obj_t ts_toast;
+
+static uint32_t ts_acc;
+static uint8_t  ts_idx;
+
+#define TS_PERIOD   2200U
+#define TS_DURATION 1200U
+
+/* 轮换文案（静态持有）与配套底色；最后一条超宽演示尾部截断加 "..." */
+static const char *const ts_msg[3] = {
+    "Saved OK",
+    "Wi-Fi lost",
+    "Firmware 2.4.1 downloaded, restart to apply",
+};
+static const uint8_t ts_bg[3][3] = {
+    {  46, 140,  90 },   /* 绿：成功 */
+    { 190,  70,  64 },   /* 红：告警 */
+    { 168, 120,  36 },   /* 琥珀：长文本省略号演示 */
+};
+
+/**
+ * @brief 按钮回调：点击立即弹出一条紫色 toast（演示动画中重复 show）
+ * @param obj 传入：按钮对象指针（未使用）
+ * @param event 传入：输入事件类型
+ * @param data 传入：输入设备数据指针（未使用）
+ * @return 1 表示已消费
+ */
+static uint8_t _ts_btn_event_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    (void)obj;
+    (void)data;
+
+    if (event == WE_EVENT_CLICKED)
+    {
+        we_toast_set_colors(&ts_toast,
+                            RGB888TODEV(120, 86, 200), RGB888TODEV(244, 240, 255));
+        we_toast_show(&ts_toast, "Instant show()", 1500U);
+    }
+    return 1U;
+}
+
+/**
+ * @brief 初始化 toast demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_toast_simple_demo_init(we_lcd_t *lcd)
+{
+    /* 计时器预置到只差 200ms：首条 toast 在启动约 200ms 后即弹出 */
+    ts_acc = (uint32_t)(TS_PERIOD - 200U);
+    ts_idx = 0U;
+
+    /* 顶部让给 toast 停靠区，常驻文字放下半屏 */
+    we_label_obj_init(&ts_title, lcd, 2, 30,
+                      "TOAST", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
+
+    we_btn_obj_init(&ts_btn, lcd, 60, 40, 64, 22,
+                    "SHOW", we_font_consolas_18, _ts_btn_event_cb);
+
+    /* toast 最后初始化：初始隐藏，show 时还会再 bring_to_front 置顶 */
+    we_toast_obj_init(&ts_toast, lcd, we_font_consolas_18);
+}
+
+/**
+ * @brief toast demo 周期更新（128x64 布局）：定时轮换弹出
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_toast_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    ts_acc += ms_tick;
+    if (ts_acc >= TS_PERIOD)
+    {
+        ts_acc = 0U;
+        we_toast_set_colors(&ts_toast,
+                            RGB888TODEV(ts_bg[ts_idx][0], ts_bg[ts_idx][1], ts_bg[ts_idx][2]),
+                            RGB888TODEV(240, 244, 250));
+        we_toast_show(&ts_toast, ts_msg[ts_idx], TS_DURATION);
+        ts_idx = (uint8_t)((ts_idx + 1U) % 3U);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

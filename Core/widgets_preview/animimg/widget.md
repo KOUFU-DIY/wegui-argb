@@ -48,7 +48,7 @@
   跳帧策略可配置
 
 ## 对应 demo
-- `Demo/preview/demo_animimg.c`（DEMO_ID 111）：init 时纯整数代码生成
+- `Demo/preview/demo_animimg.c`（DEMO_ID 121）：init 时纯整数代码生成
   4 帧 48×48 图案（渐变背景 + 四角轮转亮点，static 静态帧缓冲），
   左侧实例 120ms 持续循环，右侧实例 60ms 且每 2s 自动 start/stop 切换
   （状态 label 同步显示 RUN/STOP）

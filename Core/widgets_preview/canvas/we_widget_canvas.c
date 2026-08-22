@@ -9,6 +9,7 @@
  */
 
 #include "we_widget_canvas.h"
+#include "we_render.h" /* PFB 裁剪三件套 */
 
 /* --------------------------------------------------------------------------
  * 内部回调
@@ -29,37 +30,22 @@ static void _canvas_draw_cb(void *ptr)
 
     {
         /* group 同款 PFB 窗口收窄：用户回调里的原语越界自动被裁掉 */
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
         uint8_t old_scale = lcd->opa_scale;
 
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             /* 控件整体透明度乘入级联乘子：用户回调内原语按各自 opacity 传参即可 */
             lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
-
-            lcd->pfb_area.x0 = (uint16_t)new_x0;
-            lcd->pfb_area.x1 = (uint16_t)new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end = (uint16_t)new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                            (new_x0 - (int16_t)old_pfb_area.x0);
 
             obj->user_draw_cb(lcd, obj, obj->user_data);
         }
 
         lcd->opa_scale = old_scale;
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 

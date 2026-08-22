@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t ls_title;
 static we_label_obj_t ls_fps_label;
 static we_label_obj_t ls_sel_label;   /* 顶部点击回显 */
@@ -108,3 +110,74 @@ void we_list_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ls_fps_label, &ls_fps_timer,
                        &ls_last_frames, ls_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t ls_sel_label;   /* 顶部点击回显 */
+static we_list_obj_t ls_menu;
+
+static char ls_sel_buf[16];
+
+/* 10 项设置菜单（调用方持有的静态数组，控件只存指针） */
+static const char *const ls_items[] = {
+    "Display",
+    "Sound",
+    "Network",
+    "Bluetooth",
+    "Battery",
+    "Storage",
+    "Security",
+    "Language",
+    "Date & Time",
+    "About",
+};
+
+/**
+ * @brief 行点击回调：把被点行的名称回显到顶部 label。
+ * @param list 传入：列表控件对象指针（透传，本 demo 未使用）
+ * @param idx 传入：被点击行的条目索引
+ * @return 无
+ */
+static void ls_on_clicked(void *list, uint16_t idx)
+{
+    (void)list;
+    if (idx >= 10U)
+        return;
+    sprintf(ls_sel_buf, "> %s", ls_items[idx]);
+    we_label_set_text(&ls_sel_label, ls_sel_buf);
+}
+
+/**
+ * @brief 初始化 list demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_list_simple_demo_init(we_lcd_t *lcd)
+{
+    memset(ls_sel_buf, 0, sizeof(ls_sel_buf));
+
+    sprintf(ls_sel_buf, "> tap item");
+    we_label_obj_init(&ls_sel_label, lcd, 2, 1,
+                      ls_sel_buf, we_font_consolas_18,
+                      RGB888TODEV(112, 184, 255), 255);
+
+    /* 列表面板占主体：10 项超出 48px 高度，拖拽/惯性/回弹/滚动条全可体验 */
+    we_list_obj_init(&ls_menu, lcd, 0, 16, 128, 48,
+                     we_font_consolas_18);
+    we_list_set_options(&ls_menu, ls_items, (uint16_t)(sizeof(ls_items) / sizeof(ls_items[0])));
+    we_list_set_clicked_cb(&ls_menu, ls_on_clicked);
+}
+
+/**
+ * @brief list demo 周期更新（列表交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_list_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

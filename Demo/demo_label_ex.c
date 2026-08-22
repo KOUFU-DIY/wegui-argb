@@ -13,6 +13,8 @@
 #include "demo_common.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t    label_ex_title;
 static we_label_obj_t    label_ex_note;
 static we_label_obj_t    label_ex_fps;
@@ -97,3 +99,63 @@ void we_label_ex_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &label_ex_fps, &label_ex_fps_timer,
                        &label_ex_last_frames, label_ex_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t    label_ex_title;
+static we_label_ex_obj_t label_ex_a;
+static we_label_ex_obj_t label_ex_c;
+
+static uint32_t label_ex_ticks_ms;
+
+/**
+ * @brief 初始化高级文字控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_label_ex_simple_demo_init(we_lcd_t *lcd)
+{
+    label_ex_ticks_ms = 0U;
+
+    we_label_obj_init(&label_ex_title, lcd, 2, 2,
+                      "LABEL_EX", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* 左慢转、右快转 + 缩放呼吸 */
+    we_label_ex_obj_init(&label_ex_a, lcd,
+                         38, 40,
+                         "WeGui", we_font_consolas_18,
+                         RGB888TODEV(255, 214, 120), 255);
+
+    we_label_ex_obj_init(&label_ex_c, lcd,
+                         94, 40,
+                         "ROT", we_font_consolas_18,
+                         RGB888TODEV(255, 140, 80), 255);
+}
+
+/**
+ * @brief 高级文字演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_label_ex_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int16_t  angle_a;
+    int16_t  angle_c;
+    uint16_t scale_c;
+    uint32_t t;
+
+    if (!lcd || ms_tick == 0U)
+        return;
+
+    label_ex_ticks_ms += ms_tick;
+    t = label_ex_ticks_ms;
+
+    angle_a = (int16_t)((t / 4000U * 512U + (t % 4000U) * 512U / 4000U) & 0x1FFU);
+    angle_c = (int16_t)((t / 1500U * 512U + (t % 1500U) * 512U / 1500U) & 0x1FFU);
+    scale_c = (uint16_t)(256U + (uint32_t)((we_sin((int16_t)((t * 3U / 100U) & 0x1FFU)) * 64) >> 15));
+
+    we_label_ex_set_transform(&label_ex_a, angle_a, 256U);
+    we_label_ex_set_transform(&label_ex_c, angle_c, scale_c);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

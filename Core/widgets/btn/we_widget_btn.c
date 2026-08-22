@@ -3,41 +3,36 @@
 #include "we_render.h"
 
 #if !WE_BTN_USE_CUSTOM_STYLE
+/* 默认配色以 RGB565 手写表为准；RGB888/其它色深表由 565 值按位复制
+ * 展开（888→565 截断可精确还原），三张表跨色深呈现同一配色。 */
 static const we_btn_style_t _built_in_styles[WE_BTN_STATE_MAX] = {
 #if (LCD_DEEP == DEEP_RGB565)
     [WE_BTN_STATE_NORMAL] = {.bg_color = {.dat16 = 0x39AA},
-                             .border_color = {.dat16 = 0x39AA},
-                             .text_color = {.dat16 = 0xEF7D},
-                             .border_w = 0},
+                             .text_color = {.dat16 = 0xEF7D}},
     [WE_BTN_STATE_SELECTED] = {.bg_color = {.dat16 = 0x5D9F},
-                               .border_color = {.dat16 = 0x5D9F},
-                               .text_color = {.dat16 = 0xFFBF},
-                               .border_w = 0},
+                               .text_color = {.dat16 = 0xFFBF}},
     [WE_BTN_STATE_PRESSED] = {.bg_color = {.dat16 = 0x44DB},
-                              .border_color = {.dat16 = 0x44DB},
-                              .text_color = {.dat16 = 0xF77E},
-                              .border_w = 0},
+                              .text_color = {.dat16 = 0xF77E}},
     [WE_BTN_STATE_DISABLED] = {.bg_color = {.dat16 = 0x4A69},
-                               .border_color = {.dat16 = 0x4A69},
-                               .text_color = {.dat16 = 0x9CD3},
-                               .border_w = 0},
+                               .text_color = {.dat16 = 0x9CD3}},
 #elif (LCD_DEEP == DEEP_RGB888)
-    [WE_BTN_STATE_NORMAL] = {.bg_color = {.rgb = {58, 66, 82}},
-                             .border_color = {.rgb = {58, 66, 82}},
-                             .text_color = {.rgb = {239, 243, 250}},
-                             .border_w = 0},
-    [WE_BTN_STATE_SELECTED] = {.bg_color = {.rgb = {92, 181, 255}},
-                               .border_color = {.rgb = {92, 181, 255}},
-                               .text_color = {.rgb = {255, 255, 255}},
-                               .border_w = 0},
-    [WE_BTN_STATE_PRESSED] = {.bg_color = {.rgb = {64, 152, 231}},
-                              .border_color = {.rgb = {64, 152, 231}},
-                              .text_color = {.rgb = {247, 250, 255}},
-                              .border_w = 0},
-    [WE_BTN_STATE_DISABLED] = {.bg_color = {.rgb = {74, 79, 92}},
-                               .border_color = {.rgb = {74, 79, 92}},
-                               .text_color = {.rgb = {156, 164, 179}},
-                               .border_w = 0},
+    [WE_BTN_STATE_NORMAL] = {.bg_color = {.rgb = {59, 52, 82}},
+                             .text_color = {.rgb = {239, 239, 239}}},
+    [WE_BTN_STATE_SELECTED] = {.bg_color = {.rgb = {90, 178, 255}},
+                               .text_color = {.rgb = {255, 247, 255}}},
+    [WE_BTN_STATE_PRESSED] = {.bg_color = {.rgb = {66, 154, 222}},
+                              .text_color = {.rgb = {247, 239, 247}}},
+    [WE_BTN_STATE_DISABLED] = {.bg_color = {.rgb = {74, 77, 74}},
+                               .text_color = {.rgb = {156, 154, 156}}},
+#else /* 其它色深（GRAY8 等）：用编译期常量宏按 RGB888 等值转换 */
+    [WE_BTN_STATE_NORMAL] = {.bg_color = RGB888_CONST(59, 52, 82),
+                             .text_color = RGB888_CONST(239, 239, 239)},
+    [WE_BTN_STATE_SELECTED] = {.bg_color = RGB888_CONST(90, 178, 255),
+                               .text_color = RGB888_CONST(255, 247, 255)},
+    [WE_BTN_STATE_PRESSED] = {.bg_color = RGB888_CONST(66, 154, 222),
+                              .text_color = RGB888_CONST(247, 239, 247)},
+    [WE_BTN_STATE_DISABLED] = {.bg_color = RGB888_CONST(74, 77, 74),
+                               .text_color = RGB888_CONST(156, 154, 156)},
 #endif
 };
 #endif
@@ -75,10 +70,7 @@ we_draw_round_rect_analytic_fill(lcd, x, y, w, h, draw_r, style->bg_color, opaci
 static void _btn_draw_text_clipped(we_btn_obj_t *obj, const we_btn_style_t *style)
 {
     we_lcd_t *lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     uint16_t txt_w;
     int8_t y_top;
     int8_t y_bot;
@@ -86,10 +78,6 @@ static void _btn_draw_text_clipped(we_btn_obj_t *obj, const we_btn_style_t *styl
     int16_t btn_cy;
     int16_t txt_x;
     int16_t txt_y;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
 
     if (obj == NULL || style == NULL || obj->text == NULL || obj->font == NULL)
         return;
@@ -106,32 +94,14 @@ static void _btn_draw_text_clipped(we_btn_obj_t *obj, const we_btn_style_t *styl
     txt_x = btn_cx - (int16_t)(txt_w / 2);
     txt_y = btn_cy - (y_top + y_bot) / 2;
 
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
-
-    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-    clip_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    we_pfb_clip_save(lcd, &sv);
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                       (int16_t)(obj->base.x + obj->base.w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
     {
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                + (clip_x0 - old_pfb_area.x0);
-
         we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text, style->text_color, obj->opacity);
     }
-
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 }
 
 /**
@@ -155,11 +125,47 @@ static void _btn_draw_cb(void *ptr)
 
     we_lcd_t *lcd = obj->base.lcd;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：常态描边+实体字，按压反白+挖空字 */
+    {
+        static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
+        static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+        we_btn_style_t mono_style = *style;
+        uint16_t r = obj->radius;
+
+        if (r > obj->base.w / 2U)
+            r = (uint16_t)(obj->base.w / 2U);
+        if (r > obj->base.h / 2U)
+            r = (uint16_t)(obj->base.h / 2U);
+
+        we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
+                                         (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                         r, mono_fg, obj->opacity);
+        if (obj->state == WE_BTN_STATE_PRESSED)
+        {
+            mono_style.text_color = mono_bg; /* 反白面板上的挖空字 */
+        }
+        else
+        {
+            if (obj->base.w > 2U && obj->base.h > 2U)
+                we_draw_round_rect_analytic_fill(lcd, (int16_t)(obj->base.x + 1),
+                                                 (int16_t)(obj->base.y + 1),
+                                                 (uint16_t)(obj->base.w - 2U),
+                                                 (uint16_t)(obj->base.h - 2U),
+                                                 (uint16_t)((r > 0U) ? (r - 1U) : 0U),
+                                                 mono_bg, obj->opacity);
+            mono_style.text_color = mono_fg;
+        }
+        _btn_draw_text_clipped(obj, &mono_style);
+        return;
+    }
+#else
     // 2. [合并绘制] 使用抗锯齿圆角矩形引擎一次画完背景与圆角抗锯齿（当前样式不绘制边框）
     we_btn_draw_skin(lcd, obj->base.x, obj->base.y, obj->base.w, obj->base.h,
                      obj->radius, style, obj->opacity);
 
     _btn_draw_text_clipped(obj, style);
+#endif
 }
 
 /**
@@ -213,9 +219,8 @@ we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
  * @param ptr 回调透传对象指针。
  * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
  * @return 非 0 表示已消费。
- * @note 按住 OK 期间保持 PRESSED（与触摸按住一致）；tap 式注入由管理器的
- *       最短按压窗口保证视觉可见。按键合成的 CLICKED 事件 data 为 NULL，
- *       用户回调不得解引用坐标。
+ * @note 按住 OK 期间保持 PRESSED（与触摸按住一致）。按键合成的 CLICKED
+ *       事件 data 为 NULL，用户回调不得解引用坐标。
  */
 static uint8_t _btn_key_cb(void *ptr, uint8_t key_evt)
 {
@@ -292,15 +297,11 @@ void we_btn_obj_init(we_btn_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int
     obj->opacity = 255;
 
 #if WE_BTN_USE_CUSTOM_STYLE
-    // 3. 设置默认配色方案 (如果使用独立样式)
-    we_btn_set_style(obj, WE_BTN_STATE_NORMAL, RGB888TODEV(58, 66, 82), RGB888TODEV(58, 66, 82),
-RGB888TODEV(239, 243, 250), 1);
-    we_btn_set_style(obj, WE_BTN_STATE_SELECTED, RGB888TODEV(92, 181, 255), RGB888TODEV(92, 181, 255),
-RGB888TODEV(255, 255, 255), 1);
-    we_btn_set_style(obj, WE_BTN_STATE_PRESSED, RGB888TODEV(64, 152, 231), RGB888TODEV(64, 152, 231),
-RGB888TODEV(247, 250, 255), 1);
-    we_btn_set_style(obj, WE_BTN_STATE_DISABLED, RGB888TODEV(74, 79, 92), RGB888TODEV(74, 79, 92),
-RGB888TODEV(156, 164, 179), 1);
+    // 3. 设置默认配色方案 (如果使用独立样式；与内置样式表同源，见表头注释)
+    we_btn_set_style(obj, WE_BTN_STATE_NORMAL, RGB888TODEV(59, 52, 82), RGB888TODEV(239, 239, 239));
+    we_btn_set_style(obj, WE_BTN_STATE_SELECTED, RGB888TODEV(90, 178, 255), RGB888TODEV(255, 247, 255));
+    we_btn_set_style(obj, WE_BTN_STATE_PRESSED, RGB888TODEV(66, 154, 222), RGB888TODEV(247, 239, 247));
+    we_btn_set_style(obj, WE_BTN_STATE_DISABLED, RGB888TODEV(74, 77, 74), RGB888TODEV(156, 154, 156));
 #endif
 
     // 4. 加入显示链表
@@ -344,30 +345,23 @@ we_obj_invalidate((we_obj_t *)obj);
  * @param obj 目标控件对象指针。
  * @param state 目标状态枚举值。
  * @param bg 按钮背景色。
- * @param border 按钮边框色。
- * @param text UTF-8 文本字符串。
- * @param border_w 边框宽度（像素）。
+ * @param text 按钮文字颜色。
  * @return 无。
  */
-void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colour_t border, colour_t text,
-                      uint8_t border_w)
+void we_btn_set_style(we_btn_obj_t *obj, we_btn_state_t state, colour_t bg, colour_t text)
 {
 #if WE_BTN_USE_CUSTOM_STYLE
     if (obj == NULL || state >= WE_BTN_STATE_MAX)
         return;
     obj->styles[state].bg_color = bg;
-    obj->styles[state].border_color = border;
     obj->styles[state].text_color = text;
-    obj->styles[state].border_w = border_w;
 we_obj_invalidate((we_obj_t *)obj);
 #else
     // 内置样式模式下样式表只读，本函数静默忽略所有参数（无运行时副作用）
     (void)obj;
     (void)state;
     (void)bg;
-    (void)border;
     (void)text;
-    (void)border_w;
 #endif
 }
 
@@ -385,36 +379,3 @@ void we_btn_set_radius(we_btn_obj_t *obj, uint16_t radius)
 we_obj_invalidate((we_obj_t *)obj);
 }
 
-/**
- * @brief 更新按钮属性并触发重绘。
- * @param obj 目标控件对象指针。
- * @param border_w 边框宽度（像素）。
- * @return 无。
- */
-void we_btn_set_border_width(we_btn_obj_t *obj, uint8_t border_w)
-{
-#if WE_BTN_USE_CUSTOM_STYLE
-    uint8_t i;
-    uint8_t changed = 0;
-
-    if (obj == NULL)
-        return;
-
-    for (i = 0; i < WE_BTN_STATE_MAX; i++)
-    {
-        if (obj->styles[i].border_w != border_w)
-        {
-            obj->styles[i].border_w = border_w;
-            changed = 1;
-        }
-    }
-
-    if (changed)
-    {
-we_obj_invalidate((we_obj_t *)obj);
-    }
-#else
-    (void)obj;
-    (void)border_w;
-#endif
-}

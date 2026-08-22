@@ -139,7 +139,7 @@ void we_ime_pinyin_obj_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
                             const unsigned char *font);
 
 /**
- * @brief 初始化弹层模式拼音输入法（不挂对象链表，show 时经 LCD 弹层滑入）。
+ * @brief 初始化弹层模式拼音输入法（不挂对象链表，show 时挂顶层链滑入）。
  * @param obj 控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param h 面板总高（像素，含顶部回显条 WE_KEYBOARD_ECHO_H + 拼音条 +
@@ -153,7 +153,7 @@ void we_ime_pinyin_popup_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
                               int16_t h, const unsigned char *font);
 
 /**
- * @brief 弹出拼音输入法：占用 LCD 弹层并从屏底滑入。
+ * @brief 弹出拼音输入法：挂 LCD 顶层链、声明模态，并从屏底滑入。
  * @param obj 控件对象指针（须为 popup_init 创建）。
  * @param target_textarea 绑定的目标输入框（we_textarea_obj_t*，可 NULL）。
  * @return 无。
@@ -163,7 +163,7 @@ void we_ime_pinyin_popup_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
 void we_ime_pinyin_popup_show(we_ime_pinyin_obj_t *obj, void *target_textarea);
 
 /**
- * @brief 收回拼音输入法：滑出到屏外后释放 LCD 弹层。
+ * @brief 收回拼音输入法：滑出到屏外后解除模态并摘离顶层链。
  * @param obj 控件对象指针。
  * @return 无。
  */

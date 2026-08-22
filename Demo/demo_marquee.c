@@ -17,6 +17,8 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t   mq_title;
 static we_label_obj_t   mq_fps;
 static we_label_obj_t   mq_cap[3];
@@ -113,3 +115,70 @@ void we_marquee_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &mq_fps, &mq_fps_timer,
                        &mq_last_frames, mq_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t   mq_title;
+static we_box_obj_t     mq_bg[2];
+static we_marquee_obj_t mq[2];
+
+/* 两条示例文案（由 demo 静态持有，满足"调用方持有字符串"约定） */
+static const char *const mq_text_long =
+    "The quick brown fox jumps over the lazy dog -- WeGui marquee";
+static const char *const mq_text_fast =
+    "Fast lane 90 px/s short pause";
+
+/**
+ * @brief 初始化 marquee demo（128x64 布局）：默认速度长句 + 快速窄条
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_marquee_simple_demo_init(we_lcd_t *lcd)
+{
+    int16_t mq_h = (int16_t)(we_font_get_line_height(we_font_consolas_18) +
+                             2 * WE_MARQUEE_PAD_Y);
+    int16_t i;
+    int16_t row_y[2];
+    int16_t row_w[2];
+
+    row_y[0] = 16;
+    row_y[1] = (int16_t)(20 + mq_h);
+    row_w[0] = 124;
+    row_w[1] = 90;
+
+    we_label_obj_init(&mq_title, lcd, 2, 2,
+                      "MARQUEE", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
+
+    /* 垫底 box：与跑马灯同矩形，衬托裁剪边界（先建，压在下层） */
+    for (i = 0; i < 2; i++)
+    {
+        we_box_obj_init(&mq_bg[i], lcd, 2, row_y[i], row_w[i], mq_h);
+        we_box_set_radius(&mq_bg[i], 3U);
+        we_box_set_color(&mq_bg[i], RGB888TODEV(30, 38, 52));
+        we_box_set_border(&mq_bg[i], RGB888TODEV(70, 84, 106), 1U);
+    }
+
+    /* 1. 长英文句：默认速度 30 px/s、默认停留 800ms */
+    we_marquee_obj_init(&mq[0], lcd, 2, row_y[0], row_w[0],
+                        mq_text_long, we_font_consolas_18, RGB888TODEV(236, 241, 248));
+
+    /* 2. 快速条：更窄窗口 + 90 px/s + 300ms 停留 + 橙色 */
+    we_marquee_obj_init(&mq[1], lcd, 2, row_y[1], row_w[1],
+                        mq_text_fast, we_font_consolas_18, RGB888TODEV(250, 180, 90));
+    we_marquee_set_speed(&mq[1], 90U);
+    we_marquee_set_pause(&mq[1], 300U);
+}
+
+/**
+ * @brief marquee demo 周期更新（滚动由控件动画自驱）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_marquee_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

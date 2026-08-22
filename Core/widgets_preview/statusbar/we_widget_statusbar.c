@@ -45,34 +45,6 @@ static const we_class_t _statusbar_class = {
  * 内部工具
  * -------------------------------------------------------------------------- */
 
-/**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _sb_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
- * @brief 将图层透明度与控件整体不透明度相乘。
- * @param a 图层透明度（0~255）。
- * @param opacity 控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _sb_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
 /* --------------------------------------------------------------------------
  * 图标绘制（bx/wx/sx = 图标左上角 X，iy = 图标顶 Y，均为屏幕绝对坐标）
  * -------------------------------------------------------------------------- */
@@ -95,12 +67,9 @@ static void _sb_draw_battery(const we_statusbar_obj_t *obj, int16_t bx, int16_t 
     int16_t fw;
 
     /* 外壳轮廓：外层前景色圆角矩形 - 内层底色圆角矩形 = 1px 壳 */
-    we_draw_round_rect_analytic_fill(lcd, bx, iy,
-                                     (uint16_t)_SB_BAT_BODY_W, (uint16_t)_SB_ICON_H,
-                                     3U, obj->fg_color, opa);
-    we_draw_round_rect_analytic_fill(lcd, (int16_t)(bx + 1), (int16_t)(iy + 1),
-                                     (uint16_t)(_SB_BAT_BODY_W - 2), (uint16_t)(_SB_ICON_H - 2),
-                                     2U, obj->bg_color, opa);
+    we_draw_round_rect_outline_fill(lcd, bx, iy,
+                                    (uint16_t)_SB_BAT_BODY_W, (uint16_t)_SB_ICON_H,
+                                    3U, obj->fg_color, obj->bg_color, opa);
 
     /* 右侧电极凸块（4px 高，垂直居中） */
     we_fill_rect(lcd, (int16_t)(bx + _SB_BAT_BODY_W), (int16_t)(iy + 4),
@@ -140,7 +109,7 @@ static void _sb_draw_battery(const we_statusbar_obj_t *obj, int16_t bx, int16_t 
 static void _sb_draw_wifi(const we_statusbar_obj_t *obj, int16_t wx, int16_t iy)
 {
     we_lcd_t *lcd = obj->base.lcd;
-    uint8_t dim = _sb_scale_opa(WE_STATUSBAR_DIM_OPA, obj->opacity);
+    uint8_t dim = we_opa_scale(WE_STATUSBAR_DIM_OPA, obj->opacity);
     uint8_t opa;
 
     /* 顶层弧条 12x3（level >= 3 点亮） */
@@ -169,7 +138,7 @@ static void _sb_draw_wifi(const we_statusbar_obj_t *obj, int16_t wx, int16_t iy)
 static void _sb_draw_signal(const we_statusbar_obj_t *obj, int16_t sx, int16_t iy)
 {
     we_lcd_t *lcd = obj->base.lcd;
-    uint8_t dim = _sb_scale_opa(WE_STATUSBAR_DIM_OPA, obj->opacity);
+    uint8_t dim = we_opa_scale(WE_STATUSBAR_DIM_OPA, obj->opacity);
     int16_t i;
 
     for (i = 0; i < 4; i++)
@@ -369,9 +338,9 @@ void we_statusbar_set_colors(we_statusbar_obj_t *obj, colour_t bg,
 {
     if (obj == NULL)
         return;
-    if (_sb_col_eq(obj->bg_color, bg) &&
-        _sb_col_eq(obj->fg_color, fg) &&
-        _sb_col_eq(obj->low_color, low))
+    if (we_colour_eq(obj->bg_color, bg) &&
+        we_colour_eq(obj->fg_color, fg) &&
+        we_colour_eq(obj->low_color, low))
         return;
 
     obj->bg_color  = bg;

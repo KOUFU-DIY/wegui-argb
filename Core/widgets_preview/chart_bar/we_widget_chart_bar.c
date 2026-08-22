@@ -21,21 +21,6 @@
 #define WE_CHART_BAR_BASE_ALPHA 200U
 
 /**
- * @brief 比较两个颜色值是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static uint8_t _chart_bar_color_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#else
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 计算柱高可用量程（总高扣除底部 1px 基线）。
  * @param obj 传入：控件对象指针。
  * @return 可用高度（像素，最小 1）。
@@ -257,8 +242,8 @@ void we_chart_bar_set_colors(we_chart_bar_obj_t *obj, colour_t bar, colour_t gri
 {
     if (obj == NULL)
         return;
-    if (_chart_bar_color_eq(obj->bar_color, bar) &&
-        _chart_bar_color_eq(obj->grid_color, grid))
+    if (we_colour_eq(obj->bar_color, bar) &&
+        we_colour_eq(obj->grid_color, grid))
         return;
 
     obj->bar_color = bar;

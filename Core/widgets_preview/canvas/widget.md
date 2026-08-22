@@ -32,4 +32,4 @@
 - 无内容缓存（每次重绘都全量重画），毕业时可评估可选的行缓存/快照模式
 
 ## 对应 demo
-- `Demo/preview/demo_canvas.c`（DEMO_ID 112）：用户回调里画十字网格背景 + 李萨如曲线（`we_cos`/`we_sin` 参数方程取 48 点、`we_draw_line_round` 连线），相位由 demo tick 推进后调 `we_canvas_invalidate` 形成旋转变形动画
+- `Demo/preview/demo_canvas.c`（DEMO_ID 122）：用户回调里画十字网格背景 + 李萨如曲线（`we_cos`/`we_sin` 参数方程取 48 点、`we_draw_line_round` 连线），相位由 demo tick 推进后调 `we_canvas_invalidate` 形成旋转变形动画

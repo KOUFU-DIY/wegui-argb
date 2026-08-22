@@ -40,7 +40,7 @@ void lcd_hw_init(void)
  * @param pix_size 本次输出像素数量。
  * @return 无。
  */
-void we_lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
+void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
 {
     (void)gram;
     (void)pix_size;
@@ -55,7 +55,7 @@ void we_lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
  * @param pix_size 本次输出像素数量。
  * @return 无。
  */
-void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
+void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
 {
     (void)gram;
     (void)pix_size;

@@ -897,6 +897,16 @@
               <FilePath>..\Lcd_Port\stm32f103_lcd_hard_4spi_port.c</FilePath>
             </File>
             <File>
+              <FileName>stm32f103_lcd_soft_3spi_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\stm32f103_lcd_soft_3spi_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f103_lcd_soft_iic_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\stm32f103_lcd_soft_iic_port.c</FilePath>
+            </File>
+            <File>
               <FileName>stm32f103_lcd_soft_4spi_port.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Lcd_Port\stm32f103_lcd_soft_4spi_port.c</FilePath>
@@ -925,6 +935,51 @@
               <FileName>st7735.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Lcd_Port\st7735.c</FilePath>
+            </File>
+            <File>
+              <FileName>ssd1306.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\ssd1306.c</FilePath>
+            </File>
+            <File>
+              <FileName>ssd1309.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\ssd1309.c</FilePath>
+            </File>
+            <File>
+              <FileName>ssd1312.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\ssd1312.c</FilePath>
+            </File>
+            <File>
+              <FileName>ssd1315.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\ssd1315.c</FilePath>
+            </File>
+            <File>
+              <FileName>ssd1327.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\ssd1327.c</FilePath>
+            </File>
+            <File>
+              <FileName>sh1106.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\sh1106.c</FilePath>
+            </File>
+            <File>
+              <FileName>sh1107.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\sh1107.c</FilePath>
+            </File>
+            <File>
+              <FileName>sh1108.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\sh1108.c</FilePath>
+            </File>
+            <File>
+              <FileName>sh1115.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Lcd_Port\sh1115.c</FilePath>
             </File>
             <File>
               <FileName>st7789v3.c</FileName>
@@ -972,11 +1027,6 @@
               <FilePath>..\..\Core\image_res.h</FilePath>
             </File>
             <File>
-              <FileName>res_img.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\tool\2.img2c\output\c\res_img.c</FilePath>
-            </File>
-            <File>
               <FileName>we_gui_driver.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\we_gui_driver.c</FilePath>
@@ -994,12 +1044,12 @@
             <File>
               <FileName>we_motion.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_motion.c</FilePath>
+              <FilePath>..\..\Core\components\we_motion.c</FilePath>
             </File>
             <File>
               <FileName>we_scroll.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_scroll.c</FilePath>
+              <FilePath>..\..\Core\components\we_scroll.c</FilePath>
             </File>
             <File>
               <FileName>we_render.c</FileName>
@@ -1159,8 +1209,153 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>we_widget_preview</GroupName>
+          <Files>
+            <File>
+              <FileName>we_widget_animimg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\animimg\we_widget_animimg.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_btnmatrix.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\btnmatrix\we_widget_btnmatrix.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_calendar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\calendar\we_widget_calendar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_canvas.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\canvas\we_widget_canvas.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_chart_bar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\chart_bar\we_widget_chart_bar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_colorwheel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\colorwheel\we_widget_colorwheel.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_hold_btn.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\hold_btn\we_widget_hold_btn.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_pinyin_table.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin_table.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_pinyin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_ime_pinyin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_widget_ime_pinyin.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_joystick.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\joystick\we_widget_joystick.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_keyboard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\keyboard\we_widget_keyboard.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_knob.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\knob\we_widget_knob.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_logview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\logview\we_widget_logview.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_mask_group.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\mask_group\we_widget_mask_group.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_menu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\menu\we_widget_menu.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_mlabel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\mlabel\we_widget_mlabel.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_qr_encoder.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\qrcode\we_qr_encoder.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_qrcode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\qrcode\we_widget_qrcode.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_radio.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\radio\we_widget_radio.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_scale.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\scale\we_widget_scale.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_spectrum.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\spectrum\we_widget_spectrum.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_spinner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\spinner\we_widget_spinner.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_statusbar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\statusbar\we_widget_statusbar.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_table.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\table\we_widget_table.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_tabview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\tabview\we_widget_tabview.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_widget_textarea.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\textarea\we_widget_textarea.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>we_tool_bin</GroupName>
           <Files>
+            <File>
+              <FileName>res_img.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\tool\2.img2c\output\c\res_img.c</FilePath>
+            </File>
             <File>
               <FileName>simli_16_2bpp.h</FileName>
               <FileType>5</FileType>
@@ -1170,6 +1365,11 @@
               <FileName>simli_16_2bpp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\tool\1.font2c\output\simli_16_2bpp.c</FilePath>
+            </File>
+            <File>
+              <FileName>simsun_12_2bpp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\tool\1.font2c\output\simsun_12_2bpp.c</FilePath>
             </File>
             <File>
               <FileName>msyh_16_4bpp_ime.c</FileName>
@@ -1370,146 +1570,6 @@
               <FileName>demo_segdisp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\demo_segdisp.c</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>we_widget_preview</GroupName>
-          <Files>
-            <File>
-              <FileName>we_widget_animimg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\animimg\we_widget_animimg.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_btnmatrix.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\btnmatrix\we_widget_btnmatrix.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_calendar.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\calendar\we_widget_calendar.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_canvas.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\canvas\we_widget_canvas.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_chart_bar.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\chart_bar\we_widget_chart_bar.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_colorwheel.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\colorwheel\we_widget_colorwheel.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_hold_btn.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\hold_btn\we_widget_hold_btn.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_pinyin_table.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin_table.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_pinyin.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_pinyin.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_ime_pinyin.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\ime_pinyin\we_widget_ime_pinyin.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_joystick.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\joystick\we_widget_joystick.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_keyboard.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\keyboard\we_widget_keyboard.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_knob.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\knob\we_widget_knob.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_logview.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\logview\we_widget_logview.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_mask_group.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\mask_group\we_widget_mask_group.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_menu.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\menu\we_widget_menu.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_mlabel.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\mlabel\we_widget_mlabel.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_qr_encoder.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\qrcode\we_qr_encoder.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_qrcode.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\qrcode\we_widget_qrcode.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_radio.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\radio\we_widget_radio.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_scale.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\scale\we_widget_scale.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_spectrum.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\spectrum\we_widget_spectrum.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_spinner.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\spinner\we_widget_spinner.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_statusbar.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\statusbar\we_widget_statusbar.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_table.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\table\we_widget_table.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_tabview.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\tabview\we_widget_tabview.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_widget_textarea.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\widgets_preview\textarea\we_widget_textarea.c</FilePath>
             </File>
           </Files>
         </Group>

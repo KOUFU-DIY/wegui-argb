@@ -21,21 +21,6 @@
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _ta_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
  * @brief 把光标拉回亮相位并复位闪烁计时（内容变化后调用）。
  * @param obj 传入：控件对象指针。
  * @return 无。
@@ -159,27 +144,15 @@ static void _textarea_draw_cb(void *ptr)
 
     {
         /* group 同款 PFB 窗口收窄：窗口外的字形/光标像素被自动裁掉 */
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
 
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, inner_x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(inner_x + inner_w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, inner_x, obj->base.y,
+                           (int16_t)(inner_x + inner_w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             int16_t text_y = (int16_t)(obj->base.y + WE_TEXTAREA_PAD_Y);
             int16_t cursor_x = inner_x;
-
-            lcd->pfb_area.x0 = (uint16_t)new_x0;
-            lcd->pfb_area.x1 = (uint16_t)new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end = (uint16_t)new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                            (new_x0 - (int16_t)old_pfb_area.x0);
 
             if (obj->len > 0U && obj->font != NULL)
             {
@@ -208,10 +181,7 @@ static void _textarea_draw_cb(void *ptr)
                              obj->cursor_color, obj->opacity);
         }
 
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 
@@ -580,9 +550,9 @@ void we_textarea_set_colors(we_textarea_obj_t *obj, colour_t bg,
 {
     if (obj == NULL)
         return;
-    if (_ta_colour_eq(obj->bg_color, bg) &&
-        _ta_colour_eq(obj->text_color, text) &&
-        _ta_colour_eq(obj->cursor_color, cursor))
+    if (we_colour_eq(obj->bg_color, bg) &&
+        we_colour_eq(obj->text_color, text) &&
+        we_colour_eq(obj->cursor_color, cursor))
         return;
 
     obj->bg_color = bg;

@@ -2,7 +2,7 @@
 #define __WE_WIDGET_GAUGE_H
 
 #include "we_gui_driver.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 仪表盘控件（gauge）

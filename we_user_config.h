@@ -6,41 +6,40 @@
 
 /* ----------------------------- 版本 ----------------------------- */
 /* 框架版本号（字符串），与 README / 对外发布保持一致 */
-#define WE_GUI_VERSION "V0.4.0 beta"
+#define WE_GUI_VERSION "V0.4.1 beta"
 
+/* -------------------------- GUI 输出色深设置 -------------------------- */
+#define DEEP_GRAY8  (3)  /* 8位灰度 */
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
+#define LCD_DEEP (DEEP_GRAY8)
 
-/* -------------------------- 屏幕设置 -------------------------- */
-/* LCD 输出色深 */
-#define LCD_DEEP (DEEP_RGB565)
+/* 单色样式（MONO 优化） */
+#define WE_CFG_MONO_STYLE (1)
 
-/* 屏幕宽高（demo 均按 280x240 固定布局编写；
- * 更大的屏幕上 demo 内容锚定左上角显示） */
-#define SCREEN_WIDTH (280)
-#define SCREEN_HEIGHT (240)
+/* -------------------------- GUI 输出屏幕宽高 -------------------------- */
+#define SCREEN_WIDTH  (128)
+#define SCREEN_HEIGHT (64)
 
-/* 屏幕显存
- * 最小设置 1 行；
- * DMA 模式建议至少 2 行。 */
+/* -------------------------- GUI 显存 -------------------------- */
+/* DMA 双 BUF 模式开关 */
+#define GRAM_DMA_BUFF_EN      (0)
+
+/* GUI显存（像素数）
+ * 最小设置 1 行；DMA 模式建议至少 2 行；
+ * GRAY8 下行数须为 8 的倍数（页对齐），默认 8 行。 */
 #define USER_GRAM_NUM (SCREEN_WIDTH * 8)
 
-/* DMA 双 BUF 模式开关 */
-#define GRAM_DMA_BUFF_EN (1)
-
-/* 刷新区域像素对齐粒度（QSPI 彩屏 / SSD1306 页式 OLED 等硬件需求）。
- * 部分屏幕对刷新窗口坐标有硬件粒度要求：
- *   - QSPI 接口彩屏常要求 set_addr 的 x/y 起止坐标为 2 或 4 的倍数；
- *   - SSD1306 等页式单色 OLED 以 8 行为一页，y 向必须按 8 对齐。
- * 语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把矩形
- * 扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上取整到
- * 对齐倍数-1。扩出的边缘随本矩形整块走正常渲染路径重绘，因此推屏时
- * set_addr 收到的窗口天然对齐，且像素流与窗口严格一致。
- * 取值必须为 2 的幂；平台端口不定义时默认 1（不对齐），
- * 现有平台零行为、零开销变化。 */
-#define WE_LCD_FLUSH_ALIGN_X (1)
-#define WE_LCD_FLUSH_ALIGN_Y (1)
-
+/* -------------------------- GUI 显存 -------------------------- */
+/* 输出像素对齐 */
+//#define WE_LCD_FLUSH_ALIGN_X (1) //普通TFT设置参考
+//#define WE_LCD_FLUSH_ALIGN_Y (1)
+//#define WE_LCD_FLUSH_ALIGN_X (2) //QSPI屏幕设置参考
+//#define WE_LCD_FLUSH_ALIGN_Y (2)
+#define WE_LCD_FLUSH_ALIGN_X (1) //普通OLED设置参考
+#define WE_LCD_FLUSH_ALIGN_Y (8)
+//#define WE_LCD_FLUSH_ALIGN_X (2) //普通GRAY设置参考
+//#define WE_LCD_FLUSH_ALIGN_Y (2)
 
 /* ------------------------- 脏矩形配置 ------------------------- */
 /* 脏矩形策略
@@ -84,10 +83,6 @@
 /* --------------------------- GUI 定时器配置 --------------------------- */
 /* 用户定时器已改为调用方持有的侵入式节点（we_gui_timer_t）：无槽位上限 */
 
-/* 定时器单帧补偿上限：主循环长时间阻塞（flash 擦写/长中断）后恢复的
- * 那一帧，每个周期定时器最多补发的节拍数；超出部分丢弃并从当前重新计时 */
-// #define WE_CFG_TIMER_CATCHUP_MAX (4)
-
 /* -------------------------- 输入接口 -------------------------- */
 /* 输入接口(按键或触摸)开关
  * 0: 关闭，节省空间
@@ -110,6 +105,12 @@
  * modal 三函数退化为空 stub——不用 msgbox/toast/dropdown 弹层语义的产品
  * 可整段裁掉（弹层控件仍可编译，只是失去保证置顶与吞键语义） */
 // #define WE_CFG_ENABLE_TOP_LAYER (1)
+
+/* ------------------------ 外部储存接口 ------------------------ */
+/* 外部储存接口开关
+ * 0: 关闭，节省空间
+ * 1: 打开 */
+#define WE_CFG_ENABLE_STORAGE_PORT_BIND (1)
 
 /* ----------------------- 聚焦与按键导航 ----------------------- */
 /* 全局聚焦 + 按键导航总开关
@@ -142,14 +143,9 @@
 // #define WE_CFG_FOCUS_EDIT_R (255)         /* 编辑态光标颜色 RGB888（值类控件 OK 进入编辑后换色） */
 // #define WE_CFG_FOCUS_EDIT_G (150)
 // #define WE_CFG_FOCUS_EDIT_B (60)
-// #define WE_CFG_FOCUS_FLASH_MS (90U)       /* OK 最短按压窗口（毫秒，≤255） */
 // #define WE_CFG_KEY_QUEUE_LEN (8)          /* 语义键环形队列深度（2 的幂，容量=深度-1，默认 8） */
 
-/* ------------------------ 外部储存接口 ------------------------ */
-/* 外部储存接口开关
- * 0: 关闭，节省空间
- * 1: 打开 */
-#define WE_CFG_ENABLE_STORAGE_PORT_BIND (1)
+
 
 /* ======================== 控件可编辑默认宏 ======================== */
 /* 下面这些默认值从当前控件头文件拷贝出来。
@@ -200,8 +196,6 @@
  * 0: 线性衰减
  * 1: 二次衰减（内侧更厚实，外侧掉得更快） */
 // #define WE_CFG_CHART_AA_CURVE (0)
-
-/* ------------------------- group 控件 ------------------------- */
 
 /* ------------------------ img_ex 控件 ------------------------ */
 /* 图片旋转缩放取样模式
@@ -262,9 +256,6 @@
 
 /* 消息框面板圆角半径 */
 // #define WE_MSGBOX_RADIUS (14)
-
-/* 消息框内部按钮圆角半径 */
-// #define WE_MSGBOX_BTN_RADIUS (10)
 
 /* ----------------------- slideshow 控件 ----------------------- */
 /* 幻灯片吸附动画模式
@@ -646,5 +637,29 @@
 // #define WE_SEGDISP_DEF_OFF_R (66)
 // #define WE_SEGDISP_DEF_OFF_G (78)
 // #define WE_SEGDISP_DEF_OFF_B (96)
+
+/* ==================== 派生参数（按色深自动固定，勿手改） ==================== */
+/* 依据文件开头的 LCD_DEEP 推导底层刷屏参数：
+ * - GRAY8（单色/灰度 OLED）：
+ *   软 SPI / 软 IIC 均为阻塞端口，双缓冲无收益 → GRAM_DMA_BUFF_EN = 0；
+ *   页式单色 OLED 要求脏矩形 y 向按 8 行页对齐，SSD1327 要求 x 向按
+ *   2 像素对齐 —— 统一取两者并集（对彼此无害，代价仅是脏矩形略微扩边）。
+ * - RGB565 / RGB888（TFT）：
+ *   无对齐要求；DMA 端口可用双缓冲。
+ * 对齐语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把
+ * 矩形扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上
+ * 取整到对齐倍数-1；扩出的边缘随本矩形整块重绘，set_addr 收到的窗口
+ * 天然对齐。 */
+#if (LCD_DEEP == DEEP_GRAY8)
+  #if (USER_GRAM_NUM != (SCREEN_WIDTH * 8))
+	  #undef USER_GRAM_NUM
+	#endif
+  #ifdef GRAM_DMA_BUFF_EN
+    #undef GRAM_DMA_BUFF_EN
+  #endif
+	
+  #define GRAM_DMA_BUFF_EN (0)
+	#define USER_GRAM_NUM (SCREEN_WIDTH * 8)
+#endif /* LCD_DEEP 派生参数 */
 
 #endif

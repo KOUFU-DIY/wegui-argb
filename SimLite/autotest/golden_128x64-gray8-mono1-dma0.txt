@@ -1,0 +1,68 @@
+cfg=128x64-gray8-mono1-dma0
+id=1 frames=180 crc=A3C63725
+id=2 frames=180 crc=E1669554
+id=3 frames=180 crc=A4515BC4
+id=4 frames=180 crc=015E5CCC
+id=5 frames=180 crc=31439FF4
+id=6 frames=180 crc=388B7714
+id=7 frames=180 crc=9D079E44
+id=7 frames=180 script=7.evt crc=9D079E44
+id=8 frames=180 crc=3EE63BF5
+id=9 frames=180 crc=F988B905
+id=10 frames=180 crc=04838D0D
+id=11 frames=180 crc=260D0544
+id=12 frames=180 crc=488A8F85
+id=13 frames=180 crc=1F0B4F55
+id=14 frames=180 crc=4827716C
+id=15 frames=180 crc=013D9224
+id=16 frames=180 crc=3D974894
+id=17 frames=180 crc=D7FFD794
+id=18 frames=180 crc=FEE933A5
+id=18 frames=180 script=18.evt crc=FEE933A5
+id=19 frames=180 crc=D36A7A65
+id=19 frames=180 script=19.evt crc=D36A7A65
+id=20 frames=180 crc=668401A5
+id=21 frames=180 crc=1E5887E5
+id=22 frames=180 crc=813D699D
+id=23 frames=180 crc=DEC6AD45
+id=24 frames=180 crc=E8E0FCD5
+id=25 frames=180 crc=B61A9A45
+id=25 frames=180 script=25.evt crc=B61A9A45
+id=26 frames=180 crc=2385FDC5
+id=27 frames=180 crc=C455707D
+id=28 frames=180 crc=AF482FF4
+id=29 frames=180 crc=BF2609C5
+id=29 frames=180 script=29.evt crc=51AABABD
+id=30 frames=180 crc=0B7189C5
+id=30 frames=180 script=30.evt crc=DFAF2CEC
+id=31 frames=180 crc=C35DFD25
+id=32 frames=180 crc=0443A1C5
+id=33 frames=180 crc=FCAD6DD5
+id=101 frames=180 crc=8CE3566D
+id=102 frames=180 crc=A2464274
+id=102 frames=180 script=102.evt crc=54F8DD64
+id=103 frames=180 crc=E6430854
+id=103 frames=180 script=103.evt crc=E6430854
+id=104 frames=180 crc=B31AC955
+id=105 frames=180 crc=5B12E054
+id=105 frames=400 script=105.evt crc=BB957194
+id=106 frames=180 crc=3D90E70D
+id=107 frames=180 crc=2CD5FA1D
+id=107 frames=180 script=107.evt crc=2CD5FA1D
+id=108 frames=180 crc=292B9F34
+id=109 frames=180 crc=C2F69324
+id=110 frames=180 crc=5EE93D54
+id=111 frames=180 crc=6623ED75
+id=112 frames=180 crc=0758E21C
+id=113 frames=180 crc=791C51FD
+id=114 frames=180 crc=142644F5
+id=115 frames=180 crc=AA8C5484
+id=116 frames=180 crc=0C72BB04
+id=118 frames=180 crc=DFFB21A4
+id=119 frames=180 crc=544A1D85
+id=121 frames=180 crc=9DA4E32D
+id=122 frames=180 crc=C4B84755
+id=123 frames=180 crc=9C246434
+id=124 frames=180 crc=0318C414
+id=125 frames=180 crc=C1D14454
+id=126 frames=180 crc=9C863C44

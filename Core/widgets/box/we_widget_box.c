@@ -20,6 +20,20 @@
 #include "we_widget_box.h"
 #include "we_render.h"
 
+/* 单色样式：绘制路径的取色统一改道（白边黑底、边宽至少 1px，四角样式保留）；
+ * 非单色档保持原字段直读。 */
+#if (WE_CFG_MONO_STYLE == 1)
+static const colour_t _box_mono_fg = RGB888_CONST(255, 255, 255);
+static const colour_t _box_mono_bg = RGB888_CONST(0, 0, 0);
+#define _BOX_BG_COLOR(o) _box_mono_bg
+#define _BOX_BORDER_COLOR(o) _box_mono_fg
+#define _BOX_BORDER_W(o) (((o)->border_w > 0U) ? (o)->border_w : 1U)
+#else
+#define _BOX_BG_COLOR(o) ((o)->bg_color)
+#define _BOX_BORDER_COLOR(o) ((o)->border_color)
+#define _BOX_BORDER_W(o) ((o)->border_w)
+#endif
+
 /* --------------------------------------------------------------------------
  * 内部回调声明
  * -------------------------------------------------------------------------- */
@@ -41,18 +55,6 @@ static const we_class_t _box_class = {
 
 /* 从打包字节里取一个角的样式（每角 2bit，位移 = 角索引*2） */
 #define _BOX_STYLE(o, i) ((uint8_t)(((o)->corner_styles >> ((uint8_t)(i) * 2U)) & 0x3U))
-
-/**
- * @brief 颜色相等比较（RGB565/RGB888），供 setter 的“值未变则跳过”守卫使用。
- */
-static __inline uint8_t _box_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
 
 /* --------------------------------------------------------------------------
  * 绘制
@@ -137,16 +139,16 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
                     (has_in && u >= (int16_t)g->bw && v >= (int16_t)g->bw))
                 {
                     if (g->eff_op >= 250U)
-                        we_store_color(p, o->bg_color);
+                        we_store_color(p, _BOX_BG_COLOR(o));
                     else
-                        we_store_blended_color(p, o->bg_color, g->eff_op);
+                        we_store_blended_color(p, _BOX_BG_COLOR(o), g->eff_op);
                 }
                 else
                 {
                     if (g->eff_op >= 250U)
-                        we_store_color(p, o->border_color);
+                        we_store_color(p, _BOX_BORDER_COLOR(o));
                     else
-                        we_store_blended_color(p, o->border_color, g->eff_op);
+                        we_store_blended_color(p, _BOX_BORDER_COLOR(o), g->eff_op);
                 }
                 continue;
             }
@@ -167,18 +169,18 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
             if (a_in != 0U)
             {
                 if (a_in >= 250U && g->eff_op >= 250U)
-                    we_store_color(p, o->bg_color);
+                    we_store_color(p, _BOX_BG_COLOR(o));
                 else
-                    we_store_blended_color(p, o->bg_color,
+                    we_store_blended_color(p, _BOX_BG_COLOR(o),
                                            we_div255((uint32_t)g->eff_op * a_in));
             }
             if (a_out > a_in)
             {
                 uint8_t a_bd = (uint8_t)(a_out - a_in);
                 if (a_bd >= 250U && g->eff_op >= 250U)
-                    we_store_color(p, o->border_color);
+                    we_store_color(p, _BOX_BORDER_COLOR(o));
                 else
-                    we_store_blended_color(p, o->border_color,
+                    we_store_blended_color(p, _BOX_BORDER_COLOR(o),
                                            we_div255((uint32_t)g->eff_op * a_bd));
             }
         }
@@ -298,10 +300,10 @@ static void _box_draw_corner_chamfer(const we_box_obj_t *o, we_lcd_t *lcd,
         {
             /* 无边框：外 AA 像素为半透填充，其后整段填充 */
             _box_chamfer_span(row, cx0, cx1, bx, k, left, u0, u0,
-                              o->bg_color, 128U, g->eff_op);
+                              _BOX_BG_COLOR(o), 128U, g->eff_op);
             _box_chamfer_span(row, cx0, cx1, bx, k, left,
                               (int16_t)(u0 + 1), (int16_t)(k - 1U),
-                              o->bg_color, 255U, g->eff_op);
+                              _BOX_BG_COLOR(o), 255U, g->eff_op);
             continue;
         }
 
@@ -325,22 +327,22 @@ static void _box_draw_corner_chamfer(const we_box_obj_t *o, we_lcd_t *lcd,
 
         /* 外切线 AA 像素：纯边框半透（内轮廓在此必为 0） */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, u0, u0,
-                          o->border_color, 128U, g->eff_op);
+                          _BOX_BORDER_COLOR(o), 128U, g->eff_op);
         /* 边框实心段 */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, (int16_t)(u0 + 1),
                           (int16_t)((in_aa >= 0 ? in_aa : fill_from) - 1),
-                          o->border_color, 255U, g->eff_op);
+                          _BOX_BORDER_COLOR(o), 255U, g->eff_op);
         /* 内切线 AA 像素：半透填充 + 半透边框叠加 */
         if (in_aa >= 0)
         {
             _box_chamfer_span(row, cx0, cx1, bx, k, left, in_aa, in_aa,
-                              o->bg_color, 128U, g->eff_op);
+                              _BOX_BG_COLOR(o), 128U, g->eff_op);
             _box_chamfer_span(row, cx0, cx1, bx, k, left, in_aa, in_aa,
-                              o->border_color, 127U, g->eff_op);
+                              _BOX_BORDER_COLOR(o), 127U, g->eff_op);
         }
         /* 填充实心段 */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, fill_from, (int16_t)(k - 1U),
-                          o->bg_color, 255U, g->eff_op);
+                          _BOX_BG_COLOR(o), 255U, g->eff_op);
     }
 }
 
@@ -383,7 +385,7 @@ static void _box_draw_cb(void *ptr)
 
     /* 各角半径钳制到宽高各半；边框厚度同样钳制 */
     half = (uint16_t)((w < h ? w : h) / 2);
-    g.bw = o->border_w;
+    g.bw = (uint8_t)_BOX_BORDER_W(o);
     if ((uint16_t)g.bw > half)
         g.bw = (uint8_t)half;
 
@@ -442,16 +444,16 @@ static void _box_draw_cb(void *ptr)
 
         if (g.bw > 0U)
         {
-            we_fill_rect(lcd, xm, y, wm, g.bw, o->border_color, o->opacity);
+            we_fill_rect(lcd, xm, y, wm, g.bw, _BOX_BORDER_COLOR(o), o->opacity);
             we_fill_rect(lcd, xm, (int16_t)(y1 - (int16_t)g.bw + 1), wm, g.bw,
-                         o->border_color, o->opacity);
+                         _BOX_BORDER_COLOR(o), o->opacity);
         }
         if (fh > 0U)
         {
             we_fill_rect(lcd, xm, (int16_t)(y + (int16_t)g.bw), wm, fh,
-                         o->bg_color, o->opacity);
+                         _BOX_BG_COLOR(o), o->opacity);
             we_fill_rect(lcd, xm, (int16_t)(y1 - (int16_t)k + 1), wm, fh,
-                         o->bg_color, o->opacity);
+                         _BOX_BG_COLOR(o), o->opacity);
         }
     }
 
@@ -463,12 +465,12 @@ static void _box_draw_cb(void *ptr)
 
         if (g.bw > 0U)
         {
-            we_fill_rect(lcd, x, ym, g.bw, hm, o->border_color, o->opacity);
+            we_fill_rect(lcd, x, ym, g.bw, hm, _BOX_BORDER_COLOR(o), o->opacity);
             we_fill_rect(lcd, (int16_t)(x1 - (int16_t)g.bw + 1), ym, g.bw, hm,
-                         o->border_color, o->opacity);
+                         _BOX_BORDER_COLOR(o), o->opacity);
         }
         we_fill_rect(lcd, (int16_t)(x + (int16_t)g.bw), ym,
-                     (uint16_t)(w - 2 * (int16_t)g.bw), hm, o->bg_color, o->opacity);
+                     (uint16_t)(w - 2 * (int16_t)g.bw), hm, _BOX_BG_COLOR(o), o->opacity);
     }
 
     /* --- 3. 四个 K×K 角落方块合成（圆角单遍子采样 / 切角行扫描） --- */
@@ -712,7 +714,7 @@ void we_box_set_color(we_box_obj_t *obj, colour_t color)
 {
     if (obj == NULL)
         return;
-    if (_box_colour_eq(obj->bg_color, color))
+    if (we_colour_eq(obj->bg_color, color))
         return;
     obj->bg_color = color;
     we_obj_invalidate((we_obj_t *)obj);
@@ -722,7 +724,7 @@ void we_box_set_border(we_box_obj_t *obj, colour_t color, uint8_t width)
 {
     if (obj == NULL)
         return;
-    if (_box_colour_eq(obj->border_color, color) && obj->border_w == width)
+    if (we_colour_eq(obj->border_color, color) && obj->border_w == width)
         return;
     obj->border_color = color;
     obj->border_w     = width;

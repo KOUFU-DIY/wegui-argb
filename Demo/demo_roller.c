@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t rl_title;
 static we_label_obj_t rl_fps_label;
 static we_label_obj_t rl_time_label;   /* 顶部 "HH:MM" 实时显示 */
@@ -169,3 +171,68 @@ void we_roller_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &rl_fps_label, &rl_fps_timer,
                        &rl_last_frames, rl_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t rl_colon_label;  /* 两滚轮之间的 ":" 装饰 */
+static we_roller_obj_t rl_hour;
+static we_roller_obj_t rl_min;
+
+/* 小时选项 00~23（调用方持有的静态数组，控件只存指针） */
+static const char *const rl_hour_opts[24] = {
+    "00", "01", "02", "03", "04", "05", "06", "07",
+    "08", "09", "10", "11", "12", "13", "14", "15",
+    "16", "17", "18", "19", "20", "21", "22", "23",
+};
+
+/* 分钟选项 00~55，步进 5 */
+static const char *const rl_min_opts[12] = {
+    "00", "05", "10", "15", "20", "25",
+    "30", "35", "40", "45", "50", "55",
+};
+
+/**
+ * @brief 初始化 roller demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ * @details 3 可见行的双滚轮高约 72px，上下各溢出 4px 由裁剪吃掉，
+ *          中心选中行完整可见（滚轮自身显示选中值，不再另设回显）。
+ */
+void we_roller_simple_demo_init(we_lcd_t *lcd)
+{
+    int16_t colon_w;
+    int16_t colon_x;
+    int16_t colon_y;
+
+    /* 左：小时滚轮（24 项适合甩动）；右：分钟滚轮 */
+    we_roller_obj_init(&rl_hour, lcd, 8, -4, 50, 3U,
+                       we_font_consolas_18);
+    we_roller_set_options(&rl_hour, rl_hour_opts, 24U);
+    we_roller_set_selected(&rl_hour, 8U);
+
+    we_roller_obj_init(&rl_min, lcd, 70, -4, 50, 3U,
+                       we_font_consolas_18);
+    we_roller_set_options(&rl_min, rl_min_opts, 12U);
+    we_roller_set_selected(&rl_min, 6U); /* 30 分 */
+
+    /* 两滚轮之间的 ":" 装饰（对齐屏幕垂直中心） */
+    colon_w = (int16_t)we_get_text_width(we_font_consolas_18, ":");
+    colon_x = (int16_t)(58 + (12 - colon_w) / 2);
+    colon_y = (int16_t)(32 - (int16_t)we_font_get_line_height(we_font_consolas_18) / 2);
+    we_label_obj_init(&rl_colon_label, lcd, colon_x, colon_y,
+                      ":", we_font_consolas_18, RGB888TODEV(150, 162, 182), 255);
+}
+
+/**
+ * @brief roller demo 周期更新（滚轮交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_roller_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

@@ -40,21 +40,6 @@ static const we_class_t _marquee_class = {
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 颜色相等比较（RGB565/RGB888），供 setter 的“值未变则跳过”守卫使用。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static __inline uint8_t _marquee_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 复位滚动运行态：偏移回起点、清空毫像素累计与停留状态。
  * @param obj 控件对象指针。
  * @return 无。
@@ -337,26 +322,14 @@ static void _marquee_draw_cb(void *ptr)
 
     {
         /* group 同款 PFB 窗口收窄：窗口外的字形像素被自动裁掉 */
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
 
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             int16_t text_y = (int16_t)(obj->base.y + WE_MARQUEE_PAD_Y);
-
-            lcd->pfb_area.x0 = (uint16_t)new_x0;
-            lcd->pfb_area.x1 = (uint16_t)new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end = (uint16_t)new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                            (new_x0 - (int16_t)old_pfb_area.x0);
 
             if (obj->text_w <= (uint16_t)obj->base.w)
             {
@@ -375,10 +348,7 @@ static void _marquee_draw_cb(void *ptr)
             }
         }
 
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 
@@ -534,7 +504,7 @@ void we_marquee_set_color(we_marquee_obj_t *obj, colour_t color)
 {
     if (obj == NULL || obj->base.lcd == NULL)
         return;
-    if (_marquee_colour_eq(obj->color, color))
+    if (we_colour_eq(obj->color, color))
         return;
 
     obj->color = color;

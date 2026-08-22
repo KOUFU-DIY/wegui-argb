@@ -56,21 +56,6 @@ static uint32_t _knob_get_inv(uint32_t a, uint32_t b)
 }
 
 /**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _knob_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
  * @brief 八分区近似整数 atan2，输出 512 步制角度（纯整数）。
  * @param dy 触点相对中心的 Y 偏移（屏幕 Y 向下为正）。
  * @param dx 触点相对中心的 X 偏移。
@@ -500,9 +485,9 @@ void we_knob_set_colors(we_knob_obj_t *obj, colour_t track_color,
 {
     if (obj == NULL)
         return;
-    if (_knob_col_eq(obj->track_color, track_color) &&
-        _knob_col_eq(obj->value_color, value_color) &&
-        _knob_col_eq(obj->dot_color, dot_color))
+    if (we_colour_eq(obj->track_color, track_color) &&
+        we_colour_eq(obj->value_color, value_color) &&
+        we_colour_eq(obj->dot_color, dot_color))
         return;
 
     obj->track_color = track_color;

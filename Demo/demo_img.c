@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t img_title;
 static we_label_obj_t img_note;
 static we_label_obj_t img_fps;
@@ -96,3 +98,58 @@ void we_img_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &img_fps, &img_fps_timer,
                        &img_last_frames, img_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t img_stat;
+static we_img_obj_t   img_main;
+static we_img_obj_t   img_overlay;
+
+static uint32_t img_ticks_ms;
+static char     img_stat_buf[16];
+
+/**
+ * @brief 初始化图片控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @details 主图 128x64 正好满屏；叠加图 80x80 垂直居中裁剪显示，
+ *          透明度呼吸；左下角状态字叠在图上。
+ */
+void we_img_simple_demo_init(we_lcd_t *lcd)
+{
+    img_ticks_ms = 0U;
+    memset(img_stat_buf, 0, sizeof(img_stat_buf));
+
+    we_img_obj_init(&img_main, lcd, 0, 0, demo_rgb565_indexqoi_be_128x64, 255);
+    we_img_obj_init(&img_overlay, lcd, 24, -8, demo_argb8565_indexqoi_be_80x80, 200);
+
+    we_label_obj_init(&img_stat, lcd, 2, 50,
+                      "OP 255", we_font_consolas_18,
+                      RGB888TODEV(0, 0, 0), 255);
+}
+
+/**
+ * @brief 图片演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_img_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t opacity;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    img_ticks_ms += ms_tick;
+
+    opacity = (uint8_t)(90U + (((uint32_t)(we_sin((int16_t)((img_ticks_ms * 6U) / 100U) & 0x1FF))
+                                + 32768U) * 130U >> 16));
+
+    we_img_obj_set_opacity(&img_overlay, opacity);
+
+    snprintf(img_stat_buf, sizeof(img_stat_buf), "OP %03u", (unsigned)opacity);
+    we_label_set_text(&img_stat, img_stat_buf);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

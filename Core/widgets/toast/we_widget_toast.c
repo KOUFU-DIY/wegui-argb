@@ -12,7 +12,7 @@
 
 #include "we_widget_toast.h"
 #include "we_render.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* 阶段状态机取值（存入 obj->state） */
 enum
@@ -31,21 +31,6 @@ enum
 /* --------------------------------------------------------------------------
  * 内部工具
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 颜色相等比较（RGB565/RGB888），供 setter 的“值未变则跳过”守卫使用。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static __inline uint8_t _toast_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
 
 /**
  * @brief 计算隐藏态停放 Y（整体移出屏幕顶部再留 4px 余量）。
@@ -290,17 +275,12 @@ static void _toast_draw_cb(void *ptr)
 
     {
         /* PFB 窗口收窄到面板矩形：任何文字像素都不会画出横幅之外 */
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
 
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             uint16_t txt_w;
             int32_t avail_w;
@@ -309,16 +289,17 @@ static void _toast_draw_cb(void *ptr)
             int16_t txt_x;
             int16_t txt_y;
 
-            lcd->pfb_area.x0 = (uint16_t)new_x0;
-            lcd->pfb_area.x1 = (uint16_t)new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end = (uint16_t)new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                            (new_x0 - (int16_t)old_pfb_area.x0);
-
+#if (WE_CFG_MONO_STYLE == 1)
+            /* 单色样式：黑底横幅 + 1px 白描边 */
+            we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                            (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                            WE_TOAST_RADIUS, RGB888TODEV(255, 255, 255),
+                                            RGB888TODEV(0, 0, 0), obj->opacity);
+#else
             we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                              (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                              WE_TOAST_RADIUS, obj->bg_color, obj->opacity);
+#endif
 
             /* 按可见 bbox 垂直居中 */
             txt_w = we_get_text_width(obj->font, obj->text);
@@ -369,10 +350,7 @@ static void _toast_draw_cb(void *ptr)
             }
         }
 
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 
@@ -472,7 +450,7 @@ void we_toast_set_colors(we_toast_obj_t *obj, colour_t bg, colour_t text_color)
 {
     if (obj == NULL || obj->base.lcd == NULL)
         return;
-    if (_toast_colour_eq(obj->bg_color, bg) && _toast_colour_eq(obj->text_color, text_color))
+    if (we_colour_eq(obj->bg_color, bg) && we_colour_eq(obj->text_color, text_color))
         return;
 
     obj->bg_color = bg;

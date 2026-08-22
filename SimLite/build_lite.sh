@@ -27,22 +27,22 @@ fi
 
 SRCS="$LITE_SRCS
 $(find "$REPO/Core" -maxdepth 1 -name '*.c' ! -name '*_bckup.c')
+$(find "$REPO/Core/components" -maxdepth 1 -name '*.c')
 $(find "$REPO/Core/widgets" -mindepth 2 -maxdepth 2 -name '*.c' ! -name '*_bckup.c')
 $(find "$REPO/Core/widgets_preview" -mindepth 2 -maxdepth 2 -name '*.c')
 $(find "$REPO/Demo/preview" -maxdepth 1 -name '*.c')"
 
-for d in demo_showcase demo_common demo_label demo_btn demo_img demo_img_alpha demo_img_ex demo_arc \
-         demo_concentric_arc demo_group demo_slideshow demo_checkbox demo_label_ex demo_chart \
-         demo_toggle demo_progress demo_msgbox demo_flash_img demo_flash_font demo_slider \
-         demo_scroll_panel demo_dropdown demo_stepper demo_indicator demo_line demo_box \
-         demo_gauge demo_list demo_roller demo_marquee demo_toast demo_focus demo_focus2 \
-         demo_imgbtn demo_segdisp; do
-  SRCS="$SRCS
-$REPO/Demo/$d.c"
-done
+# 稳定 demo 清单唯一事实源 Demo/demo_manifest.txt（新增 demo 只改清单一处；模拟器编译全部条目）
+cr=$(printf '\r')
+while read -r f _tags; do
+  f=${f%"$cr"}
+  case "$f" in *.c) SRCS="$SRCS
+$REPO/Demo/$f" ;; esac
+done < "$REPO/Demo/demo_manifest.txt"
 
 SRCS="$SRCS
 $REPO/tool/1.font2c/output/simli_16_2bpp.c
+$REPO/tool/1.font2c/output/simsun_12_2bpp.c
 $REPO/tool/1.font2c/output/msyh_16_4bpp_ime.c
 $REPO/tool/1.font2c/output/gbsn00lp_2_16_4bpp.c
 $REPO/tool/2.img2c/output/c/res_img.c

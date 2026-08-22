@@ -81,5 +81,5 @@
 - [ ] 长按翻月热区无连发（stepper 的 STAY 连发套路可平移过来）
 
 ## 对应 demo
-- `Demo/preview/demo_calendar.c`（DEMO_ID 122：2026-07-20 初始 +
+- `Demo/preview/demo_calendar.c`（DEMO_ID 106：2026-07-20 初始 +
   回调回显 SEL 日期 + 定时自动翻月循环演示）

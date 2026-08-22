@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t  tgl_title;
 static we_label_obj_t  tgl_fps_label;
 static we_label_obj_t  tgl_hint;
@@ -30,7 +32,6 @@ static we_toggle_obj_t tgl_all;
 
 static uint32_t tgl_fps_timer;
 static uint32_t tgl_last_frames;
-static uint32_t tgl_tick_acc;
 static uint32_t tgl_auto_timer;
 static uint8_t  tgl_last_snap;
 static char     tgl_fps_buf[16];
@@ -120,7 +121,6 @@ void we_toggle_simple_demo_init(we_lcd_t *lcd)
 
     tgl_fps_timer   = 0U;
     tgl_last_frames = 0U;
-    tgl_tick_acc    = 0U;
     tgl_auto_timer  = 0U;
     tgl_last_snap   = 0xFFU;
     memset(tgl_fps_buf, 0, sizeof(tgl_fps_buf));
@@ -213,7 +213,6 @@ void we_toggle_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     if (lcd == NULL || ms_tick == 0U)
         return;
 
-    tgl_tick_acc += ms_tick;
     tgl_auto_timer += ms_tick;
 
     if (tgl_auto_timer >= 2500U)
@@ -232,3 +231,144 @@ void we_toggle_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &tgl_fps_label, &tgl_fps_timer,
                        &tgl_last_frames, tgl_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t  tgl_status_label;
+static we_label_obj_t  tgl_wifi_lbl;
+static we_label_obj_t  tgl_dark_lbl;
+static we_label_obj_t  tgl_all_lbl;
+static we_toggle_obj_t tgl_wifi;
+static we_toggle_obj_t tgl_dark;
+static we_toggle_obj_t tgl_all;
+
+static uint32_t tgl_auto_timer;
+static uint8_t  tgl_last_snap;
+static char     tgl_status_buf[24];
+
+/**
+ * @brief 打包三个开关当前状态为位图快照
+ * @return 状态位图（bit0~bit2 对应三个开关）
+ */
+static uint8_t _snap(void)
+{
+    return (uint8_t)((we_toggle_is_checked(&tgl_wifi) << 0) |
+                     (we_toggle_is_checked(&tgl_dark) << 1) |
+                     (we_toggle_is_checked(&tgl_all) << 2));
+}
+
+/**
+ * @brief 刷新底部开关状态文本
+ * @return 无
+ */
+static void _update_status(void)
+{
+    sprintf(tgl_status_buf, "W:%d AU:%d ALL:%d",
+            we_toggle_is_checked(&tgl_wifi),
+            we_toggle_is_checked(&tgl_dark),
+            we_toggle_is_checked(&tgl_all));
+    we_label_set_text(&tgl_status_label, tgl_status_buf);
+}
+
+/**
+ * @brief 处理 ALL 开关事件并联动其余开关
+ * @param obj 传入：触发事件的开关对象指针
+ * @param event 传入：事件类型
+ * @param data 传入：输入设备数据
+ * @return 1 表示事件已消费
+ */
+static uint8_t _all_event_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    we_toggle_obj_t *t = (we_toggle_obj_t *)obj;
+    (void)data;
+
+    switch (event)
+    {
+    case WE_EVENT_PRESSED:
+        t->pressed = 1U;
+        we_obj_invalidate((we_obj_t *)t);
+        break;
+    case WE_EVENT_RELEASED:
+        t->pressed = 0U;
+        we_obj_invalidate((we_obj_t *)t);
+        break;
+    case WE_EVENT_CLICKED:
+    {
+        uint8_t val;
+        we_toggle_toggle(t);
+        val = we_toggle_is_checked(t);
+        we_toggle_set_checked(&tgl_wifi, val);
+        we_toggle_set_checked(&tgl_dark, val);
+        break;
+    }
+    default:
+        break;
+    }
+    return 1;
+}
+
+/**
+ * @brief 初始化 toggle demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_toggle_simple_demo_init(we_lcd_t *lcd)
+{
+    tgl_auto_timer = 0U;
+    tgl_last_snap  = 0xFFU;
+    memset(tgl_status_buf, 0, sizeof(tgl_status_buf));
+
+    /* 两行开关：WiFi / ALL 联动一行，Auto（定时自动翻转）一行 */
+    we_toggle_obj_init(&tgl_wifi, lcd, 2, 2, 36, 18, NULL);
+    we_label_obj_init(&tgl_wifi_lbl, lcd, 42, 5,
+                      "WiFi", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+
+    we_toggle_obj_init(&tgl_all, lcd, 68, 2, 36, 18, _all_event_cb);
+    we_label_obj_init(&tgl_all_lbl, lcd, 108, 5,
+                      "ALL", we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    we_toggle_obj_init(&tgl_dark, lcd, 2, 26, 36, 18, NULL);
+    we_label_obj_init(&tgl_dark_lbl, lcd, 42, 29,
+                      "Auto", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+
+    we_toggle_set_checked(&tgl_wifi, 1);
+
+    _update_status();
+    we_label_obj_init(&tgl_status_label, lcd, 2, 50,
+                      tgl_status_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+/**
+ * @brief toggle demo 周期更新（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_toggle_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t snap;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    tgl_auto_timer += ms_tick;
+
+    if (tgl_auto_timer >= 2500U)
+    {
+        tgl_auto_timer = 0U;
+        we_toggle_toggle(&tgl_dark);
+    }
+
+    snap = _snap();
+    if (snap != tgl_last_snap)
+    {
+        tgl_last_snap = snap;
+        _update_status();
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

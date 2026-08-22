@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t demo_title;
 static we_label_obj_t demo_hint;
 static we_label_obj_t demo_fps;
@@ -194,3 +196,105 @@ void we_scroll_panel_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &demo_fps, &demo_fps_timer,
                        &demo_last_frames, demo_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t demo_stat;
+
+static we_scroll_panel_obj_t demo_panel;
+static we_label_obj_t panel_header;
+static we_label_obj_t panel_item_a;
+static we_label_obj_t panel_item_b;
+static we_btn_obj_t panel_btn_a;
+static we_label_obj_t panel_item_c;
+
+static char demo_stat_buf[16];
+static int16_t demo_last_scroll_y;
+
+static void _scroll_panel_demo_update_stat(void)
+{
+    sprintf(demo_stat_buf, "SC %03d", (int)demo_panel.scroll_y);
+    we_label_set_text(&demo_stat, demo_stat_buf);
+}
+
+static uint8_t _scroll_panel_demo_ctrl_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    we_btn_obj_t *btn = (we_btn_obj_t *)obj;
+    (void)data;
+
+    switch (event)
+    {
+    case WE_EVENT_PRESSED:
+        we_btn_set_state(btn, WE_BTN_STATE_PRESSED);
+        break;
+    case WE_EVENT_RELEASED:
+        we_btn_set_state(btn, WE_BTN_STATE_NORMAL);
+        break;
+    case WE_EVENT_CLICKED:
+        we_btn_set_text(btn, "HIT!");
+        break;
+    default:
+        break;
+    }
+    return 1U;
+}
+
+void we_scroll_panel_simple_demo_init(we_lcd_t *lcd)
+{
+    demo_last_scroll_y = -32768;
+    memset(demo_stat_buf, 0, sizeof(demo_stat_buf));
+
+    /* 面板占主体，底行显示滚动偏移；内容 120 行 > 视口 48 行可拖出惯性回弹 */
+    we_scroll_panel_obj_init(&demo_panel, lcd, 0, 0, 128, 48,
+                             RGB888TODEV(20, 27, 38), RGB888TODEV(58, 66, 82),
+                             0U, 255);
+    we_scroll_panel_set_scrollbar(&demo_panel, 1U, 4U);
+    we_scroll_panel_set_scrollbar_opacity(&demo_panel, 180U);
+    we_scroll_panel_set_content_h(&demo_panel, 120);
+
+    we_label_obj_init(&panel_header, lcd, 0, 0,
+                      "SCROLL", we_font_consolas_18,
+                      RGB888TODEV(255, 154, 102), 255);
+    we_label_obj_init(&panel_item_a, lcd, 0, 0,
+                      "Item 01 clip", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+    we_label_obj_init(&panel_item_b, lcd, 0, 0,
+                      "Item 02 drag", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 255);
+    we_btn_obj_init(&panel_btn_a, lcd, 0, 0, 70, 20,
+                    "PANEL A", we_font_consolas_18, _scroll_panel_demo_ctrl_cb);
+    we_label_obj_init(&panel_item_c, lcd, 0, 0,
+                      "Item 03 rebound", we_font_consolas_18,
+                      RGB888TODEV(255, 164, 186), 255);
+
+    we_scroll_panel_add_child(&demo_panel, (we_obj_t *)&panel_header);
+    we_scroll_panel_add_child(&demo_panel, (we_obj_t *)&panel_item_a);
+    we_scroll_panel_add_child(&demo_panel, (we_obj_t *)&panel_item_b);
+    we_scroll_panel_add_child(&demo_panel, (we_obj_t *)&panel_btn_a);
+    we_scroll_panel_add_child(&demo_panel, (we_obj_t *)&panel_item_c);
+
+    we_scroll_panel_set_child_pos(&demo_panel, (we_obj_t *)&panel_header, 4, 4);
+    we_scroll_panel_set_child_pos(&demo_panel, (we_obj_t *)&panel_item_a, 4, 22);
+    we_scroll_panel_set_child_pos(&demo_panel, (we_obj_t *)&panel_item_b, 4, 40);
+    we_scroll_panel_set_child_pos(&demo_panel, (we_obj_t *)&panel_btn_a, 4, 60);
+    we_scroll_panel_set_child_pos(&demo_panel, (we_obj_t *)&panel_item_c, 4, 88);
+
+    strcpy(demo_stat_buf, "SC 000");
+    we_label_obj_init(&demo_stat, lcd, 2, 51,
+                      demo_stat_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+void we_scroll_panel_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    if (demo_last_scroll_y != demo_panel.scroll_y)
+    {
+        demo_last_scroll_y = demo_panel.scroll_y;
+        _scroll_panel_demo_update_stat();
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

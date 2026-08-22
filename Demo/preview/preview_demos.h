@@ -4,19 +4,26 @@
 #include "we_gui_driver.h"
 
 /* demo 层统一字体：与 simple_widget_demos.h 同款定义（资源头只在
- * demo 层包含，Core 零资源感知，控件字体一律经 init 显式传入）。 */
+ * demo 层包含，Core 零资源感知，控件字体一律经 init 显式传入；
+ * 小屏与大屏的别名指向也保持一致，未引用的字库由链接器剔除）。 */
 #include "simli_16_2bpp.h"
+#include "simsun_12_2bpp.h"
 #ifndef we_font_consolas_18
+#if (SCREEN_WIDTH <= 128)
+#define we_font_consolas_18 ((const unsigned char *)&simsun_12_2bpp)
+#else
 #define we_font_consolas_18 ((const unsigned char *)&simli_16_2bpp)
+#endif
 #endif
 
 /* ============================ preview 孵化区 ============================
  * 本文件声明 preview（实验）控件的 demo 入口：
  *   1. 控件实现位于 Core/widgets_preview/<name>/we_widget_<name>.c/.h；
  *   2. demo 位于 Demo/preview/demo_<name>.c；
- *   3. DEMO_ID 使用独立编号段（100 起），与稳定区 1..28 隔离；
- *   4. 三目标均编译（模拟器 CMake glob 自动收编；两个 Keil 工程带
- *      we_widget_preview/demo_preview 文件组，未选中的由链接器剔除）；
+ *   3. DEMO_ID 使用独立编号段（100 起），与稳定区 1..33 隔离；
+ *   4. 四目标均编译（SimLite 与 AD14N 构建按源码 glob 自动收编；两个
+ *      Keil 工程带 we_widget_preview/demo_preview 文件组，未选中的由
+ *      链接器剔除）；
  *   5. 未细致优化、随时可能下架；毕业后迁入 Core/widgets 与稳定编号段。
  *
  * 编号一览（2026-07 重排：常用在前、其余靠后；textarea 因弹层键盘

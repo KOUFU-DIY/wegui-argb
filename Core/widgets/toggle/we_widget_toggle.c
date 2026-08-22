@@ -60,6 +60,7 @@ static const we_class_t _toggle_class = {
 /* --------------------------------------------------------------------------
  * 颜色常量（编译期生成，存放 Flash）
  * -------------------------------------------------------------------------- */
+#if (WE_CFG_MONO_STYLE == 0)
 static const colour_t _c_on    = RGB888_CONST(WE_TOGGLE_COLOR_ON_R,
                                                WE_TOGGLE_COLOR_ON_G,
                                                WE_TOGGLE_COLOR_ON_B);
@@ -70,6 +71,7 @@ static const colour_t _c_thumb = RGB888_CONST(WE_TOGGLE_COLOR_THUMB_R,
                                                WE_TOGGLE_COLOR_THUMB_G,
                                                WE_TOGGLE_COLOR_THUMB_B);
 static const colour_t _c_black = RGB888_CONST(0, 0, 0);
+#endif
 
 #if WE_TOGGLE_USE_ANIM
 
@@ -184,14 +186,16 @@ static void _toggle_draw_cb(void *ptr)
     uint8_t blend_alpha = obj->checked ? 255U : 0U;
 #endif
 
+#if (WE_CFG_MONO_STYLE == 0)
     /* ---- 2. 计算轨道颜色 ------------------------------------------ */
-colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
+    colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
     if (obj->pressed)
     {
         /* 按下时向黑色混合，产生轻微暗化的按压反馈 */
         track_color = we_colour_blend(_c_black, track_color,
                                       (uint8_t)WE_TOGGLE_PRESS_DARKEN);
     }
+#endif
 
     track_y = y;
     track_h = h;
@@ -224,6 +228,33 @@ colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
 #endif
     thumb_cy = (int16_t)(track_y + track_h / 2);
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* ---- 4/5. 单色样式：OFF=描边胶囊+实心滑块，ON=实心胶囊+挖空滑块 -- */
+    {
+        static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
+        static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+        uint8_t on_now = (blend_alpha >= 128U) ? 1U : 0U;
+        int16_t tr = (int16_t)(thumb_d / 2);
+
+        if (on_now == 0U)
+            we_draw_round_rect_outline_fill(lcd, x, track_y,
+                                            (uint16_t)w, (uint16_t)track_h,
+                                            (uint16_t)(track_h / 2),
+                                            mono_fg, mono_bg, obj->opacity);
+        else
+            we_draw_round_rect_analytic_fill(lcd, x, track_y,
+                                             (uint16_t)w, (uint16_t)track_h,
+                                             (uint16_t)(track_h / 2),
+                                             mono_fg, obj->opacity);
+        we_draw_round_rect_analytic_fill(lcd,
+                                         (int16_t)(thumb_cx - tr),
+                                         (int16_t)(thumb_cy - tr),
+                                         (uint16_t)(tr * 2),
+                                         (uint16_t)(tr * 2),
+                                         (uint16_t)tr,
+                                         (on_now != 0U) ? mono_bg : mono_fg, obj->opacity);
+    }
+#else
     /* ---- 4. 绘制轨道（radius = h/2 的圆角矩形，几何上等价于胶囊） -- */
     we_draw_round_rect_analytic_fill(lcd, x, track_y,
                                      (uint16_t)w, (uint16_t)track_h,
@@ -241,6 +272,7 @@ colour_t track_color = we_colour_blend(_c_on, _c_off, blend_alpha);
                                          (uint16_t)tr,
                                          _c_thumb, obj->opacity);
     }
+#endif
 
     /* draw_cb 仅负责按当前 anim_step 绘制，不推进状态、不标脏。
      * 动画推进由中央动画引擎（we_anim_t / lcd->anim_head）完成，

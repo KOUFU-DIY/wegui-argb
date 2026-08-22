@@ -25,6 +25,8 @@
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t    focus_title;
 static we_label_obj_t    focus_hint;
 static we_label_obj_t    focus_fps;
@@ -149,6 +151,62 @@ void we_focus_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
         return;
     we_demo_update_fps(lcd, &focus_fps, &focus_fps_timer, &focus_last_frames, focus_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_btn_obj_t      focus_btn_a;
+static we_btn_obj_t      focus_btn_b;
+static we_group_obj_t    focus_group;
+static we_btn_obj_t      focus_btn_g1;
+static we_btn_obj_t      focus_btn_g2;
+
+/**
+ * @brief 按钮用户回调：CLICKED 时切换按钮文本给出反馈
+ * @note 按键合成的 CLICKED 事件 data 为 NULL，这里不解引用坐标。
+ */
+static uint8_t _focus_btn_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    (void)data;
+    if (event == WE_EVENT_CLICKED)
+        we_btn_set_text((we_btn_obj_t *)obj, "HIT");
+    return 1U;
+}
+
+/**
+ * @brief 初始化聚焦演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @details 顶行两键练方向/Tab 导航；下方 group 练 OK 下钻 / BACK 退出。
+ */
+void we_focus_simple_demo_init(we_lcd_t *lcd)
+{
+    we_btn_obj_init(&focus_btn_a, lcd, 6, 6, 46, 20, "BTN A", we_font_consolas_18, _focus_btn_cb);
+    we_btn_obj_init(&focus_btn_b, lcd, 62, 6, 46, 20, "BTN B", we_font_consolas_18, _focus_btn_cb);
+
+    /* group 容器：聚焦后 OK 进入子控件、BACK 退回容器本体 */
+    we_group_obj_init(&focus_group, lcd, 6, 34, 112, 26, RGB888TODEV(30, 38, 52), 255);
+    we_btn_obj_init(&focus_btn_g1, lcd, 0, 0, 42, 18, "G-1", we_font_consolas_18, _focus_btn_cb);
+    we_btn_obj_init(&focus_btn_g2, lcd, 0, 0, 42, 18, "G-2", we_font_consolas_18, _focus_btn_cb);
+    we_group_add_child(&focus_group, (we_obj_t *)&focus_btn_g1);
+    we_group_add_child(&focus_group, (we_obj_t *)&focus_btn_g2);
+    we_group_set_child_pos(&focus_group, (we_obj_t *)&focus_btn_g1, 6, 4);
+    we_group_set_child_pos(&focus_group, (we_obj_t *)&focus_btn_g2, 60, 4);
+
+    /* 初始焦点落在第一个按钮上，光标立即可见 */
+    we_focus_set(lcd, (we_obj_t *)&focus_btn_a);
+}
+
+/**
+ * @brief 聚焦演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_focus_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */
 
 #else /* WE_CFG_ENABLE_KEY_INPUT == 0：降级桩，提示开启总开关 */
 

@@ -20,6 +20,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /* ---- 控件对象 ---- */
 static we_label_obj_t label_title;       /* 演示标题，固定不动 */
 static we_label_obj_t label_note;        /* 功能说明，固定不动 */
@@ -40,7 +42,7 @@ static char     label_main_buf[24];      /* 主 Label 动态文本缓冲区 */
  */
 void we_label_simple_demo_init(we_lcd_t *lcd)
 {
-    /* 参考布局 280x240；坐标为固定像素，按 240 宽屏排布；如需跨分辨率请套用 we_demo_scale_x/y。 */
+    /* 参考布局 280x240；坐标为固定像素。 */
     int16_t margin_x = 10;
     int16_t title_y  = 10;
     int16_t note_y   = 32;
@@ -134,3 +136,99 @@ void we_label_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &label_fps, &label_fps_timer,
                        &label_last_frames, label_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/* ---- 控件对象 ---- */
+static we_label_obj_t label_title;       /* 标题，固定不动 */
+static we_label_obj_t label_fps;         /* 右上角帧率显示 */
+static we_label_obj_t label_main;        /* 主演示：文本与颜色随 sin 波变化 */
+static we_label_obj_t label_sub;         /* 副演示：上下浮动 + 透明度渐变 */
+
+/* ---- 状态变量 ---- */
+static uint32_t label_ticks_ms;
+static uint32_t label_fps_timer;
+static uint32_t label_last_frames;
+static char     label_fps_buf[16];
+static char     label_main_buf[16];
+
+/**
+ * @brief 初始化标签控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_label_simple_demo_init(we_lcd_t *lcd)
+{
+    int16_t fps_x = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
+
+    label_ticks_ms    = 0U;
+    label_fps_timer   = 0U;
+    label_last_frames = 0U;
+    memset(label_fps_buf,  0, sizeof(label_fps_buf));
+    memset(label_main_buf, 0, sizeof(label_main_buf));
+
+    /* 标题行：白色，固定 */
+    we_label_obj_init(&label_title, lcd, 2, 2,
+                      "LABEL", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* FPS 计数：青绿色，与标题同行靠右 */
+    we_label_obj_init(&label_fps, lcd, fps_x, 2,
+                      "FPS", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 255);
+
+    /* 主演示：金黄色，tick 中实时更新文本和颜色 */
+    we_label_obj_init(&label_main, lcd, 2, 22,
+                      "LABEL 000", we_font_consolas_18,
+                      RGB888TODEV(255, 214, 120), 255);
+
+    /* 副演示：青绿色，透明度初始 220，tick 中上下浮动 */
+    we_label_obj_init(&label_sub, lcd, 2, 44,
+                      "fade move", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 220);
+}
+
+/**
+ * @brief 标签演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_label_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int16_t  float_y;
+    uint8_t  opacity;
+    uint8_t  wave;
+    colour_t color;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    label_ticks_ms += ms_tick;
+
+    /* sin 波映射到 0~255，用于主 Label 文本数字和颜色分量 */
+    wave = (uint8_t)(((uint32_t)(we_sin((int16_t)((label_ticks_ms * 6U) / 100U) & 0x1FF)) + 32768U) >> 8);
+
+    /* 副 Label 透明度在 80~230 之间以较慢频率来回变化 */
+    opacity = (uint8_t)(80U + (((uint32_t)(we_sin((int16_t)((label_ticks_ms * 5U) / 100U) & 0x1FF)) + 32768U) * 150U >> 16));
+
+    /* 副 Label Y 坐标以 sin 波上下浮动约 ±4px */
+    float_y = (int16_t)(44 + ((we_sin((int16_t)((label_ticks_ms * 4U) / 100U) & 0x1FF)
+                               * 4) >> 15));
+
+    snprintf(label_main_buf, sizeof(label_main_buf), "LABEL %03u", (unsigned)wave);
+    we_label_set_text(&label_main, label_main_buf);
+
+    color = RGB888TODEV((uint8_t)(120U + wave / 2U),
+                        (uint8_t)(120U + wave / 3U),
+                        (uint8_t)(255U - wave / 3U));
+    we_label_set_color(&label_main, color);
+
+    we_label_set_opacity(&label_sub, opacity);
+    we_label_obj_set_pos(&label_sub, 2, float_y);
+
+    we_demo_update_fps(lcd, &label_fps, &label_fps_timer,
+                       &label_last_frames, label_fps_buf, ms_tick);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

@@ -1,5 +1,5 @@
 #include "we_widget_progress.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 #include "we_render.h"
 
 /**
@@ -321,6 +321,34 @@ static void _progress_draw_cb(void *ptr)
     if (lcd == NULL)
         return;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：描边轨道 + 实心已填段 */
+    {
+        static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
+        static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+        uint16_t ir;
+
+        _progress_draw_track_bar(obj, lcd, mono_fg);
+        if (obj->base.w > 2U && obj->base.h > 2U)
+        {
+            ir = obj->radius;
+            if (ir > 0U)
+                ir--;
+            if (ir > (uint16_t)(obj->base.w - 2U) / 2U)
+                ir = (uint16_t)((obj->base.w - 2U) / 2U);
+            if (ir > (uint16_t)(obj->base.h - 2U) / 2U)
+                ir = (uint16_t)((obj->base.h - 2U) / 2U);
+            we_draw_round_rect_analytic_fill(lcd, (int16_t)(obj->base.x + 1),
+                                             (int16_t)(obj->base.y + 1),
+                                             (uint16_t)(obj->base.w - 2U),
+                                             (uint16_t)(obj->base.h - 2U),
+                                             ir, mono_bg, obj->opacity);
+        }
+        fill_w = _progress_calc_fill_w(obj, obj->display_value);
+        if (fill_w > 0U)
+            _progress_draw_fill_bar(obj, lcd, fill_w, mono_fg);
+    }
+#else
     _progress_draw_track_bar(obj, lcd, obj->track_color);
 
     fill_w = _progress_calc_fill_w(obj, obj->display_value);
@@ -328,6 +356,7 @@ static void _progress_draw_cb(void *ptr)
     {
         _progress_draw_fill_bar(obj, lcd, fill_w, obj->fill_color);
     }
+#endif
 }
 
 /**

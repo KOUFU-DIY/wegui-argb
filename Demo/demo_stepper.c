@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t   sp_title;
 static we_label_obj_t   sp_fps_label;
 static we_label_obj_t   sp_temp_cap;
@@ -135,3 +137,79 @@ void we_stepper_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &sp_fps_label, &sp_fps_timer,
                        &sp_last_frames, sp_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t   sp_title;
+static we_label_obj_t   sp_temp_cap;
+static we_label_obj_t   sp_status_label;
+static we_stepper_obj_t sp_temp;
+
+static char sp_status_buf[16];
+
+/**
+ * @brief 刷新底部状态行，显示当前值。
+ * @return 无。
+ */
+static void _sp_update_status(void)
+{
+    int32_t t = we_stepper_get_value(&sp_temp); /* 定点 x10 */
+
+    sprintf(sp_status_buf, "T:%ld.%ldC",
+            (long)(t / 10), (long)(t % 10));
+    we_label_set_text(&sp_status_label, sp_status_buf);
+}
+
+/**
+ * @brief 数值改变回调：刷新状态行。
+ * @param obj 触发回调的 stepper 对象。
+ * @param value 新定点值。
+ * @return 无。
+ */
+static void _sp_changed_cb(we_stepper_obj_t *obj, int32_t value)
+{
+    (void)obj;
+    (void)value;
+    _sp_update_status();
+}
+
+/**
+ * @brief 初始化 stepper demo（128x64 布局）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_stepper_simple_demo_init(we_lcd_t *lcd)
+{
+    memset(sp_status_buf, 0, sizeof(sp_status_buf));
+
+    we_label_obj_init(&sp_title, lcd, 2, 2,
+                      "STEPPER", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* 温度：16.0~30.0，步进 0.5，1 位小数；按住 +/- 连续步进 */
+    we_stepper_obj_init(&sp_temp, lcd, 2, 18, 96, 24,
+                        we_font_consolas_18, 1U, 160, 300, 5, 230);
+    we_stepper_set_changed_cb(&sp_temp, _sp_changed_cb);
+    we_label_obj_init(&sp_temp_cap, lcd, 102, 24,
+                      "C", we_font_consolas_18,
+                      RGB888TODEV(160, 200, 245), 255);
+
+    _sp_update_status();
+    we_label_obj_init(&sp_status_label, lcd, 2, 50,
+                      sp_status_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+/**
+ * @brief stepper demo 周期更新（控件本身事件驱动）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_stepper_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

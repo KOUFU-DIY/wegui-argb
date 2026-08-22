@@ -53,4 +53,4 @@
 - 低电阈值处可加闪烁提醒（接中央动画引擎）
 
 ## 对应 demo
-- `Demo/preview/demo_statusbar.c`（DEMO_ID 129：状态栏置顶，下方大 label 联动回显各值；tick 驱动时间每 2 秒 +1 分钟、电池 100→5 递减循环（过 20% 变红、到 5% 切充电态回满）、WiFi/信号各自周期变格）
+- `Demo/preview/demo_statusbar.c`（DEMO_ID 112：状态栏置顶，下方大 label 联动回显各值；tick 驱动时间每 2 秒 +1 分钟、电池 100→5 递减循环（过 20% 变红、到 5% 切充电态回满）、WiFi/信号各自周期变格）

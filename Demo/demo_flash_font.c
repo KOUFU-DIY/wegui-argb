@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_flash_font_face_t ff_face;
 static uint8_t ff_glyph_scratch[WE_FLASH_FONT_SCRATCH_MAX];
 
@@ -156,3 +158,115 @@ void we_flash_font_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ff_fps, &ff_fps_timer,
                        &ff_last_frames, ff_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_flash_font_face_t ff_face;
+static uint8_t ff_glyph_scratch[WE_FLASH_FONT_SCRATCH_MAX];
+
+static we_label_obj_t      ff_status;
+static we_flash_font_obj_t ff_body;
+
+static uint32_t ff_ticks_ms;
+static uint32_t ff_text_timer;
+static uint8_t  ff_text_idx;
+static uint8_t  ff_font_ready;
+static char     ff_status_buf[16];
+
+static const char *const ff_text_pool[] = {
+    "菜单 系统设置",
+    "WiFi 100%\n中文 12:00",
+    "Hello WeGui!\n你好 世界",
+};
+
+#define FF_TEXT_POOL_SIZE (sizeof(ff_text_pool) / sizeof(ff_text_pool[0]))
+#define FF_TEXT_PERIOD_MS 1500U
+
+static const colour_t ff_color_pool[] = {
+    RGB888_CONST(244, 244, 244),
+    RGB888_CONST(90, 220, 255),
+    RGB888_CONST(255, 196, 80),
+};
+#define FF_COLOR_POOL_SIZE (sizeof(ff_color_pool) / sizeof(ff_color_pool[0]))
+
+/**
+ * @brief 初始化外挂 Flash 字体演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_flash_font_simple_demo_init(we_lcd_t *lcd)
+{
+    font_external_handle_t font_handle;
+
+    if (lcd == NULL)
+        return;
+
+    ff_ticks_ms   = 0U;
+    ff_text_timer = 0U;
+    ff_text_idx   = 0U;
+    ff_font_ready = 0U;
+    memset(ff_status_buf, 0, sizeof(ff_status_buf));
+
+    snprintf(ff_status_buf, sizeof(ff_status_buf), "EXT %u/%u",
+             (unsigned)(ff_text_idx + 1U), (unsigned)FF_TEXT_POOL_SIZE);
+    we_label_obj_init(&ff_status, lcd, 2, 2,
+                      ff_status_buf, we_font_consolas_18,
+                      RGB888TODEV(255, 196, 80), 255);
+
+    font_handle.font = &gbsn00lp_2_16_4bpp;
+    font_handle.blob_addr = GBSN00LP_2_16_4BPP_ADDR;
+
+    if (!we_flash_font_face_init(&ff_face, lcd, &font_handle,
+                                 ff_glyph_scratch, (uint32_t)sizeof(ff_glyph_scratch)))
+    {
+        we_label_set_text(&ff_status, "FACE ERR");
+        return;
+    }
+
+    if (!we_flash_font_obj_init(&ff_body, &ff_face, 2, 18,
+                                ff_text_pool[ff_text_idx],
+                                ff_color_pool[ff_text_idx % FF_COLOR_POOL_SIZE], 255U))
+    {
+        we_label_set_text(&ff_status, "OBJ ERR");
+        memset(&ff_face, 0, sizeof(ff_face));
+        return;
+    }
+
+    ff_font_ready = 1U;
+}
+
+/**
+ * @brief 外挂 Flash 字体演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_flash_font_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t opacity;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    if (ff_font_ready == 0U)
+        return;
+
+    ff_ticks_ms += ms_tick;
+    ff_text_timer += ms_tick;
+
+    opacity = (uint8_t)(90U + (((uint32_t)(we_sin((int16_t)((ff_ticks_ms * 25U) / 100U) & 0x1FF))
+                                + 32768U) * 165U >> 16));
+    we_flash_font_obj_set_opacity(&ff_body, opacity);
+
+    if (ff_text_timer >= FF_TEXT_PERIOD_MS)
+    {
+        ff_text_timer = 0U;
+        ff_text_idx = (uint8_t)((ff_text_idx + 1U) % FF_TEXT_POOL_SIZE);
+        we_flash_font_obj_set_text(&ff_body, ff_text_pool[ff_text_idx]);
+        we_flash_font_obj_set_color(&ff_body, ff_color_pool[ff_text_idx % FF_COLOR_POOL_SIZE]);
+
+        snprintf(ff_status_buf, sizeof(ff_status_buf), "EXT %u/%u",
+                 (unsigned)(ff_text_idx + 1U), (unsigned)FF_TEXT_POOL_SIZE);
+        we_label_set_text(&ff_status, ff_status_buf);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

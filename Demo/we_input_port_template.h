@@ -12,11 +12,24 @@
  * 2. 它只作为“移植输入设备时”的参考模板
  * 3. 适合触摸屏、按键、编码器等输入链路做第一版骨架
  *
- * 使用步骤建议：
- * 1. 先根据你的硬件决定输入来源：触摸 / 按键 / 编码器
- * 2. 在 Demo/we_input_port_template.c 中补齐初始化和读取逻辑
- * 3. 每次得到新的输入状态后，填充 we_indev_data_t
- * 4. 再调用 we_gui_indev_handler(lcd, &data) 送进 GUI 内核
+ * 触摸链路（轮询式）使用步骤：
+ * 1. 在 we_input_port_read 中读取硬件，填充 we_indev_data_t
+ *    （x/y 坐标 + state = PRESSED/STAY/RELEASED/NONE）
+ * 2. 注册进内核：WE_CFG_ENABLE_INPUT_PORT_BIND=1 时把它作为
+ *    input_cb 传给 we_gui_init(...)；=0 时内核直接按
+ *    we_input_port_read 函数名链接，无需注册
+ * 3. we_gui_task_handler() 每周期自动轮询并分发；只有自行管理
+ *    输入状态机时才需要手动调 we_gui_indev_handler
+ *
+ * 按键链路（注入式，内核不轮询按键）：
+ * 1. 端口自行消抖，把物理按键翻译成语义键
+ *    WE_KEY_UP/DOWN/LEFT/RIGHT/PREV/NEXT/OK/BACK
+ * 2. 双沿端口调 we_gui_key_press / we_gui_key_release；OK 键必须
+ *    上报松开沿（按住期间才有按压视觉），方向键的自动重复由端口
+ *    重复注入按下沿
+ * 3. 简单端口调 we_gui_key_inject 一次注入完整一击
+ * 4. 三个注入函数 ISR 安全（SPSC 队列），可在中断里直接调用；
+ *    参考实现：SimLite/fenster_port.c、AD14N/Key_Port
  * -------------------------------------------------------------------------- */
 
 /**

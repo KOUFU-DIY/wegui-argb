@@ -9,9 +9,15 @@
 # 原理：开发者版 wegui_lite_dev 运行时选 demo（注册表），整个回归只构建一次
 # （tcc 秒级全量编译，gcc 兜底），再对每个 id 以 `<id> --autotest N` 跑
 # headless（不开窗，固定 16ms 步进），对每帧 ARGB8888 帧缓冲做 FNV-1a 链式
-# 哈希，与 autotest/golden.txt 逐行比对。帧缓冲布局与 565->8888 位扩展公式
+# 哈希，与基准文件逐行比对。帧缓冲布局与 565->8888 位扩展公式
 # 与原 SDL 模拟器一致，基准哈希历史值直接沿用。
 # 基准哈希只锁"渲染/动画"确定性；交互手感仍需人工验证。
+#
+# 配置指纹：基准哈希依赖 屏幕尺寸/色深/MONO/DMA 四个配置轴，每套配置各有
+# 一份基准文件——golden.txt 对应正典口径 280x240-rgb565-mono0-dma1，其余
+# 配置为 golden_<指纹>.txt（如 golden_128x64-gray8-mono1-dma0.txt）。基准
+# 文件首行 cfg=<指纹>，与 exe 实际配置（wegui_lite_dev --cfg）不符时拒跑，
+# 防止错配置下 -Update 把整表基线清洗掉。
 param(
     [switch]$Update,
     [int[]]$Ids,
@@ -33,17 +39,39 @@ if (-not $SkipBuild) {
 }
 if (-not (Test-Path $exe)) { throw "找不到 $exe（先跑 build_lite.ps1 -Dev）" }
 
+# 查询 exe 配置指纹并选定对应基准文件
+$cfgFp = ''
+try { $cfgFp = @(& $exe --cfg)[0].Trim() } catch {}
+if (-not $cfgFp -or $cfgFp -notmatch '^\d+x\d+-\w+-mono\d-dma\d$') {
+    throw "配置指纹查询失败（exe 输出: '$cfgFp'）——旧版 exe 请先重跑 build_lite.ps1 -Dev"
+}
+$defaultFp = '280x240-rgb565-mono0-dma1'
+if ($cfgFp -ne $defaultFp) {
+    $goldenFile = Join-Path $liteRoot ("autotest\golden_" + $cfgFp + ".txt")
+}
+Write-Host ("cfg=" + $cfgFp + "  golden=" + (Split-Path $goldenFile -Leaf))
+
 if (-not $Ids) { $Ids = @(1..33) + @(101..116) + @(118..119) + @(121..126) } # 0=showcase 需 800x480 跳过；117/120 已毕业留洞（→33/32）
 
-# 读入既有基准哈希
+# 读入既有基准哈希（首行 cfg 指纹必须与 exe 一致，防错配置清洗基线）
 $golden = @{}
 if (Test-Path $goldenFile) {
-    foreach ($line in Get-Content $goldenFile) {
+    $glines = @(Get-Content $goldenFile)
+    if ($glines.Count -eq 0 -or $glines[0].Trim() -notmatch '^cfg=(\S+)$') {
+        throw "基准文件缺 cfg 指纹头: $goldenFile（首行应为 cfg=$cfgFp）"
+    }
+    if ($Matches[1] -ne $cfgFp) {
+        throw ("配置指纹不匹配: exe=" + $cfgFp + " / golden=" + $Matches[1] + " —— 拒绝运行")
+    }
+    foreach ($line in $glines) {
         if ($line -match '^id=(\d+) frames=\d+ (?:script=(\S+) )?crc=[0-9A-F]+$') {
             $k = if ($Matches[2]) { "$($Matches[1]).s" } else { "$($Matches[1])" }
             $golden[$k] = $line.Trim()
         }
     }
+}
+elseif (-not $Update) {
+    Write-Host ("当前配置尚无基准文件，用 -Update 录制第一套基线: " + $goldenFile)
 }
 
 $results = [ordered]@{}
@@ -89,7 +117,7 @@ if ($Update) {
     # 合并写回：本次运行的结果覆盖对应键，未运行的旧基准行保留（-Ids 局部更新安全）
     foreach ($k in $results.Keys) { $golden[$k] = $results[$k] }
     $ids = @($golden.Keys) | Where-Object { $_ -notmatch '\.s$' } | ForEach-Object { [int]$_ } | Sort-Object
-    $lines = @()
+    $lines = @('cfg=' + $cfgFp)
     foreach ($i in $ids) {
         $lines += $golden["$i"]
         if ($golden.ContainsKey("$i.s")) { $lines += $golden["$i.s"] }

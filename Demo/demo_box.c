@@ -16,6 +16,8 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t bx_title;
 static we_label_obj_t bx_fps_label;
 static we_label_obj_t bx_lbl[4];
@@ -171,3 +173,77 @@ void we_box_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &bx_fps_label, &bx_fps_timer,
                        &bx_last_frames, bx_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t bx_title;
+static we_label_obj_t bx_lbl[2];
+static we_box_obj_t   bx[2];           /* 0=mix 1=fade */
+
+static uint32_t bx_fade_t;
+static uint8_t  bx_fade_dim;
+
+#define BX_PERIOD 1400U
+#define BX_DIM    56
+
+/**
+ * @brief 初始化 box demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_box_simple_demo_init(we_lcd_t *lcd)
+{
+    bx_fade_dim = 0U;
+    bx_fade_t   = BX_PERIOD / 2U;
+
+    we_label_obj_init(&bx_title, lcd, 2, 2,
+                      "BOX", we_font_consolas_18, RGB888TODEV(236, 241, 248), 255);
+
+    /* 0 mix：四角混合样式静态展示（圆角/切角/直角/小圆角）+ 细边框 */
+    we_box_obj_init(&bx[0], lcd, 2, 16, 60, 44);
+    we_box_set_color(&bx[0], RGB888TODEV(40, 52, 70));
+    we_box_set_border(&bx[0], RGB888TODEV(120, 168, 224), 2U);
+    we_box_set_corner(&bx[0], WE_BOX_LT, WE_BOX_CORNER_ROUND, 14U);
+    we_box_set_corner(&bx[0], WE_BOX_RT, WE_BOX_CORNER_CHAMFER, 14U);
+    we_box_set_corner(&bx[0], WE_BOX_LB, WE_BOX_CORNER_ROUND, 0U);
+    we_box_set_corner(&bx[0], WE_BOX_RB, WE_BOX_CORNER_ROUND, 6U);
+
+    /* 1 fade：对角混合（切角/圆角相对），透明度呼吸 */
+    we_box_obj_init(&bx[1], lcd, 66, 16, 60, 44);
+    we_box_set_color(&bx[1], RGB888TODEV(58, 46, 88));
+    we_box_set_border(&bx[1], RGB888TODEV(168, 140, 230), 2U);
+    we_box_set_corner(&bx[1], WE_BOX_LT, WE_BOX_CORNER_CHAMFER, 12U);
+    we_box_set_corner(&bx[1], WE_BOX_RT, WE_BOX_CORNER_ROUND, 12U);
+    we_box_set_corner(&bx[1], WE_BOX_LB, WE_BOX_CORNER_ROUND, 12U);
+    we_box_set_corner(&bx[1], WE_BOX_RB, WE_BOX_CORNER_CHAMFER, 12U);
+
+    /* 面板标签后创建，压在面板上层 */
+    we_label_obj_init(&bx_lbl[0], lcd, 12, 32,
+                      "mix", we_font_consolas_18, RGB888TODEV(196, 205, 220), 255);
+    we_label_obj_init(&bx_lbl[1], lcd, 76, 32,
+                      "fade", we_font_consolas_18, RGB888TODEV(196, 205, 220), 255);
+}
+
+/**
+ * @brief box demo 周期更新（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_box_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    bx_fade_t += ms_tick;
+
+    /* fade：每个周期在明/暗两档透明度间切换（即时生效） */
+    if (bx_fade_t >= BX_PERIOD)
+    {
+        bx_fade_t = 0U;
+        bx_fade_dim ^= 1U;
+        we_box_set_opacity(&bx[1], (uint8_t)(bx_fade_dim ? BX_DIM : 255U));
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

@@ -47,4 +47,4 @@ N 根竖直柱的柱状图：底部 1px 基线 + 可选横向低透明网格线 
 - 未满 bar_cnt 个有效样本时当前显示为 0 高度柱；如需"右对齐渐进填充"（同 chart 数据不满时的行为）需补 count 字段
 
 ## 对应 demo
-- `Demo/preview/demo_chart_bar.c`（DEMO_ID 125：上面板 24 柱每 250ms push 一个 LCG+we_sin 合成值演示滚动；下面板 16 柱每 600ms set_all 一组随机分布演示整帧覆盖；各配说明 label）
+- `Demo/preview/demo_chart_bar.c`（DEMO_ID 109：上面板 24 柱每 250ms push 一个 LCG+we_sin 合成值演示滚动；下面板 16 柱每 600ms set_all 一组随机分布演示整帧覆盖；各配说明 label）

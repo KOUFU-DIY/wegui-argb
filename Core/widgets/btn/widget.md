@@ -12,15 +12,13 @@
 - `we_btn_obj_init(...)`
 - `we_btn_set_state(...)`
 - `we_btn_set_text(...)`
-- `we_btn_set_style(...)`
+- `we_btn_set_style(...)`（背景色 + 文字色）
 - `we_btn_set_radius(...)`
-- `we_btn_set_border_width(...)`
 - `we_btn_draw_skin(...)`
 
 ## 可调宏
 在 `we_user_config.h` 中可覆盖：
 - `WE_BTN_USE_CUSTOM_STYLE`：是否让每个按钮实例持有独立样式表
-- `WE_BTN_DRAW_MODE`：边框圆角绘制模式
 
 ## 事件与行为
 - **按压视觉始终由控件默认维护**（叠加语义）：按下变 PRESSED、释放回 NORMAL，用户回调无需补样式

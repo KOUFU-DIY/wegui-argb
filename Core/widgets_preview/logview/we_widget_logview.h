@@ -2,7 +2,7 @@
 #define __WE_WIDGET_LOGVIEW_H
 
 #include "we_gui_driver.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 #ifdef __cplusplus
 extern "C"

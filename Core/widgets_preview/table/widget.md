@@ -81,5 +81,5 @@
 - [ ] 字体不可配置（可加 set_font；需同步重推导默认行高）
 
 ## 对应 demo
-- `Demo/preview/demo_table.c`（DEMO_ID 123：4 列 × 14 行传感器参数表 +
+- `Demo/preview/demo_table.c`（DEMO_ID 107：4 列 × 14 行传感器参数表 +
   两行 VAL 每 400ms 实时刷新 + 拖拽滚动）

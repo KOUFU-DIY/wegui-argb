@@ -17,21 +17,6 @@
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色值是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static uint8_t _spec_color_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#else
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 计算电平可用像素高度（总高扣除 1px 基线与 2px 峰值帽余量）。
  * @param obj 传入：控件对象指针。
  * @return 可用高度（像素，最小 1）。
@@ -372,9 +357,9 @@ void we_spectrum_set_colors(we_spectrum_obj_t *obj,
 {
     if (obj == NULL)
         return;
-    if (_spec_color_eq(obj->color_low, low) &&
-        _spec_color_eq(obj->color_high, high) &&
-        _spec_color_eq(obj->color_peak, peak))
+    if (we_colour_eq(obj->color_low, low) &&
+        we_colour_eq(obj->color_high, high) &&
+        we_colour_eq(obj->color_peak, peak))
         return;
 
     obj->color_low = low;

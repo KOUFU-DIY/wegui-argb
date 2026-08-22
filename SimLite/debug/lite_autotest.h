@@ -28,6 +28,15 @@ typedef struct
 } lite_autotest_cfg_t;
 
 /**
+ * @brief 取当前构建的配置指纹字符串
+ * @return 形如 "280x240-rgb565-mono0-dma1" 的静态字符串
+ * @note 组成：屏幕尺寸-色深-MONO 样式-DMA 双缓冲，即所有会改变帧缓冲
+ *       哈希口径的配置轴（MONO 计入是因为模拟器把二值化写进被哈希的
+ *       帧缓冲）。autotest.ps1 用它选择/校验对应的基准文件。
+ */
+const char *lite_autotest_cfg_fingerprint(void);
+
+/**
  * @brief 解析回归模式命令行参数（--autotest N / --out file / --script file）
  * @param argc 传入：命令行参数个数
  * @param argv 传入：命令行参数数组

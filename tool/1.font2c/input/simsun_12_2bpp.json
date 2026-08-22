@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "symbol": "simsun_12_2bpp",
+  "font": {
+    "file": "simsun.ttc",
+    "size": 12
+  },
+  "render": {
+    "bpp": 2,
+    "missing_glyph": "box"
+  },
+  "charset": {
+    "ranges": [
+      ["U+0020", "U+007E"]
+    ]
+  },
+  "deploy": {
+    "mode": "internal"
+  }
+}

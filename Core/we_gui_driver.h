@@ -61,7 +61,29 @@ static inline int32_t we_lerp(int32_t from, int32_t to, uint16_t t)
 }
 
 /* --- 色深跨平台共用体 --- */
-#if (LCD_DEEP == DEEP_RGB565)
+#if (LCD_DEEP == DEEP_GRAY8)
+    /* 8 位灰度：单字节亮度。单色/灰度 OLED 由端口在 flush 时量化打包，
+     * 内核渲染管线（AA 字体/mask/混色）按灰度照常工作。 */
+    typedef union colour
+    {
+        uint8_t v; /* 亮度 0~255 */
+        uint8_t dat[1];
+        uint8_t dat8;
+    } colour_t;
+    static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
+    {
+        colour_t c;
+        /* 整数亮度公式 (r*77 + g*150 + b*29) >> 8，无除法无浮点 */
+        c.dat8 = (uint8_t)(((uint16_t)cr * 77U + (uint16_t)cg * 150U + (uint16_t)cb * 29U) >> 8);
+        return c;
+    }
+#define RGB888TODEV(cr, cg, cb) we_rgb888_to_dev((uint8_t)(cr), (uint8_t)(cg), (uint8_t)(cb))
+/* 编译期常量版本, 可用于 static const 初始化 */
+#define RGB888_CONST(cr, cg, cb)                                                                                       \
+    {                                                                                                                  \
+        .dat8 = (uint8_t)((((cr) * 77U) + ((cg) * 150U) + ((cb) * 29U)) >> 8)                                          \
+    }
+#elif (LCD_DEEP == DEEP_RGB565)
     typedef union colour
     {
         struct
@@ -106,13 +128,6 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
 #define RGB888TODEV(cr, cg, cb) we_rgb888_to_dev((uint8_t)(cr), (uint8_t)(cg), (uint8_t)(cb))
 /* 编译期常量版本, 可用于 static const 初始化 */
 #define RGB888_CONST(cr, cg, cb) { .rgb = { (cr), (cg), (cb) } }
-#define RGB888TOC(c, cr, cg, cb)                                                                                       \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        c.rgb.r = cr;                                                                                                  \
-        c.rgb.g = cg;                                                                                                  \
-        c.rgb.b = cb;                                                                                                  \
-    } while (0)
 #endif
 
     typedef struct we_area
@@ -223,14 +238,13 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
 #define WE_FOCUS_F_EDIT (0x01U)     /* 编辑态：方向键调值，光标换编辑色 */
 #define WE_FOCUS_F_OK_HELD (0x02U)  /* OK 物理按住中（吞掉系统连发的重复按下沿） */
 #define WE_FOCUS_F_OK_ARMED (0x04U) /* OK 按下沿已被焦点控件消费，等待松开沿回发 */
-#define WE_FOCUS_F_REL_PEND (0x08U) /* 松开沿已到但仍在最短按压窗口内，窗口到期补发 */
 #define WE_FOCUS_F_CURSOR_VIS (0x10U) /* 光标可见：按键活动/we_focus_set 亮出，触摸按下收起 */
 #endif
 
     typedef void (*we_gui_timer_cb_t)(struct we_lcd_t *lcd, uint16_t elapsed_ms);
 
     /* 用户定时器：与中央动画引擎同构的侵入式节点——调用方持有节点、
-     * 零槽位、数量无上限、create 不会失败（槽满静默丢失的问题不复存在）。 */
+     * 零槽位、数量无上限、create 不会失败。 */
     typedef struct we_gui_timer_s
     {
         struct we_gui_timer_s *next; /* 侵入式链表指针（内核维护） */
@@ -245,6 +259,8 @@ static __inline colour_t we_rgb888_to_dev(uint8_t cr, uint8_t cg, uint8_t cb)
 #if (LCD_DEEP == DEEP_RGB565)
     typedef void (*we_lcd_flush_cb_t)(uint16_t *gram, uint32_t pix_size);
 #elif (LCD_DEEP == DEEP_RGB888)
+typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
+#elif (LCD_DEEP == DEEP_GRAY8)
 typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
 #endif
     typedef void (*we_input_read_cb_t)(we_indev_data_t *data);
@@ -332,13 +348,13 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
 
     typedef struct we_lcd_t
     {
-        // 1. PFB 显存管理
+        // 1. PFB 显存管理（指针成员集中在前，半字成员集中在后，消除对齐填充）
         colour_t *pfb_gram;      // 当前活动的显存指针 (可用于DMA切换)
         colour_t *pfb_gram_base; // 显存基地址
-        uint16_t pfb_size;
         we_lcd_set_addr_cb_t set_addr_cb; // 当前 LCD 绑定的设窗接口
         we_lcd_flush_cb_t flush_cb;       // 当前 LCD 绑定的刷屏接口
-        we_area_t pfb_area;
+        we_area_t pfb_area; // 仅 x0/x1 有效（当前切片 X 窗口）；Y 窗口见 pfb_y_start/pfb_y_end
+        uint16_t pfb_size;
         uint16_t pfb_width, pfb_y_start, pfb_y_end;
 
         // 2. 屏幕属性
@@ -367,13 +383,11 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
         uint8_t gesture_drag_done;                                // 本次触摸序列是否已完成拖拽接管询问（DRAG_BEGIN 只发一轮）
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
         we_obj_t *focus_obj;                     // 当前焦点对象（NULL=无；we_obj_delete 沿祖先链防悬空）
-        uint8_t focus_flags;                     // WE_FOCUS_F_* 位组合（编辑态/OK按住/OK待回发/松开挂起/光标可见）
-        uint8_t key_flash_left_ms;               // OK 最短按压窗口剩余毫秒（task_handler 直接倒计时，不占动画节点）
-        uint8_t key_queue[WE_CFG_KEY_QUEUE_LEN]; // 语义键环形队列（SPSC：注入侧只写 tail，消费侧只写 head，中断注入安全）
+        uint8_t focus_flags;                     // WE_FOCUS_F_* 位组合（编辑态/OK按住/OK待回发/光标可见）
+        uint8_t key_queue[WE_CFG_KEY_QUEUE_LEN]; // 语义键环形队列（SPSC：注入侧只写 tail/key_ok_down，消费侧只写 head，中断注入安全）
         volatile uint8_t key_q_head;             // 队头下标（仅消费侧写；head==tail 为空）
         volatile uint8_t key_q_tail;             // 队尾下标（仅注入侧写；容量 = 队列深度-1）
-        volatile uint8_t key_ok_drop_seq;        // OK 松开沿因队满被丢弃的计数（仅注入侧写）
-        uint8_t key_ok_drop_ack;                 // 消费侧已对账的丢弃计数副本（对账补投防 OK 卡按压）
+        volatile uint8_t key_ok_down;            // OK 物理电平（注入侧独写：按下沿置 1、松开沿清 0；队列是顺序信使，电平是兜底事实源）
 #endif
 
         /* 渲染统计：真正完成一次脏区提交就记 1 帧（FPS 显示的数据源）。 */
@@ -489,9 +503,9 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      *    页面自动切换、消息自动关闭、数值轮询、demo tick 等；
      * 2. create 成功后会立即进入激活状态，通常不需要再额外 start；
      * 3. repeat = 1 表示周期定时器，repeat = 0 表示单次定时器；
-     * 4. 回调参数 elapsed_ms 固定等于创建时的 period_ms。
-     *    当主循环偶尔抖动时，内核会按周期补偿多次回调，
-     *    而不是把一个很大的时间片一次性塞给业务层；
+     * 4. 回调参数 elapsed_ms 为距上次触发的真实流逝毫秒（≥ period_ms，
+     *    上限 65535）；每帧至多触发一次，主循环阻塞的积压以一个大时间
+     *    片一次上报，如何消化由业务层的累计逻辑决定；
      * 5. 常见用法示例（节点由调用方持有，静态或生命周期覆盖使用期）：
      *    static we_gui_timer_t anim_timer, hide_timer;
      *    we_gui_timer_create(lcd, &anim_timer, we_btn_simple_demo_tick, 16U, 1U);
@@ -503,7 +517,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @brief 创建并启动一个 GUI 定时器（不会失败）。
      * @param p_lcd 传入，GUI 屏幕上下文指针。
      * @param t 传入，调用方持有的定时器节点。
-     * @param cb 传入，定时器回调函数，回调参数中的 elapsed_ms 为定时器周期值。
+     * @param cb 传入，定时器回调函数，回调参数 elapsed_ms 为距上次触发的真实毫秒数。
      * @param period_ms 传入，定时器周期，单位毫秒，必须大于 0。
      * @param repeat 传入，1 表示周期定时器，0 表示单次定时器。
      * @return 无。
@@ -541,7 +555,7 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @param p_lcd 传入，GUI 屏幕上下文指针。
      * @param t 传入，定时器节点。
      * @return 无。
-     * @note 删除后槽位会被完全清空，可供后续重新创建。
+     * @note 删除后节点被摘链并清空，可复用于重新创建。
      */
     void we_gui_timer_delete(we_lcd_t *p_lcd, we_gui_timer_t *t);
     /**
@@ -594,8 +608,8 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
      * @param lcd 传入：GUI 屏幕上下文指针
      * @param key 传入：WE_KEY_UP..WE_KEY_BACK 语义键值
      * @return 无
-     * @note 面向只上报"按了一下"的简单端口（三键板/编码器等）；OK 键
-     *       经最短按压窗口（WE_CFG_FOCUS_FLASH_MS）保证按压视觉可见。
+     * @note 面向只上报"按了一下"的简单端口（三键板/编码器等）；两个边沿
+     *       同周期消费，OK 按压视觉不驻留，要按住手感请用双沿上报。
      */
     void we_gui_key_inject(we_lcd_t *lcd, uint8_t key);
     /**
@@ -870,21 +884,6 @@ typedef void (*we_lcd_flush_cb_t)(uint8_t *gram, uint32_t pix_size);
                                         int16_t ex, int16_t ey, int16_t ew, int16_t eh);
 
     /* === 图形绘制 API === */
-    /**
-     * @brief 绘制一块带 alpha 的遮罩图形
-     * @param p_lcd 传入：GUI 屏幕上下文指针
-     * @param x 传入：绘制起点 X 坐标
-     * @param y 传入：绘制起点 Y 坐标
-     * @param w 传入：遮罩宽度
-     * @param h 传入：遮罩高度
-     * @param src_data 传入：遮罩数据指针
-     * @param bpp 传入：遮罩位深
-     * @param fg_color 传入：前景颜色
-     * @param opacity 传入：透明度
-     * @return 无
-     */
-    void we_draw_alpha_mask(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h,
-                            const unsigned char *src_data, uint8_t bpp, colour_t fg_color, uint8_t opacity);
     /**
      * @brief 绘制纯色矩形
      * @param p_lcd 传入：GUI 屏幕上下文指针

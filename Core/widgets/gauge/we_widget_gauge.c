@@ -37,21 +37,6 @@ static const we_class_t _gauge_class = {
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _gauge_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
  * @brief 将数值钳制到量程内。
  * @param obj 控件对象指针。
  * @param v 输入值。
@@ -558,8 +543,8 @@ void we_gauge_set_colors(we_gauge_obj_t *obj, colour_t tick_color,
 {
     if (obj == NULL)
         return;
-    if (_gauge_col_eq(obj->tick_color, tick_color) &&
-        _gauge_col_eq(obj->pointer_color, pointer_color))
+    if (we_colour_eq(obj->tick_color, tick_color) &&
+        we_colour_eq(obj->pointer_color, pointer_color))
         return;
 
     obj->tick_color    = tick_color;

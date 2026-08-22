@@ -62,4 +62,4 @@
 - 字体参数化（已完成：init 必传）
 
 ## 对应 demo
-- `Demo/preview/demo_mlabel.c`（DEMO_ID 127：三块 mlabel——长英文段落断词 + 长无空格 token 字符断行（硬截断对比）+ 居中短诗；A 块每 4 秒两段文本互换演示重排）
+- `Demo/preview/demo_mlabel.c`（DEMO_ID 126：三块 mlabel——长英文段落断词 + 长无空格 token 字符断行（硬截断对比）+ 居中短诗；A 块每 4 秒两段文本互换演示重排）

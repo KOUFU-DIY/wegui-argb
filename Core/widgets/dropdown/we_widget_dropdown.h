@@ -2,7 +2,7 @@
 #define __WE_WIDGET_DROPDOWN_H
 
 #include "we_gui_driver.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 闭合态：OK 按下沿主框进入按压态，松开沿展开列表；

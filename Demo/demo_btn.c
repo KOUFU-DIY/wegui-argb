@@ -18,6 +18,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t btn_title;
 static we_label_obj_t btn_note;
 static we_label_obj_t btn_fps;
@@ -165,3 +167,126 @@ void we_btn_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &btn_fps, &btn_fps_timer,
                        &btn_last_frames, btn_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t btn_title;
+static we_label_obj_t btn_fps;
+static we_label_obj_t btn_evt_stat;
+static we_btn_obj_t   btn_event;
+static we_btn_obj_t   btn_dynamic;
+
+static uint32_t btn_ticks_ms;
+static uint32_t btn_fps_timer;
+static uint32_t btn_last_frames;
+static char     btn_fps_buf[16];
+static uint16_t btn_click_cnt;
+static char     btn_evt_buf[16];
+
+/**
+ * @brief EVENT 按钮的自定义事件回调，把收到的事件实时显示到状态栏
+ * @param obj 触发事件的控件对象指针（本例未使用）
+ * @param event 事件码
+ * @param data 输入数据指针
+ * @return 恒返回 1
+ */
+static uint8_t _btn_demo_event_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    switch (event)
+    {
+    case WE_EVENT_PRESSED:
+        we_label_set_text(&btn_evt_stat, "PRESS");
+        break;
+
+    case WE_EVENT_RELEASED:
+        we_label_set_text(&btn_evt_stat, "RELEASE");
+        break;
+
+    case WE_EVENT_CLICKED:
+        btn_click_cnt++;
+        snprintf(btn_evt_buf, sizeof(btn_evt_buf), "CLICK %u", (unsigned)btn_click_cnt);
+        we_label_set_text(&btn_evt_stat, btn_evt_buf);
+        break;
+
+    default:
+        break;
+    }
+
+    (void)obj;
+    (void)data;
+    return 1;
+}
+
+/**
+ * @brief 初始化按钮控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_btn_simple_demo_init(we_lcd_t *lcd)
+{
+    int16_t fps_x = we_demo_fps_x(lcd, "FPS", we_font_consolas_18);
+
+    btn_ticks_ms    = 0U;
+    btn_fps_timer   = 0U;
+    btn_last_frames = 0U;
+    btn_click_cnt   = 0U;
+    memset(btn_fps_buf, 0, sizeof(btn_fps_buf));
+    memset(btn_evt_buf, 0, sizeof(btn_evt_buf));
+
+    we_label_obj_init(&btn_title, lcd, 2, 2,
+                      "BTN", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+    we_label_obj_init(&btn_fps, lcd, fps_x, 2,
+                      "FPS", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 255);
+
+    /* 一行两键：EVENT 带自定义回调，DYN 自动循环状态与圆角 */
+    we_btn_obj_init(&btn_event, lcd, 2, 18, 62, 22,
+                    "EVENT", we_font_consolas_18, _btn_demo_event_cb);
+    we_btn_obj_init(&btn_dynamic, lcd, 70, 18, 56, 22,
+                    "DYN", we_font_consolas_18, NULL);
+
+    we_label_obj_init(&btn_evt_stat, lcd, 2, 48, "EVT ---",
+                      we_font_consolas_18, RGB888TODEV(255, 154, 102), 255);
+}
+
+/**
+ * @brief 按钮演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_btn_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t phase;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    btn_ticks_ms += ms_tick;
+    phase = (uint8_t)((btn_ticks_ms / 900U) & 0x03U);
+
+    we_btn_set_state(&btn_dynamic, (we_btn_state_t)phase);
+    we_btn_set_radius(&btn_dynamic, (uint16_t)(3U + phase * 2U));
+
+    switch (phase)
+    {
+    case 0:
+        we_btn_set_text(&btn_dynamic, "NORM");
+        break;
+    case 1:
+        we_btn_set_text(&btn_dynamic, "SEL");
+        break;
+    case 2:
+        we_btn_set_text(&btn_dynamic, "PRESS");
+        break;
+    default:
+        we_btn_set_text(&btn_dynamic, "DIS");
+        break;
+    }
+
+    we_demo_update_fps(lcd, &btn_fps, &btn_fps_timer,
+                       &btn_last_frames, btn_fps_buf, ms_tick);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

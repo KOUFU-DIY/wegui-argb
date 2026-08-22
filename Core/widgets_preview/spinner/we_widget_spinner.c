@@ -27,21 +27,6 @@ static const we_class_t _spinner_class = {
  * 内部工具
  * -------------------------------------------------------------------------- */
 
-/**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _spinner_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
 /* --------------------------------------------------------------------------
  * 绘制 / 事件
  * -------------------------------------------------------------------------- */
@@ -220,7 +205,7 @@ void we_spinner_obj_init(we_spinner_obj_t *obj, we_lcd_t *lcd,
 
 void we_spinner_set_colors(we_spinner_obj_t *obj, colour_t color)
 {
-    if (obj == NULL || _spinner_col_eq(obj->color, color))
+    if (obj == NULL || we_colour_eq(obj->color, color))
         return;
     obj->color = color;
     we_obj_invalidate((we_obj_t *)obj);

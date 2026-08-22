@@ -248,7 +248,7 @@ void we_img_render_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8
  * @param opacity 传入：整体透明度（0~255）
  * @return 无
  * @note 取模数据每行按字节对齐（行末补零）、位序高位在前；
- *       与 we_draw_alpha_mask 的连续位流布局不同，不能混用
+ *       连续位流布局的取模数据与此不兼容，不能混用
  */
 void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, colour_t fg_color, uint8_t opacity)
 {
@@ -321,13 +321,15 @@ void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t 
     for (y = 0; y < draw_height; y++)
     {
         colour_t *p_dst = dst_line;
+        /* 行内位游标：起点 = 源列偏移 × bpp，逐像素 += bpp 增量推进
+         * （字节内高位在前），内环零乘法。 */
+        uint32_t bit_pos = (uint32_t)ix_start * bpp;
 
         for (x = 0; x < draw_width; x++)
         {
-            // 行内位偏移 = 源列号 * bpp，字节内高位在前。
-            uint32_t bit_pos = (uint32_t)(ix_start + x) * bpp;
             uint8_t raw = (uint8_t)((src_line[bit_pos >> 3] >> (8U - bpp - (bit_pos & 7U))) & alpha_mask);
 
+            bit_pos += bpp;
             if (raw > 0)
             {
                 uint32_t alpha = (uint32_t)raw * factor;
@@ -394,11 +396,25 @@ void we_img_render_indexqoi_mask(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const 
     uint8_t q = (uint8_t)(8U - (pl[0] & 0x03U)); /* 量化位数：00b=8bit 01b=7 10b=6 11b=5 */
     uint8_t shift = (uint8_t)(8U - q);           /* 反量化（高位复制）左移量 */
     uint16_t m = (uint16_t)(((uint16_t)pl[1] << 8) | pl[2]);
+
+    /* 损坏流防线（与 indexed-QOI 路径同级）：m 超高度会使下面的
+     * (img_h - m) 无符号下溢出天文偏移，必须先拦 */
+    if (m > img_h)
+        return;
+
     const uint8_t *tab16 = pl + 5;
     const uint8_t *tab32 = tab16 + ((uint32_t)m << 1);
     const uint8_t *p_dict_n = tab32 + (((uint32_t)(img_h - m)) << 2);
     const uint8_t *dict = p_dict_n + 1;
     const uint8_t *base = dict + *p_dict_n; /* 像素流起点（行偏移的基准） */
+
+    /* 字典数上限 = INDEX 操作码域宽（0x00..0x3F）；行偏移保守上界按
+     * 最坏 2 字节/像素 + 行首字节推出，拦截损坏索引表的任意地址跳转。
+     * 合法码流全部通过，解码逐位不变。 */
+    uint32_t stream_span = ((uint32_t)img_w * 2U + 1U) * img_h;
+
+    if (*p_dict_n > 64U)
+        return;
 
     /* ---------------- 3. 目标起始指针与跨距 ---------------- */
     int16_t draw_x0 = x0 + ix_start;
@@ -450,6 +466,8 @@ void we_img_render_indexqoi_mask(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const 
             ofs = ((uint32_t)tab32[i4] << 24) | ((uint32_t)tab32[i4 + 1U] << 16) |
                   ((uint32_t)tab32[i4 + 2U] << 8) | tab32[i4 + 3U];
         }
+        if (ofs >= stream_span)
+            return; /* 损坏的行偏移：越过保守流上界，放弃绘制 */
         p = base + ofs;
 
         prev = *p++; /* 行首字节 = 首像素原始值（无 tag），同时初始化 prev */
@@ -1168,6 +1186,46 @@ static void _we_fill_rect_no_scale(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16
 
             dst_line += dst_stride;
         }
+#elif (LCD_DEEP == DEEP_GRAY8)
+        /* GRAY8：单字节亮度复制成 32 位字，行内按 4 像素批量写
+         * （we_fill_gram 同款口径；M0 不允许非对齐 32 位访问，行首先补齐）。 */
+        uint8_t color_val = color.dat8;
+        uint32_t color_val32 = ((uint32_t)color_val << 24) | ((uint32_t)color_val << 16) |
+                               ((uint32_t)color_val << 8) | color_val;
+
+        for (py = draw_y_start; py <= draw_y_end; py++)
+        {
+            colour_t *p_dst = dst_line;
+            uint16_t count = span;
+
+            /* 1. 行首补齐到 4 字节边界。 */
+            while (count > 0U && ((uintptr_t)p_dst & 0x3U) != 0U)
+            {
+                p_dst->dat8 = color_val;
+                p_dst++;
+                count--;
+            }
+
+            /* 2. 32 位主循环，每次写 4 个像素。 */
+            {
+                uint32_t *p32 = (uint32_t *)p_dst;
+                uint16_t words = (uint16_t)(count >> 2);
+
+                while (words--)
+                    *p32++ = color_val32;
+                p_dst = (colour_t *)p32;
+            }
+
+            /* 3. 收尾不足 4 像素的部分。 */
+            count &= 3U;
+            while (count--)
+            {
+                p_dst->dat8 = color_val;
+                p_dst++;
+            }
+
+            dst_line += dst_stride;
+        }
 #else
         for (py = draw_y_start; py <= draw_y_end; py++)
         {
@@ -1614,6 +1672,18 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
                           r, WE_MASK_QUADRANT_RB, color, opacity);
 }
 
+void we_draw_round_rect_outline_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
+                                     uint16_t w, uint16_t h, uint16_t radius,
+                                     colour_t outline, colour_t fill, uint8_t opacity)
+{
+    we_draw_round_rect_analytic_fill(p_lcd, x, y, w, h, radius, outline, opacity);
+    if (w > 2U && h > 2U)
+        we_draw_round_rect_analytic_fill(p_lcd, (int16_t)(x + 1), (int16_t)(y + 1),
+                                         (uint16_t)(w - 2U), (uint16_t)(h - 2U),
+                                         (uint16_t)((radius > 0U) ? (radius - 1U) : 0U),
+                                         fill, opacity);
+}
+
 /**
  * @brief 带裁剪的单像素写入（内联版，供 we_draw_pixel / we_draw_line 等热路径复用）
  * @param p_lcd 传入：GUI 屏幕上下文指针
@@ -1960,82 +2030,6 @@ int16_t we_cos(int16_t angle)
     return we_sin(angle + 128);
 }
 /**
- * @brief  在当前 PFB 中绘制通用 Alpha 位图/蒙版，支持 A1/A2/A4/A8
- * @param  p_lcd     当前 LCD/PFB 上下文
- * @param  x, y      位图左上角屏幕坐标
- * @param  w, h      位图实际宽高
- * @param  src_data  位图像素数据
- * @param  bpp       位深，支持 1/2/4/8
- * @param  fg_color  前景色
- * @param  opacity   全局透明度
- */
-void we_draw_alpha_mask(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, const unsigned char *src_data,
-                        uint8_t bpp, colour_t fg_color, uint8_t opacity)
-{
-    if (w == 0 || h == 0 || src_data == NULL || opacity == 0)
-        return;
-
-    // 1. 先算出位图完整物理边界。
-    int16_t draw_x_end = x + w - 1;
-    int16_t draw_y_end = y + h - 1;
-
-    // 2. 与当前 PFB 切片求交，得到真正要处理的区域。
-    int16_t clip_x_start = (x < p_lcd->pfb_area.x0) ? p_lcd->pfb_area.x0 : x;
-    int16_t clip_y_start = (y < p_lcd->pfb_y_start) ? p_lcd->pfb_y_start : y;
-    int16_t clip_x_end = (draw_x_end > p_lcd->pfb_area.x1) ? p_lcd->pfb_area.x1 : draw_x_end;
-    int16_t clip_y_end = (draw_y_end > p_lcd->pfb_y_end) ? p_lcd->pfb_y_end : draw_y_end;
-
-    // 如果与当前 PFB 没有交集，直接返回。
-    if (clip_x_start > clip_x_end || clip_y_start > clip_y_end)
-        return;
-
-    uint8_t alpha_mask = (1 << bpp) - 1;
-
-    colour_t *gram = (colour_t *)p_lcd->pfb_gram;
-    uint16_t pfb_stride = p_lcd->pfb_width;
-
-    // 3. 遍历裁剪后的有效区域。
-    for (int16_t py = clip_y_start; py <= clip_y_end; py++)
-    {
-        colour_t *p_dst = gram + ((py - p_lcd->pfb_y_start) * pfb_stride) + (clip_x_start - p_lcd->pfb_area.x0);
-        int16_t mask_y = py - y; // 位图内相对 Y
-
-        for (int16_t px = clip_x_start; px <= clip_x_end; px++)
-        {
-            int16_t mask_x = px - x; // 位图内相对 X
-
-            // 直接按绝对位偏移取出该像素的 alpha。
-            uint32_t pixel_idx = mask_y * w + mask_x;
-            uint32_t bit_pos = pixel_idx * bpp;
-            uint32_t byte_idx = bit_pos >> 3;
-            uint8_t shift = 8 - bpp - (bit_pos & 7);
-
-            uint8_t a_raw = (src_data[byte_idx] >> shift) & alpha_mask;
-
-            if (a_raw > 0)
-            {
-                // 把不同位深的 alpha 统一量化到 0~255。
-                uint32_t alpha = 0;
-                if (bpp == 8)
-                    alpha = a_raw;
-                else if (bpp == 4)
-                    alpha = (a_raw << 4) | a_raw;
-                else if (bpp == 2)
-                    alpha = a_raw * 85;
-                else if (bpp == 1)
-                    alpha = 255;
-
-                if (opacity != 255)
-                    alpha = (alpha * opacity) >> 8;
-
-                we_store_blended_color(p_dst, fg_color, (uint8_t)alpha);
-            }
-            p_dst++; // 目标指针前进 1 像素
-        }
-    }
-}
-
-/**
  * @brief  使用指定颜色填充当前整个局部帧缓冲(PFB/GRAM)
  * @param  p_lcd  当前 LCD 上下文
  * @param  c      目标颜色
@@ -2048,10 +2042,54 @@ void we_fill_gram(we_lcd_t *p_lcd, colour_t c)
 
     uint32_t blocks, rem, i;
 
-#if (LCD_DEEP == DEEP_OLED)
-#error ("Not support DEEP_OLED yet!")
-#elif (LCD_DEEP == DEEP_GRAY8)
-#error ("Not support DEEP_GRAY8 yet!")
+#if (LCD_DEEP == DEEP_GRAY8)
+    /* GRAY8：单字节亮度，复制成 32 位字后按 4 像素批量写。 */
+    colour_t *gram8 = p_lcd->pfb_gram;
+    uint8_t color_val = c.dat8;
+    uint32_t color_val32 = ((uint32_t)color_val << 24) | ((uint32_t)color_val << 16) |
+                           ((uint32_t)color_val << 8) | color_val;
+
+    /* PFB 基址补齐到 4 字节边界（M0 不允许非对齐 32 位访问）。 */
+    while (total_pixels > 0U && ((uintptr_t)gram8 & 0x3U) != 0U)
+    {
+        gram8->dat8 = color_val;
+        gram8++;
+        total_pixels--;
+    }
+
+    {
+        uint32_t *gram32 = (uint32_t *)gram8;
+        uint32_t words = total_pixels >> 2;
+
+        blocks = words / 8U; /* 每块 8 个 32 位字 = 32 像素 */
+        rem = words % 8U;
+
+        for (i = 0; i < blocks; i++)
+        {
+            gram32[0] = color_val32;
+            gram32[1] = color_val32;
+            gram32[2] = color_val32;
+            gram32[3] = color_val32;
+            gram32[4] = color_val32;
+            gram32[5] = color_val32;
+            gram32[6] = color_val32;
+            gram32[7] = color_val32;
+            gram32 += 8;
+        }
+        for (i = 0; i < rem; i++)
+        {
+            *gram32++ = color_val32;
+        }
+        gram8 = (colour_t *)gram32;
+    }
+
+    /* 收尾不足 4 像素的部分。 */
+    for (i = 0; i < (total_pixels & 3U); i++)
+    {
+        gram8->dat8 = color_val;
+        gram8++;
+    }
+
 #elif (LCD_DEEP == DEEP_RGB332)
 #error ("Not support DEEP_RGB332 yet!")
 #elif (LCD_DEEP == DEEP_RGB565)

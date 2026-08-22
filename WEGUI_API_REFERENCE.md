@@ -1,7 +1,7 @@
 # WeGui API Reference
 
 > Lightweight embedded GUI framework for multiple MCU / SoC platforms.
-> Dual-target: STM32F103 hardware (Keil AC5) + SDL2 PC simulator (CMake + MinGW).
+> Targets: STM32F103 / STM32F030 hardware (Keil AC5), JieLi AD14N (CodeBlocks/pi32), and the SimLite PC simulator (fenster backend, TCC/gcc).
 
 ---
 
@@ -29,7 +29,9 @@
 |------|-------------|
 | `Core/` | Platform-independent kernel, widgets, dirty-rect engine, fonts |
 | `Demo/` | Demo applications, each widget has its own `demo_xxx.c` |
-| `STM32F103/` | Hardware MCU entry, Keil project, LCD SPI port |
+| `STM32F103/` | Hardware MCU entry, Keil project, LCD SPI + external flash ports |
+| `STM32F030/` | Hardware MCU entry, Keil project, LCD SPI ports |
+| `AD14N/` | JieLi AD142A4 entry, CodeBlocks/pi32 project, SPI1+DMA LCD port |
 | `SimLite/` | PC simulator entry (fenster backend, no SDL), port, config, autotest harness |
 
 ### Key Concepts
@@ -56,8 +58,8 @@ colour_t user_gram[USER_GRAM_NUM];
 we_gui_init(&mylcd,
     RGB888TODEV(10, 14, 20),      // background color
     user_gram, USER_GRAM_NUM,      // PFB buffer and size
-    lcd_set_addr,                  // set-window callback
-    LCD_FLUSH_PORT,                // flush callback
+    lcd_set_windows,               // set-window callback
+    lcd_rgb565_port,               // flush callback (unified port naming)
     we_input_port_read,            // input read callback (NULL if unused)
     we_storage_port_read);         // storage read callback (NULL if unused)
 ```
@@ -115,7 +117,7 @@ static we_gui_timer_t anim_timer;
 we_gui_timer_create(&mylcd, &anim_timer, my_callback, 16U, 1U); // 16ms 周期 ≈ 60fps
 
 // Timer callback signature:
-void my_callback(we_lcd_t *lcd, uint16_t elapsed_ms);
+void my_callback(we_lcd_t *lcd, uint16_t elapsed_ms); // elapsed_ms = 距上次触发的真实毫秒（≥ 周期，上限 65535）
 
 // Control:
 we_gui_timer_stop(&mylcd, &anim_timer);     // pause (clears accumulator)
@@ -222,9 +224,7 @@ we_btn_set_radius(&my_btn, 12);       // corner radius
 // Custom style (only when WE_BTN_USE_CUSTOM_STYLE == 1)
 we_btn_set_style(&my_btn, WE_BTN_STATE_NORMAL,
     RGB888TODEV(40, 40, 60),          // bg
-    RGB888TODEV(80, 80, 120),         // border
-    RGB888TODEV(255, 255, 255),       // text
-    2);                               // border width
+    RGB888TODEV(255, 255, 255));      // text
 ```
 
 **Custom event callback**:
@@ -268,7 +268,7 @@ Supported formats: RGB565 raw, ARGB8565 raw, RGB565/ARGB8565 indexed QOI (`WE_CF
 static we_img_ex_obj_t my_img_ex;
 
 // Init: cx, cy = screen rotation center
-we_img_ex_obj_init(&my_img_ex, &mylcd, 140, 120, &img_RGB153, 255);
+we_img_ex_obj_init(&my_img_ex, &mylcd, 140, 120, &demo_rgb565_raw_be_64x80, 255);
 
 // Rotate + scale
 we_img_ex_obj_set_transform(&my_img_ex,
@@ -367,12 +367,12 @@ Notable rendering notes:
 
 ---
 
-## 5. Easing Functions (we_motion.h)
+## 5. Easing Functions (components/we_motion.h)
 
 Pure Q8 fixed-point easing library. `t ∈ [0, 256]`, output ∈ `[0, 256]` (except `out_back` which can overshoot).
 
 ```c
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 uint16_t val = we_ease_out_quad(t);  // t=0→0, t=256→256
 
@@ -427,8 +427,8 @@ we_draw_string(&mylcd, x, y, we_font_consolas_18, "Hello\nWorld",
 ### Font Format
 
 Font array layout:
-- `[0]`: line height (pixels, e.g., 19 for Consolas 18)
-- `[1]`: flags (bit7=ASCII fast path) | bpp (low 4 bits, typically 4)
+- `[0]`: line height (pixels)
+- `[1]`: flags (bit7=ASCII fast path) | bpp (low 4 bits, 2 or 4)
 - `[2-3]`: glyph count (uint16 LE)
 - `[4]`: ASCII range start
 - `[5]`: ASCII range count
@@ -447,9 +447,6 @@ we_clear_gram(&mylcd);
 
 // Draw filled rounded rectangle
 we_draw_round_rect_analytic_fill(&mylcd, x, y, w, h, radius, color, opacity);
-
-// Draw alpha mask (used internally for font rendering)
-we_draw_alpha_mask(&mylcd, x, y, w, h, mask_data, bpp, fg_color, opacity);
 
 // Push a PFB region to LCD hardware
 we_push_pfb(&mylcd, x, y, w, h);
@@ -560,7 +557,6 @@ Each platform must define these macros before including `we_gui_config.h`:
 | `WE_CFG_DIRTY_MAX_NUM` | Max dirty rects (strategy 2) | `8` |
 | `WE_CFG_DEBUG_DIRTY_RECT` | Show dirty rects in red | `0` or `1` |
 | `WE_CFG_ENABLE_INDEXED_QOI` | Enable indexed QOI decode | `0` or `1` |
-| `WE_CFG_GUI_TIMER_MAX_NUM` | User timer slots | `8` |
 | `WE_CFG_ENABLE_INPUT_PORT_BIND` | Enable input port binding | `0` or `1` |
 | `WE_CFG_ENABLE_STORAGE_PORT_BIND` | Enable storage port binding | `0` or `1` |
 
@@ -571,9 +567,9 @@ Optional macros (defaulted by `we_gui_config.h` when the platform omits them):
 | `WE_LCD_FLUSH_ALIGN_X` | Flush-window X alignment granularity (power of two). Dirty rects are expanded at intake (`we_dirty_invalidate`) so every `set_addr` window has `x0 % A == 0` and `(x1 + 1) % A == 0`. For QSPI panels requiring x multiples of 2/4. Requires `SCREEN_WIDTH % A == 0`. | `1` |
 | `WE_LCD_FLUSH_ALIGN_Y` | Flush-window Y alignment granularity (power of two), same intake expansion for y. For QSPI panels (2/4) or SSD1306-class page OLEDs (`8`). Requires `SCREEN_HEIGHT % A == 0` and PFB rows (`USER_GRAM_NUM / SCREEN_WIDTH`) `% A == 0` so PFB chunking inherits the alignment. | `1` |
 
-See `Demo/we_lcd_port_template.h` for worked QSPI and SSD1306 (RGB565→1bpp page packing) port examples.
+See `Demo/we_lcd_port_template.h` for worked QSPI and SSD1306 (GRAY8→1bpp page packing) port examples.
 
-Config header chain: `we_port.h` → selects platform config → `we_gui_config.h` validates all macros.
+Config header chain: `we_hw_port.h` → selects platform config → `we_gui_config.h` validates all macros.
 
 ---
 
@@ -630,30 +626,28 @@ we_gui_timer_create(&mylcd, &demo_timer, we_xxx_simple_demo_tick, 16U, 1U);
 
 ```c
 int16_t we_demo_scale_x(const we_lcd_t *lcd, int16_t base_x);   // scale X for screen width
-int16_t we_demo_scale_y(const we_lcd_t *lcd, int16_t base_y);   // scale Y for screen height
-int16_t we_demo_scale_w(const we_lcd_t *lcd, int16_t base_w);   // scale width
-int16_t we_demo_scale_h(const we_lcd_t *lcd, int16_t base_h);   // scale height
 int16_t we_demo_right_x(const we_lcd_t *lcd, int16_t margin, int16_t obj_w);  // right-aligned X
-int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t margin, int16_t obj_h); // bottom-aligned Y
 ```
 
 ---
 
 ## 13. Available Resources
 
-### Built-in Font
-- `we_font_consolas_18` — Consolas 18pt, line height 19px, 4bpp anti-aliased, ASCII 0x20~0x7E (95 glyphs)
+### Built-in Fonts (`tool/1.font2c/output/`)
+- `we_font_consolas_18` — legacy demo-layer alias: resolves to `simli_16_2bpp` (16px SimLi, 2bpp, ASCII 0x20~0x7E) on the primary layout, and to `simsun_12_2bpp` (12px SimSun embedded bitmap) when `WE_DEMO_SMALL_SCREEN` is set
+- `gbsn00lp_2_16_4bpp` — external-flash ASCII+CJK font (index `.c/.h` compiled in, glyph data merged into external flash; demos 0/16)
 
-### Built-in Images
-- `img_RGB153`, `img_RGB608`, `img_RGB567`, `img_RGB535`
-- `img_RGB186`, `img_RGB345`, `img_RGB128`, `img_RGB129`
-- `img_BG`
+### Built-in Images (`tool/2.img2c/output/c/res_img.h`)
+- `demo_rgb565_raw_be_64x80` — uncompressed RGB565 (the only format `img_ex` accepts)
+- `demo_rgb565_indexqoi_be_128x64`, `demo_argb8565_indexqoi_be_80x80`, `demo_argb8565_raw_be_80x80`
+- six 48×48 alpha icons (indexed-QOI-MASK compressed + A8 raw variants; demos 31/32)
 
 ### Existing Demos (DEMO_ID)
 
-Numbering is unified across all three targets — `1..28` are identical. The simulator
-additionally defines `0 = showcase` (simulator-only, needs 800×480). Select a demo by
-editing the `#define DEMO_ID` line near the top of `main`.
+Numbering is unified across all four targets (SimLite / STM32F103 / STM32F030 / AD14N) —
+`1..33` and the preview range `101..126` (graduated holes 117/120) are identical. The
+simulator additionally defines `0 = showcase` (simulator-only, needs 800×480). Select a
+demo by editing the `#define DEMO_ID` line near the top of `main`.
 
 | ID | Demo |
 |----|------|
@@ -686,6 +680,13 @@ editing the `#define DEMO_ID` line near the top of `main`.
 | 26 | roller |
 | 27 | marquee |
 | 28 | toast |
+| 29 | focus |
+| 30 | focus2 |
+| 31 | img_alpha |
+| 32 | imgbtn |
+| 33 | segdisp |
+
+Preview demos occupy `101..126`; the ID table and entry declarations live in `Demo/preview/preview_demos.h`.
 
 ---
 
@@ -727,7 +728,7 @@ int main(void) {
     // 2. GUI init
     we_gui_init(&mylcd, RGB888TODEV(10, 14, 20),
                 user_gram, USER_GRAM_NUM,
-                lcd_set_addr, LCD_FLUSH_PORT, NULL, NULL);
+                lcd_set_windows, lcd_rgb565_port, NULL, NULL);
 
     // 3. Create widgets
     we_label_obj_init(&hello, &mylcd, 10, 10, "Hello WeGui!",
@@ -764,7 +765,7 @@ int main(void) {
 ```c
 we_gui_key_press(&mylcd, WE_KEY_OK);    // 按下沿（双沿端口；OK 按住保持按压态）
 we_gui_key_release(&mylcd, WE_KEY_OK);  // 松开沿（仅 OK 消费，其余键可不上报）
-we_gui_key_inject(&mylcd, WE_KEY_NEXT); // 完整 tap（简单端口；OK 经最短按压窗口）
+we_gui_key_inject(&mylcd, WE_KEY_NEXT); // 完整 tap（简单端口）
 ```
 
 语义键：`WE_KEY_UP/DOWN/LEFT/RIGHT/PREV/NEXT/OK/BACK`（并入 `we_event_t` 的
@@ -783,7 +784,7 @@ we_focus_edit_enter/exit/active(&mylcd);   // 编辑态（WE_CFG_FOCUS_EDIT=0 �
 可聚焦性 = 类描述符 `class_flags` 带 `WE_CLASS_FLAG_FOCUSABLE`（2C 起 key_cb
 已并入统一 `event_cb`：0x10/0x20 两段事件码只发给 FOCUSABLE 类）。裁剪宏：
 `WE_CFG_FOCUS_EDIT` / `WE_CFG_FOCUS_NESTED` / 各控件 `WE_<NAME>_USE_KEY`。
-光标外观：`WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B`、`WE_CFG_FOCUS_FLASH_MS`。
+光标外观：`WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B`。
 光标显隐随输入来源：按键活动或 `we_focus_set`/`we_focus_edit_enter` 亮出，
 触摸按下收起（触摸的焦点跟随仍生效，只是不画环）。
 
@@ -809,7 +810,7 @@ void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj);     /* 祖先容器接管手�
 /* 容器只需应答 WE_EVENT_HIT_TEST（0=连子树跳过）与 WE_EVENT_DRAG_BEGIN
  * （拖拽接管询问，越 WE_CFG_DRAG_THRESHOLD=8 时沿祖先链询问一轮） */
 
-/* 滚动物理组件（Core/we_scroll.h，list 已迁移为样板） */
+/* 滚动物理组件（Core/components/we_scroll.h，list 已迁移为样板） */
 void    we_scroll_press(we_scroll_t *sc, int16_t c);
 uint8_t we_scroll_stay(we_scroll_t *sc, const we_scroll_cfg_t *cfg, int16_t c, int32_t max);
 uint8_t we_scroll_release(we_scroll_t *sc, int32_t max);      /* 非0=需启动惯性/回弹动画 */

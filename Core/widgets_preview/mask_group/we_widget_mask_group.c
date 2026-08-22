@@ -45,18 +45,6 @@
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 颜色相等比较（RGB565/RGB888），供 setter 的"值未变则跳过"守卫使用。
- */
-static __inline uint8_t _mg_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 按位移整体平移全部子控件（容器移动/滚动时调用）。
  * @param obj 目标控件对象指针。
  * @param dx X 方向位移（像素）。
@@ -615,29 +603,18 @@ static void _mask_group_draw_cb(void *ptr)
         return;
 
     {
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
         uint8_t old_scale = lcd->opa_scale;
-        int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-        int16_t new_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-        int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-        int16_t new_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
 
         /* 子控件透明度级联：把本容器 opacity 乘进全局乘子（嵌套自动链乘） */
         lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
 
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             we_obj_t *child = obj->children_head;
-
-            lcd->pfb_area.x0 = new_x0;
-            lcd->pfb_area.x1 = new_x1;
-            lcd->pfb_y_start = (uint16_t)new_y0;
-            lcd->pfb_y_end = (uint16_t)new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                            (new_x0 - old_pfb_area.x0);
 
             while (child != NULL)
             {
@@ -653,10 +630,7 @@ static void _mask_group_draw_cb(void *ptr)
         }
 
         lcd->opa_scale = old_scale;
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 
     /* 蒙版后处理：圆角裁剪 + 渐变（radius=0 且无渐变时内部直接返回） */
@@ -855,7 +829,7 @@ void we_mask_group_set_border(we_mask_group_obj_t *obj, colour_t color, uint8_t 
 {
     if (obj == NULL)
         return;
-    if (obj->border_w == width && _mg_colour_eq(obj->border_color, color))
+    if (obj->border_w == width && we_colour_eq(obj->border_color, color))
         return;
 
     obj->border_color = color;
@@ -865,7 +839,7 @@ void we_mask_group_set_border(we_mask_group_obj_t *obj, colour_t color, uint8_t 
 
 void we_mask_group_set_backdrop(we_mask_group_obj_t *obj, colour_t backdrop)
 {
-    if (obj == NULL || _mg_colour_eq(obj->backdrop, backdrop))
+    if (obj == NULL || we_colour_eq(obj->backdrop, backdrop))
         return;
 
     obj->backdrop = backdrop;

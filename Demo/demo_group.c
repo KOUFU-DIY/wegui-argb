@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t group_title;
 static we_label_obj_t group_note;
 static we_label_obj_t group_fps;
@@ -135,3 +137,99 @@ void we_group_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &group_fps, &group_fps_timer,
                        &group_last_frames, group_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t group_stat;
+static we_group_obj_t group_panel;
+static we_label_obj_t group_panel_title;
+static we_btn_obj_t   group_btn_a;
+static we_label_obj_t group_panel_tip;
+
+static uint32_t group_ticks_ms;
+static uint32_t group_click_cnt;
+static char     group_stat_buf[16];
+static char     group_tip_buf[8];
+
+/**
+ * @brief Group 内按钮事件回调：点击计数
+ * @param obj 传入：触发事件的对象指针
+ * @param event 传入：事件类型
+ * @param data 传入：输入设备数据
+ * @return 1 表示事件已消费
+ */
+static uint8_t _group_btn_cb(void *obj, we_event_t event, we_indev_data_t *data)
+{
+    (void)obj;
+    (void)data;
+
+    if (event == WE_EVENT_CLICKED)
+    {
+        group_click_cnt++;
+        snprintf(group_tip_buf, sizeof(group_tip_buf), "x%u", (unsigned)group_click_cnt);
+        we_label_set_text(&group_panel_tip, group_tip_buf);
+    }
+    return 1U;
+}
+
+/**
+ * @brief 初始化 group demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_group_simple_demo_init(we_lcd_t *lcd)
+{
+    group_ticks_ms  = 0U;
+    group_click_cnt = 0U;
+    memset(group_stat_buf, 0, sizeof(group_stat_buf));
+    memset(group_tip_buf, 0, sizeof(group_tip_buf));
+
+    /* 面板整体左右摆动，板内子控件相对布局跟随 */
+    we_group_obj_init(&group_panel, lcd, 4, 2, 118, 44,
+                      RGB888TODEV(24, 31, 43), 255);
+
+    we_label_obj_init(&group_panel_title, lcd, 0, 0,
+                      "GROUP", we_font_consolas_18,
+                      RGB888TODEV(255, 154, 102), 255);
+    we_btn_obj_init(&group_btn_a, lcd, 0, 0, 50, 20,
+                    "HIT", we_font_consolas_18, _group_btn_cb);
+    we_label_obj_init(&group_panel_tip, lcd, 0, 0,
+                      "x0", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 255);
+
+    we_group_add_child(&group_panel, (we_obj_t *)&group_panel_title);
+    we_group_add_child(&group_panel, (we_obj_t *)&group_btn_a);
+    we_group_add_child(&group_panel, (we_obj_t *)&group_panel_tip);
+
+    we_group_set_child_pos(&group_panel, (we_obj_t *)&group_panel_title, 6, 2);
+    we_group_set_child_pos(&group_panel, (we_obj_t *)&group_btn_a, 6, 18);
+    we_group_set_child_pos(&group_panel, (we_obj_t *)&group_panel_tip, 66, 22);
+
+    we_label_obj_init(&group_stat, lcd, 2, 50,
+                      "GROUP X 004", we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+/**
+ * @brief group demo 周期更新（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_group_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int16_t panel_x;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    group_ticks_ms += ms_tick;
+    panel_x = (int16_t)(4 + ((we_sin((int16_t)((group_ticks_ms * 32U) / 100U) & 0x1FF) * 4) >> 15));
+
+    we_obj_set_pos((we_obj_t *)&group_panel, panel_x, 2);
+
+    snprintf(group_stat_buf, sizeof(group_stat_buf), "GROUP X %03d", (int)panel_x);
+    we_label_set_text(&group_stat, group_stat_buf);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

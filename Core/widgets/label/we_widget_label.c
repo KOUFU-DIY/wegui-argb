@@ -21,7 +21,7 @@ static void _label_get_text_bbox(const unsigned char *font, const char *text, in
         return;
     }
 
-uint16_t line_height = we_font_get_line_height(font);
+    uint16_t line_height = we_font_get_line_height(font);
     int16_t max_w = 0;
     int16_t lines = 1;
     const char *p = text;
@@ -30,7 +30,7 @@ uint16_t line_height = we_font_get_line_height(font);
     while (*p)
     {
         // 调用字库测宽函数 we_get_text_width 测量当前行（到 \n 前）的像素宽
-uint16_t current_line_w = we_get_text_width(font, p);
+        uint16_t current_line_w = we_get_text_width(font, p);
         if (current_line_w > max_w)
         {
             max_w = current_line_w;
@@ -59,7 +59,7 @@ static void _label_invalidate_obj_bbox(we_label_obj_t *obj)
     if (obj == NULL || obj->base.lcd == NULL || obj->opacity == 0)
         return;
 
-we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h);
+    we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h);
 }
 
 /**
@@ -75,8 +75,8 @@ static void _label_invalidate_text_bbox(we_label_obj_t *obj, const char *text)
     if (obj == NULL || obj->base.lcd == NULL || obj->font == NULL || text == NULL || obj->opacity == 0)
         return;
 
-_label_get_text_bbox(obj->font, text, &w, &h);
-we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
+    _label_get_text_bbox(obj->font, text, &w, &h);
+    we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
 }
 
 /**
@@ -86,7 +86,7 @@ we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
  */
 static void _label_invalidate_text(we_label_obj_t *obj, const char *text)
 {
-_label_invalidate_text_bbox(obj, text);
+    _label_invalidate_text_bbox(obj, text);
 }
 
 /**
@@ -99,7 +99,7 @@ static void _label_draw_cb(void *ptr)
     if (obj->text == NULL || obj->font == NULL || obj->opacity == 0)
         return;
 
-we_draw_string(obj->base.lcd, obj->base.x, obj->base.y, obj->font, obj->text, obj->color, obj->opacity);
+    we_draw_string(obj->base.lcd, obj->base.x, obj->base.y, obj->font, obj->text, obj->color, obj->opacity);
 }
 
 // =========================================================
@@ -146,7 +146,7 @@ _label_get_text_bbox(font, text, &w, &h);
 
     if (opacity > 0 && w > 0 && h > 0)
     {
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
     }
 }
 
@@ -164,11 +164,11 @@ void we_label_set_text(we_label_obj_t *obj, const char *new_text)
     if (obj == NULL || obj->base.lcd == NULL || new_text == NULL)
         return;
 
-_label_get_text_bbox(obj->font, new_text, &new_w, &new_h);
+    _label_get_text_bbox(obj->font, new_text, &new_w, &new_h);
 
     if (obj->opacity > 0)
     {
-_label_invalidate_obj_bbox(obj);
+        _label_invalidate_obj_bbox(obj);
     }
 
     obj->text = new_text;
@@ -177,7 +177,7 @@ _label_invalidate_obj_bbox(obj);
 
     if (obj->opacity > 0)
     {
-_label_invalidate_text_bbox(obj, obj->text);
+        _label_invalidate_text_bbox(obj, obj->text);
     }
 }
 
@@ -203,7 +203,7 @@ void we_label_set_color(we_label_obj_t *obj, colour_t new_color)
     obj->color = new_color;
     if (obj->opacity > 0)
     {
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
     }
 }
 
@@ -221,10 +221,10 @@ void we_label_set_opacity(we_label_obj_t *obj, uint8_t opacity)
         return;
 
     if (obj->opacity > 0)
-_label_invalidate_text(obj, obj->text);
+        _label_invalidate_text(obj, obj->text);
 
     obj->opacity = opacity;
 
     if (obj->opacity > 0)
-_label_invalidate_text(obj, obj->text);
+        _label_invalidate_text(obj, obj->text);
 }

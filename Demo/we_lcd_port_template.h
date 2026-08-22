@@ -18,8 +18,8 @@
  * 2. 再选择 LCD IC 和通信端口。
  * 3. 把 Demo/we_lcd_port_template.c 里的占位接口改成你的硬件实现。
  * 4. 屏幕初始化、设窗和推屏逻辑，建议直接落到
- *    we_lcd_rgb565_port / we_lcd_rgb888_port 对应的底层链路里完成。
- * 5. 最后把 lcd_ic_init / lcd_set_addr / lcd_set_bright 这些宏，
+ *    lcd_rgb565_port / lcd_rgb888_port 对应的底层链路里完成。
+ * 5. 最后把 lcd_ic_init / lcd_set_windows / lcd_set_bright 这些宏，
  *    对接到你自己的底层驱动函数。
  *
  * 注意：
@@ -49,7 +49,7 @@ void lcd_hw_init(void);
  * @param pix_size 本次输出像素数量。
  * @return 无。
  */
-void we_lcd_rgb565_port(uint16_t *gram, uint32_t pix_size);
+void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size);
 
 /**
  * @brief 通过底层端口输出 RGB888 像素流。
@@ -57,7 +57,7 @@ void we_lcd_rgb565_port(uint16_t *gram, uint32_t pix_size);
  * @param pix_size 本次输出像素数量。
  * @return 无。
  */
-void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
+void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
 
 /* =========================
  * 1. 屏幕与 PFB 基本参数
@@ -87,7 +87,7 @@ void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
  * WE_LCD_FLUSH_ALIGN_X / WE_LCD_FLUSH_ALIGN_Y（不定义时默认 1 = 不对齐）。
  * 部分屏幕对刷新窗口坐标有硬件粒度要求，核心会在脏矩形入库时把矩形扩张到
  * 对齐边界（Core/dirty_driver.c），扩出的边缘随矩形整块重绘，因此
- * lcd_set_addr 收到的 x0/y0 恒为对齐倍数、x1/y1 恒为对齐倍数-1（含端点）。
+ * lcd_set_windows 收到的 x0/y0 恒为对齐倍数、x1/y1 恒为对齐倍数-1（含端点）。
  * 约束（we_gui_config.h 编译期校验）：对齐值必须是 2 的幂；SCREEN_WIDTH /
  * SCREEN_HEIGHT 及 PFB 行数（USER_GRAM_NUM / SCREEN_WIDTH）必须是对应
  * 对齐值的整数倍。
@@ -101,10 +101,12 @@ void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
  *
  * set_addr / flush 回调无需任何改动——坐标到达端口前已经对齐。
  *
- * 【示例 B：SSD1306 页式单色 OLED（128x64）】
- * SSD1306 显存按"页"组织：1 页 = 8 行，每字节对应 1 列 x 8 行。y 向必须
- * 按 8 对齐，x 向可逐列寻址：
+ * 【示例 B：SSD1306 页式单色 OLED（128x64，GRAY8 链路）】
+ * 单色/灰度屏走 GRAY8 色深：核心按 8bit 灰度渲染（1 字节亮度/像素），
+ * 量化归端口。SSD1306 显存按"页"组织：1 页 = 8 行，每字节对应
+ * 1 列 x 8 行，y 向必须按 8 对齐，x 向可逐列寻址：
  *
+ *   #define LCD_DEEP DEEP_GRAY8
  *   #define SCREEN_WIDTH  128
  *   #define SCREEN_HEIGHT 64
  *   #define WE_LCD_FLUSH_ALIGN_X (1)
@@ -113,33 +115,35 @@ void we_lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
  *
  * 端口回调写法要点（伪代码）：
  *
- *   static uint16_t win_x0, win_w, win_row;    // set_addr 记录窗口状态
+ *   static uint16_t win_x0, win_x1, win_y;     // set_addr 记录窗口状态
  *
  *   void ssd1306_set_addr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
  *   {
  *       // y0/y1 已被核心保证按 8 对齐（y0 % 8 == 0，(y1+1) % 8 == 0）
- *       win_x0 = x0; win_w = x1 - x0 + 1; win_row = 0;
- *       ssd1306_cmd_set_col_range(x0, x1);
- *       ssd1306_cmd_set_page_range(y0 >> 3, y1 >> 3);  // page = y / 8
+ *       win_x0 = x0; win_x1 = x1; win_y = y0;
  *   }
  *
- *   void ssd1306_flush(uint16_t *gram, uint32_t pix_size)
+ *   void ssd1306_gray_flush(uint8_t *gram, uint32_t pix_size)
  *   {
- *       // 每收满 8 行就把 RGB565 阈值化并按列打包成 1bpp 页字节发出。
+ *       // GRAY8 切片按列阈值二值化、垂直 8 像素打包成页字节逐页发出。
  *       // PFB 行数为 8 的倍数时，每次 flush 块都是整页，无跨块残页。
- *       uint16_t rows = pix_size / win_w;
- *       for (uint16_t page_row = 0; page_row < rows; page_row += 8) {
- *           for (uint16_t col = 0; col < win_w; col++) {
+ *       uint16_t w = win_x1 - win_x0 + 1, pages = (pix_size / w) >> 3;
+ *       for (uint16_t pg = 0; pg < pages; pg++) {
+ *           uint8_t *base = gram + pg * 8u * w;
+ *           ssd1306_cmd_page_col((win_y >> 3) + pg, win_x0);  // 逐页寻址
+ *           for (uint16_t col = 0; col < w; col++) {
  *               uint8_t b = 0;
  *               for (uint8_t bit = 0; bit < 8; bit++) {
- *                   uint16_t px = gram[(page_row + bit) * win_w + col];
- *                   if (px != 0) b |= (uint8_t)(1u << bit);  // 亮度阈值化
+ *                   if (base[bit * w + col] >= 128) b |= 1u << bit; // 亮度阈值
  *               }
  *               ssd1306_data(b);
  *           }
  *       }
- *       win_row += rows;
+ *       win_y += pages * 8;
  *   }
+ *
+ * 在库参考实现：STM32F103/Lcd_Port/stm32f103_lcd_soft_iic_port.c 的
+ * lcd_oled_port（1bpp 页打包）与 lcd_gray_port（SSD1327 类 4bpp 灰度）。
  */
 
 #endif

@@ -18,10 +18,6 @@ limitations under the License.
 #if(FLASH_PORT == _F_HARD_STDSPI)
 #include "stm32f103_flash_hard_stdspi_port.h"
 
-#ifndef RCC_HCLK_Divx
-#	define RCC_HCLK_Divx RCC_HCLK_Div4
-#endif
-
 /*--------------------------------------------------------------
   * 名称: flash_cs_clr(void)
   * 功能: FLASH片选使能 源weak类型 改自flash_port_template.c
@@ -149,8 +145,8 @@ void flash_port_init()
 	SPI_InitStructure.SPI_CRCPolynomial = 7;
 
 	RCC_APB1PeriphClockCmd(FLASH_RCC_APB1Periph_SPIx, ENABLE);
-	RCC_PCLK2Config(RCC_HCLK_Divx);//分频RCC_HCLK_Div1 RCC_HCLK_Div2 RCC_HCLK_Div4...
-	
+	/* 时钟树归 main 所有：FLASH_SPIx 挂 APB1，端口不改动全局 APB2 分频 */
+
 	SPI_Init(FLASH_SPIx, &SPI_InitStructure);
 	SPI_Cmd(FLASH_SPIx, ENABLE);
 	

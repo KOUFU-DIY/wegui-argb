@@ -1,3 +1,4 @@
+cfg=280x240-rgb565-mono0-dma1
 id=1 frames=180 crc=8C94F94D
 id=2 frames=180 crc=80405191
 id=3 frames=180 crc=74022CAC
@@ -31,7 +32,7 @@ id=26 frames=180 crc=6FFCAF09
 id=27 frames=180 crc=ACC3DF8A
 id=28 frames=180 crc=4C332E1C
 id=29 frames=180 crc=E6C19475
-id=29 frames=180 script=29.evt crc=BFB36FD5
+id=29 frames=180 script=29.evt crc=7DAC9B53
 id=30 frames=180 crc=48FA5B5D
 id=30 frames=180 script=30.evt crc=78672D4D
 id=31 frames=180 crc=87A8B4BA

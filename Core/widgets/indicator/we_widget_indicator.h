@@ -2,7 +2,7 @@
 #define __WE_WIDGET_INDICATOR_H
 
 #include "we_gui_driver.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 圆形状态指示灯控件

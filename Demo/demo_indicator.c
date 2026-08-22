@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t     ind_title;
 static we_label_obj_t     ind_fps_label;
 static we_label_obj_t     ind_hint;
@@ -178,3 +180,77 @@ void we_indicator_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ind_fps_label, &ind_fps_timer,
                        &ind_last_frames, ind_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t     ind_title;
+static we_label_obj_t     ind_pwr_lbl;
+static we_label_obj_t     ind_link_lbl;
+static we_label_obj_t     ind_tap_lbl;
+static we_indicator_obj_t ind_pwr;
+static we_indicator_obj_t ind_link;
+static we_indicator_obj_t ind_tap;
+
+static uint32_t ind_auto_timer;
+
+/**
+ * @brief 初始化 indicator demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_indicator_simple_demo_init(we_lcd_t *lcd)
+{
+    ind_auto_timer = 0U;
+
+    we_label_obj_init(&ind_title, lcd, 2, 2,
+                      "INDICATOR", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* 三盏一行：PWR 绿带光晕 / LINK 蓝慢速 / Tap 黄可点击 */
+    we_indicator_obj_init(&ind_pwr, lcd, 8, 20, 22, 22);
+    we_indicator_set_anim(&ind_pwr, 1U, 250U);
+    we_label_obj_init(&ind_pwr_lbl, lcd, 6, 46,
+                      "PWR", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+
+    we_indicator_obj_init(&ind_link, lcd, 52, 20, 22, 22);
+    we_indicator_set_colors(&ind_link, RGB888TODEV(40, 130, 255),
+                            RGB888TODEV(56, 58, 66));
+    we_indicator_set_anim(&ind_link, 1U, 600U);
+    we_label_obj_init(&ind_link_lbl, lcd, 48, 46,
+                      "LINK", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+
+    we_indicator_obj_init(&ind_tap, lcd, 96, 20, 22, 22);
+    we_indicator_set_colors(&ind_tap, RGB888TODEV(245, 214, 120),
+                            RGB888TODEV(56, 58, 66));
+    we_indicator_set_clickable(&ind_tap, 1U);
+    we_indicator_set_anim(&ind_tap, 1U, 300U);
+    we_label_obj_init(&ind_tap_lbl, lcd, 94, 46,
+                      "Tap", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+}
+
+/**
+ * @brief indicator demo 周期更新（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_indicator_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    ind_auto_timer += ms_tick;
+
+    /* 每 1.5s 自动翻转前两盏灯（第 3 盏交由点击控制），演示亮灭过渡 */
+    if (ind_auto_timer >= 1500U)
+    {
+        ind_auto_timer = 0U;
+        we_indicator_toggle(&ind_pwr);
+        we_indicator_toggle(&ind_link);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

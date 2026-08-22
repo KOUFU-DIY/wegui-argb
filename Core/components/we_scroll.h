@@ -41,15 +41,13 @@ typedef struct
     int16_t press_c;    /* 按下主轴坐标 */
     int16_t last_c;     /* 最近一次主轴坐标（步进测速用） */
     int16_t vel;        /* 速度（像素 / 16ms，方向与 pos 增量一致） */
-    uint16_t sb_idle_ms;   /* 滚动条空闲计时 */
-    uint8_t sb_alpha;      /* 滚动条当前透明度 */
     uint8_t tracking : 1;  /* 按压序列跟踪中 */
     uint8_t dragging : 1;  /* 已越过拖拽阈值 */
     uint8_t animating : 1; /* 惯性/回弹动画进行中（控件据此决定动画节点挂/摘） */
 } we_scroll_t;
 
 /**
- * @brief 复位滚动状态（init/绑定新数据时用；不触碰 sb_alpha）
+ * @brief 复位滚动状态（init/绑定新数据时用）
  */
 void we_scroll_reset(we_scroll_t *sc);
 
@@ -96,22 +94,6 @@ uint8_t we_scroll_anim_step(we_scroll_t *sc, const we_scroll_cfg_t *cfg,
  * @return 非 0 = pos 有变化。
  */
 uint8_t we_scroll_set(we_scroll_t *sc, int32_t pos, int32_t max_scroll);
-
-/**
- * @brief 唤醒滚动条（滚动值变化/绑定数据时调用：透明度拉满、空闲计时清零）
- */
-void we_scroll_bar_wake(we_scroll_t *sc, uint8_t active_alpha);
-
-/**
- * @brief 滚动条淡出步进（控件滚动条动画节点的 step_cb 调用）
- * @param idle_ms 传入：全显停留时长（如 600ms）
- * @param fade_step 传入：每 16ms 递减的 alpha 步长
- * @param resident_alpha 传入：常驻最低透明度（淡出下限）
- * @return 非 0 = alpha 有变化（调用方标脏滚动条条带）；到达常驻值后
- *         返回 0 且不再变化，调用方可摘节点。
- */
-uint8_t we_scroll_bar_step(we_scroll_t *sc, uint16_t elapsed_ms, uint16_t idle_ms,
-                           uint8_t fade_step, uint8_t resident_alpha);
 
 #ifdef __cplusplus
 }

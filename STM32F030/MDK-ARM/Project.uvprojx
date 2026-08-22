@@ -999,12 +999,12 @@
             <File>
               <FileName>we_motion.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_motion.c</FilePath>
+              <FilePath>..\..\Core\components\we_motion.c</FilePath>
             </File>
             <File>
               <FileName>we_scroll.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_scroll.c</FilePath>
+              <FilePath>..\..\Core\components\we_scroll.c</FilePath>
             </File>
             <File>
               <FileName>we_render.c</FileName>
@@ -1350,6 +1350,11 @@
               <FileName>simli_16_2bpp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\tool\1.font2c\output\simli_16_2bpp.c</FilePath>
+            </File>
+            <File>
+              <FileName>simsun_12_2bpp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\tool\1.font2c\output\simsun_12_2bpp.c</FilePath>
             </File>
             <File>
               <FileName>msyh_16_4bpp_ime.c</FileName>

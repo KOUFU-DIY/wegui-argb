@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t  img_ex_title;
 static we_label_obj_t  img_ex_note;
 static we_label_obj_t  img_ex_fps;
@@ -97,3 +99,66 @@ void we_img_ex_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &img_ex_fps, &img_ex_fps_timer,
                        &img_ex_last_frames, img_ex_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t  img_ex_title;
+static we_label_obj_t  img_ex_stat;
+static we_img_ex_obj_t img_ex_obj;
+
+static uint32_t img_ex_ticks_ms;
+static char     img_ex_stat_buf[24];
+
+/**
+ * @brief 初始化高级图片控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @details 64x80 源图以 0.5x 基准缩放呼吸并绕偏移 pivot 摆动。
+ */
+void we_img_ex_simple_demo_init(we_lcd_t *lcd)
+{
+    img_ex_ticks_ms = 0U;
+    memset(img_ex_stat_buf, 0, sizeof(img_ex_stat_buf));
+
+    we_label_obj_init(&img_ex_title, lcd, 2, 2,
+                      "IMG_EX", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+    we_label_obj_init(&img_ex_stat, lcd, 2, 50,
+                      "A 0 S 128", we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    we_img_ex_obj_init(&img_ex_obj, lcd, 88, 30, demo_rgb565_raw_be_64x80, 255);
+    we_img_ex_obj_set_pivot_offset(&img_ex_obj, -22, 0);
+}
+
+/**
+ * @brief 高级图片演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_img_ex_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int16_t  angle;
+    int32_t  swing_q15;
+    int32_t  scale_q15;
+    uint16_t scale_256;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    img_ex_ticks_ms += ms_tick;
+
+    swing_q15 = we_sin((int16_t)((img_ex_ticks_ms * 8U) / 100U) & 0x1FF);
+    angle = (int16_t)((swing_q15 * WE_DEG(90)) >> 15);
+
+    scale_q15 = we_sin((int16_t)((img_ex_ticks_ms * 12U) / 100U) & 0x1FF);
+    scale_256 = (uint16_t)(128 + ((scale_q15 * 16) >> 15));
+
+    we_img_ex_obj_set_transform(&img_ex_obj, angle, scale_256);
+
+    sprintf(img_ex_stat_buf, "A %d S %u", (int)angle, (unsigned)scale_256);
+    we_label_set_text(&img_ex_stat, img_ex_stat_buf);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

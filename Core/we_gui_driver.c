@@ -71,14 +71,16 @@ static void _we_lcd_swap_pfb(we_lcd_t *p_lcd)
  * 设计目标：
  * 1. 对业务层提供“按周期触发”的时间接口，而不是暴露底层 task 队列；
  * 2. 支持单次定时器和周期定时器；
- * 3. 当主循环偶尔抖动时，允许按周期补偿回调次数，避免动画或逻辑明显变慢。
+ * 3. 时间全额上报：每帧每定时器至多触发一次，回调收到距上次触发的
+ *    真实流逝毫秒，主循环阻塞产生的积压如何消化由回调的累计逻辑决定。
  * -------------------------------------------------------------------------- */
 /**
  * @brief 推进并触发 GUI 用户定时器
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
  * @param elapsed_ms 传入，本轮累计的已流逝时间，单位毫秒
  * @return 无
- * @note 当 elapsed_ms 大于周期时会按周期补偿触发，避免时间驱动逻辑整体变慢。
+ * @note 累计时间到达周期即触发一次并清零重计；回调参数为真实累计毫秒
+ *       （≥ 周期，上限 65535），与中央动画引擎同款的一帧一调模型。
  */
 static void _we_gui_run_timers(we_lcd_t *p_lcd, uint16_t elapsed_ms)
 {
@@ -92,42 +94,25 @@ static void _we_gui_run_timers(we_lcd_t *p_lcd, uint16_t elapsed_ms)
     for (t = p_lcd->timer_head; t != NULL; t = t_next)
     {
         uint32_t total_ms;
-        uint8_t fired = 0U;
 
         t_next = t->next;
         if (t->cb == NULL || t->active == 0U || t->period_ms == 0U)
             continue;
 
         total_ms = (uint32_t)t->acc_ms + elapsed_ms;
-
-        while (t->cb != NULL && t->active != 0U && t->period_ms != 0U && total_ms >= t->period_ms)
-        {
-            /* 补偿封顶：长阻塞恢复帧最多补发 CATCHUP_MAX 次，剩余节拍丢弃
-             * （从当前重新计时），防止回调风暴把恢复帧再次拖死。 */
-            if (fired >= WE_CFG_TIMER_CATCHUP_MAX)
-            {
-                total_ms = 0U;
-                break;
-            }
-            fired++;
-            total_ms -= t->period_ms;
-            t->cb(p_lcd, t->period_ms);
-
-            if (t->cb == NULL || t->active == 0U)
-                break;
-
-            if (t->repeat == 0U)
-            {
-                t->active = 0U;
-                total_ms = 0U;
-                break;
-            }
-        }
-
-        if (t->cb != NULL && t->active != 0U)
+        if (total_ms < t->period_ms)
         {
             t->acc_ms = (uint16_t)total_ms;
+            continue;
         }
+
+        /* 到期：先清零重计/单次收尾再回调，回调内 restart/delete 自身的语义不被覆盖 */
+        t->acc_ms = 0U;
+        if (t->repeat == 0U)
+            t->active = 0U;
+        if (total_ms > 65535U)
+            total_ms = 65535U;
+        t->cb(p_lcd, (uint16_t)total_ms);
     }
 }
 
@@ -230,8 +215,7 @@ void we_clear_gram(we_lcd_t *p_lcd) { we_fill_gram(p_lcd, p_lcd->bg_color); }
  *    光标只在按键活动或 we_focus_set 程序设焦时显示，触摸按下即收起
  *    （触摸的焦点跟随仍生效，只是不画环——手指本身就是光标）；
  * 5. 模态激活期间语义键直送模态对象的 event_cb，不再经过焦点管理器。
- * 全部瞬态标志压缩在 focus_flags 一个字节里（WE_FOCUS_F_*），
- * OK 最短按压窗口由 task_handler 直接倒计时，不占中央动画节点。
+ * 全部瞬态标志压缩在 focus_flags 一个字节里（WE_FOCUS_F_*）。
  * -------------------------------------------------------------------------- */
 
 /* 焦点光标外扩总量（控件包围盒边缘 → 光标框外缘的距离） */
@@ -320,9 +304,8 @@ static void _we_focus_cursor_show(we_lcd_t *lcd)
  * OK 按下沿：焦点控件进入按压态（btn 显示 PRESSED 且按住期间常驻），
  * 管理器吞掉按住期间的重复按下沿（防系统连发误触发）；
  * OK 松开沿：回发 WE_KEY_EVT_OK_RELEASE（控件回弹并触发点击）。
- * tap 式注入（一按一松同周期到达）经"最短按压窗口"（WE_CFG_FOCUS_FLASH_MS）
- * 延后回弹，保证按压视觉可见；焦点切走/清除时改发 WE_KEY_EVT_FLASH_END
- * （仅回弹不点击）。方向/前后/BACK 键仍为按下沿触发，松开沿忽略。
+ * 焦点切走/清除时改发 WE_KEY_EVT_FLASH_END（仅回弹不点击）。
+ * 方向/前后/BACK 键仍为按下沿触发，松开沿忽略。
  * 不变式：OK_ARMED 置位期间按压目标恒为 focus_obj（arm 只发生在焦点上，
  * 焦点切换/清除/删除必先取消），因此无需单独的目标指针。 */
 
@@ -335,8 +318,7 @@ static void _we_key_ok_deliver_release(we_lcd_t *lcd)
 {
     we_obj_t *obj = ((lcd->focus_flags & WE_FOCUS_F_OK_ARMED) != 0U) ? lcd->focus_obj : NULL;
 
-    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND);
-    lcd->key_flash_left_ms = 0U;
+    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED);
     if (obj != NULL && obj->class_p != NULL && obj->class_p->event_cb != NULL &&
         (obj->class_p->class_flags & WE_CLASS_FLAG_FOCUSABLE) != 0U)
         (void)obj->class_p->event_cb(obj, WE_KEY_EVT_OK_RELEASE, &lcd->indev_data);
@@ -353,24 +335,10 @@ static void _we_key_ok_cancel(we_lcd_t *lcd)
 
     if ((lcd->focus_flags & (WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED)) == 0U)
         return;
-    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND);
-    lcd->key_flash_left_ms = 0U;
+    lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_OK_HELD | WE_FOCUS_F_OK_ARMED);
     if (obj != NULL && obj->class_p != NULL && obj->class_p->event_cb != NULL &&
         (obj->class_p->class_flags & WE_CLASS_FLAG_FOCUSABLE) != 0U)
         (void)obj->class_p->event_cb(obj, WE_KEY_EVT_FLASH_END, &lcd->indev_data); /* 仅回弹 */
-}
-
-/**
- * @brief OK 按下沿被焦点控件消费后进入按压待回发状态与最短按压窗口
- * @param lcd 传入，当前 GUI 屏幕上下文指针
- * @return 无
- * @note 窗口倒计时由 we_gui_task_handler 直接消费 elapsed_ms 推进，
- *       不占用中央动画节点。
- */
-static void _we_key_ok_arm(we_lcd_t *lcd)
-{
-    lcd->focus_flags |= WE_FOCUS_F_OK_ARMED;
-    lcd->key_flash_left_ms = WE_CFG_FOCUS_FLASH_MS;
 }
 
 /**
@@ -635,12 +603,7 @@ static void _we_focus_dispatch(we_lcd_t *lcd, uint8_t code)
     if ((code & WE_KEY_RELEASE_FLAG) != 0U)
     {
         if (key == WE_KEY_OK && (lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U)
-        {
-            if (lcd->key_flash_left_ms > 0U)
-                lcd->focus_flags |= WE_FOCUS_F_REL_PEND; /* 仍在最短按压窗口内：挂起补发 */
-            else
-                _we_key_ok_deliver_release(lcd);
-        }
+            _we_key_ok_deliver_release(lcd);
 #if (WE_CFG_ENABLE_TOP_LAYER == 1)
         if (lcd->modal_obj != NULL && lcd->modal_obj->class_p != NULL &&
             lcd->modal_obj->class_p->event_cb != NULL)
@@ -674,8 +637,7 @@ static void _we_focus_dispatch(we_lcd_t *lcd, uint8_t code)
         if ((lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U)
             return;
         lcd->focus_flags = (uint8_t)((lcd->focus_flags | WE_FOCUS_F_OK_HELD) &
-                                     (uint8_t)~(WE_FOCUS_F_OK_ARMED | WE_FOCUS_F_REL_PEND));
-        lcd->key_flash_left_ms = 0U;
+                                     (uint8_t)~WE_FOCUS_F_OK_ARMED);
     }
 
     cur = lcd->focus_obj;
@@ -703,7 +665,7 @@ static void _we_focus_dispatch(we_lcd_t *lcd, uint8_t code)
             cur->class_p->event_cb(cur, (we_event_t)key, &lcd->indev_data) != 0U)
         {
             if (key == WE_KEY_OK)
-                _we_key_ok_arm(lcd); /* 进入按压待回发状态，等待松开沿 */
+                lcd->focus_flags |= WE_FOCUS_F_OK_ARMED; /* 进入按压待回发状态，等待松开沿 */
             return;
         }
         if (key == WE_KEY_OK || key == WE_KEY_BACK)
@@ -717,7 +679,7 @@ static void _we_focus_dispatch(we_lcd_t *lcd, uint8_t code)
         cur->class_p->event_cb(cur, (we_event_t)key, &lcd->indev_data) != 0U)
     {
         if (key == WE_KEY_OK)
-            _we_key_ok_arm(lcd); /* 进入按压待回发状态，等待松开沿 */
+            lcd->focus_flags |= WE_FOCUS_F_OK_ARMED; /* 进入按压待回发状态，等待松开沿 */
         return;
     }
 
@@ -770,14 +732,7 @@ static void _we_key_enqueue(we_lcd_t *lcd, uint8_t code)
     uint8_t next = (uint8_t)((tail + 1U) & (WE_CFG_KEY_QUEUE_LEN - 1U));
 
     if (next == lcd->key_q_head)
-    {
-        /* 队满丢弃本次注入。OK 松开沿丢失会让 HELD 清不掉（控件卡在
-         * 按压态、后续 OK 按下沿全被连发去重吞掉），单独计数（仅注入
-         * 侧写这一个字节，维持 SPSC 无竞态），交消费侧对账补投。 */
-        if (code == (uint8_t)(WE_KEY_OK | WE_KEY_RELEASE_FLAG))
-            lcd->key_ok_drop_seq++;
-        return;
-    }
+        return; /* 队满丢弃本次注入（丢一次输入无状态残留；OK 松开由 key_ok_down 电平兜底） */
     lcd->key_queue[tail] = code;
     lcd->key_q_tail = next;
 }
@@ -786,6 +741,8 @@ void we_gui_key_press(we_lcd_t *lcd, uint8_t key)
 {
     if (lcd == NULL || key < WE_KEY_UP || key > WE_KEY_BACK)
         return; /* WE_KEY_EVT_* 通知类键值禁止注入 */
+    if (key == WE_KEY_OK)
+        lcd->key_ok_down = 1U; /* 电平先于入队：消费侧兜底以电平为事实源 */
     _we_key_enqueue(lcd, key);
 }
 
@@ -793,12 +750,14 @@ void we_gui_key_release(we_lcd_t *lcd, uint8_t key)
 {
     if (lcd == NULL || key < WE_KEY_UP || key > WE_KEY_BACK)
         return;
+    if (key == WE_KEY_OK)
+        lcd->key_ok_down = 0U;
     _we_key_enqueue(lcd, (uint8_t)(key | WE_KEY_RELEASE_FLAG));
 }
 
 void we_gui_key_inject(we_lcd_t *lcd, uint8_t key)
 {
-    /* tap 语义 = 一按一松；OK 键经最短按压窗口保证按压视觉可见 */
+    /* tap 语义 = 一按一松 */
     we_gui_key_press(lcd, key);
     we_gui_key_release(lcd, key);
 }
@@ -1072,16 +1031,17 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
     uint16_t x1 = x + w - 1;
     uint16_t y1 = y + h - 1;
 
-    /* 7. 根据当前宽度和 pfb_size（当前 PFB 像素容量，真双缓冲时为整块的一半），算出单次最多能刷多少行。 */
+    /* 7. 根据当前宽度和 pfb_size（当前 PFB 像素容量，真双缓冲时为整块的一半），算出单次最多能刷多少行；
+     *    再向下对齐到 Y 对齐粒度——窄矩形下切片行数会被 pfb_size/w 放大到非对齐值，
+     *    页打包类端口依赖每个切片都是整对齐块（ALIGN_Y=1 时本步恒等，零变化）。 */
     uint16_t max_lines = p_lcd->pfb_size / w;
+    max_lines = (uint16_t)(max_lines & (uint16_t)~(WE_LCD_FLUSH_ALIGN_Y - 1));
 
     if (max_lines == 0)
         return;
 
     p_lcd->pfb_area.x0 = x;
-    p_lcd->pfb_area.y0 = y;
     p_lcd->pfb_area.x1 = x1;
-    p_lcd->pfb_area.y1 = y1;
     p_lcd->pfb_width = w;
 
     /* 8. 先告诉底层 LCD 本轮整块刷新的目标窗口。 */
@@ -1111,6 +1071,8 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
         debug_color.rgb.r = 255;
         debug_color.rgb.g = 0;
         debug_color.rgb.b = 0;
+#elif (LCD_DEEP == DEEP_GRAY8)
+        debug_color.dat8 = 255; /* 灰度屏用最亮标记脏区边框 */
 #endif
 
         colour_t *gram = (colour_t *)p_lcd->pfb_gram;
@@ -1141,6 +1103,9 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
 #elif (LCD_DEEP == DEEP_RGB888)
         p_lcd->flush_cb((uint8_t *)p_lcd->pfb_gram, pixels_to_push * 3U);
         _we_lcd_swap_pfb(p_lcd); /* 真双缓冲下与 RGB565 路径同样乒乓，否则为空操作 */
+#elif (LCD_DEEP == DEEP_GRAY8)
+        p_lcd->flush_cb((uint8_t *)p_lcd->pfb_gram, pixels_to_push); /* 1 像素 = 1 字节亮度 */
+        _we_lcd_swap_pfb(p_lcd);
 #endif
         current_y += lines_this_chunk;
         lines_left -= lines_this_chunk;
@@ -1152,7 +1117,8 @@ void we_push_pfb(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h)
  * @param p_lcd 传入，当前 GUI 屏幕上下文指针
  * @param ms 传入，本次新增的流逝时间，单位毫秒
  * @return 无
- * @note 内部会对累计值做上限保护，避免卡顿后一次性补偿过大。
+ * @note 累计值饱和到 uint16 上限（65535）：时间全额上报，积压如何
+ *       消化由定时器/动画回调的累计逻辑决定。
  */
 void we_gui_tick_inc(we_lcd_t *p_lcd, uint16_t ms)
 {
@@ -1161,11 +1127,10 @@ void we_gui_tick_inc(we_lcd_t *p_lcd, uint16_t ms)
     if (p_lcd == NULL || ms == 0U)
         return;
 
-    /* 单次累计时间需要封顶，避免主循环卡顿后一次性补偿过大，
-     * 导致容器吸附或其他时间驱动动画突然跳变。 */
+    /* uint16 饱和封顶：单次积压间隔超过 65535ms 才会丢失时间 */
     sum = (uint32_t)p_lcd->tick_elapsed_ms + ms;
-    if (sum > 200U)
-        sum = 200U;
+    if (sum > 65535U)
+        sum = 65535U;
 
     p_lcd->tick_elapsed_ms = (uint16_t)sum;
 }
@@ -1318,56 +1283,26 @@ void we_gui_task_handler(we_lcd_t *p_lcd)
 #endif
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
-    /* 1.5 语义键处理：先对账补投，再抽干环形队列。
-     * 对账补投：OK 松开沿曾因队满被丢弃时，按标准松开路径补投——否则
-     * HELD 永远清不掉，控件卡按压态、后续 OK 按下沿全被连发去重吞掉。
-     * 放在抽干之前：旧按压先正常收尾，队列里的新按下沿再从干净状态起步。 */
-    if (p_lcd->key_ok_drop_ack != p_lcd->key_ok_drop_seq)
-    {
-        p_lcd->key_ok_drop_ack = p_lcd->key_ok_drop_seq;
-        if ((p_lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U)
-        {
-            if (p_lcd->key_flash_left_ms > 0U)
-                p_lcd->focus_flags |= WE_FOCUS_F_REL_PEND; /* 仍在最短按压窗口内：挂起补发 */
-            else
-                _we_key_ok_deliver_release(p_lcd);
-        }
-    }
-
-    /* 消费队列（SPSC：本侧只写 head，注入侧只写 tail）。 */
+    /* GUI按键消费队列 */
     if (p_lcd->key_q_head != p_lcd->key_q_tail)
-        _we_focus_cursor_show(p_lcd); /* 任何按键活动都把光标亮出来（触摸按下时收起） */
+        _we_focus_cursor_show(p_lcd); /* 任何gui内部按键活动都把聚焦光标亮出来（触摸按下时收起） */
     while (p_lcd->key_q_head != p_lcd->key_q_tail)
     {
         uint8_t key = p_lcd->key_queue[p_lcd->key_q_head];
         p_lcd->key_q_head = (uint8_t)((p_lcd->key_q_head + 1U) & (WE_CFG_KEY_QUEUE_LEN - 1U));
         _we_focus_dispatch(p_lcd, key);
     }
+
+    /* OK 松开电平兜底：松开沿若因队满丢失，按注入侧电平事实收尾按压
+     * （正常送达时上面已按序清掉 HELD，此处恒为空操作）。 */
+    if ((p_lcd->focus_flags & WE_FOCUS_F_OK_HELD) != 0U && p_lcd->key_ok_down == 0U)
+        _we_key_ok_deliver_release(p_lcd);
 #endif
 
     /* 2. 消费累计时间，推进用户定时器。 */
     elapsed_ms = p_lcd->tick_elapsed_ms;
     p_lcd->tick_elapsed_ms = 0U;
     _we_gui_run_timers(p_lcd, elapsed_ms);
-
-#if (WE_CFG_ENABLE_KEY_INPUT == 1)
-    /* 2.4 OK 最短按压窗口倒计时（直接消费 elapsed_ms，不占动画节点）：
-     *     到期时若松开沿已挂起则补发回弹+点击；仍按住则仅停表，
-     *     等真实松开沿到达时即时交付。 */
-    if (p_lcd->key_flash_left_ms != 0U && elapsed_ms != 0U)
-    {
-        if (elapsed_ms >= (uint16_t)p_lcd->key_flash_left_ms)
-        {
-            p_lcd->key_flash_left_ms = 0U;
-            if ((p_lcd->focus_flags & WE_FOCUS_F_REL_PEND) != 0U)
-                _we_key_ok_deliver_release(p_lcd);
-        }
-        else
-        {
-            p_lcd->key_flash_left_ms = (uint8_t)(p_lcd->key_flash_left_ms - elapsed_ms);
-        }
-    }
-#endif
 
     /* 2.5 推进中央动画链表（控件动画）。
      *     先存 next 再调 step_cb，允许回调内摘除自身节点。 */
@@ -1756,7 +1691,7 @@ void we_obj_delete(we_obj_t *obj)
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
     // 5.2 焦点引用防悬空：被删对象是焦点本身或焦点的祖先容器时一并清理
     //     （删除路径不发 DEFOCUS 通知）。OK 按压目标恒为焦点，故编辑态与
-    //     待回发/挂起标志一起清零即可；HELD 保留，待物理松开沿自然清零。
+    //     待回发标志一起清零即可；HELD 保留，待物理松开沿自然清零。
     if (lcd->focus_obj != NULL)
     {
         const we_obj_t *it = lcd->focus_obj;
@@ -1767,9 +1702,7 @@ void we_obj_delete(we_obj_t *obj)
             if ((lcd->focus_flags & WE_FOCUS_F_CURSOR_VIS) != 0U)
                 _we_focus_cursor_invalidate(lcd->focus_obj);
             lcd->focus_obj = NULL;
-            lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_EDIT | WE_FOCUS_F_OK_ARMED |
-                                           WE_FOCUS_F_REL_PEND);
-            lcd->key_flash_left_ms = 0U;
+            lcd->focus_flags &= (uint8_t)~(WE_FOCUS_F_EDIT | WE_FOCUS_F_OK_ARMED);
         }
     }
 #endif
@@ -1816,7 +1749,7 @@ void we_obj_delete(we_obj_t *obj)
  *
  * 控件动画不占用任何槽位：节点内嵌在控件结构体里，挂到
  * lcd->anim_head 侵入式链表上，由 we_gui_task_handler 每周期统一推进。
- * 空链时开销仅一次判空；start 不会失败（彻底消除"槽满→动画静默消失"）。
+ * 空链时开销仅一次判空；start 不会失败，数量无上限。
  * -------------------------------------------------------------------------- */
 
 void we_anim_start(we_lcd_t *lcd, we_anim_t *anim,
@@ -2010,18 +1943,9 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
                            we_lcd_set_addr_cb_t set_addr_cb, we_lcd_flush_cb_t flush_cb)
 {
     WE_ASSERT(p_lcd != NULL && gram_base != NULL && gram_size != 0U && set_addr_cb != NULL && flush_cb != NULL);
-    if (p_lcd == NULL)
-        while (1)
-            ;
-    if (gram_base == NULL)
-        while (1)
-            ;
-    if (set_addr_cb == NULL)
-        while (1)
-            ;
-    if (flush_cb == NULL)
-        while (1)
-            ;
+    if (p_lcd == NULL || gram_base == NULL || gram_size == 0U ||
+        set_addr_cb == NULL || flush_cb == NULL)
+        return; /* 容错返回：与全库"断言后静默判空守卫"契约一致 */
 
     p_lcd->width = SCREEN_WIDTH;
     p_lcd->height = SCREEN_HEIGHT;
@@ -2050,22 +1974,13 @@ void we_lcd_init_with_port(we_lcd_t *p_lcd, colour_t bg, colour_t *gram_base, ui
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
     p_lcd->focus_obj = NULL; // 焦点从无开始，首个导航键或 we_focus_set 唤出
     p_lcd->focus_flags = 0U;
-    p_lcd->key_flash_left_ms = 0U;
     p_lcd->key_q_head = 0U;
     p_lcd->key_q_tail = 0U;
-    p_lcd->key_ok_drop_seq = 0U;
-    p_lcd->key_ok_drop_ack = 0U;
+    p_lcd->key_ok_down = 0U;
 #endif
-#if (WE_CFG_ENABLE_INPUT_PORT_BIND == 1)
+    /* 端口回调无条件清零：字段不受裁剪宏门控，消费方的判空依赖确定的 NULL */
     p_lcd->input_read_cb = NULL;
-#endif
-#if (WE_CFG_ENABLE_STORAGE_PORT_BIND == 1)
     p_lcd->storage_read_cb = NULL;
-#endif
-    /*
-    p_lcd->pfb_gram_base = gram; // 记录 PFB 基址，后续双缓冲切换会用到
-p_lcd->pfb_gram = gram;
-    */
     p_lcd->pfb_gram_base = gram_base; // 记录 PFB 基址，后续双缓冲切换会用到
     p_lcd->pfb_gram = gram_base;
     /* PFB 长度约定：
@@ -2173,22 +2088,22 @@ void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj)
  * @return 无
  * @note 释放阶段会按位移和阈值判定点击或方向滑动事件。
  */
-void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
+/**
+ * @brief 解析当前触摸点的命中对象（普通链 → 顶层链 → 模态兜底）
+ * @param lcd 传入，当前 GUI 屏幕上下文指针
+ * @param data 传入，触摸数据
+ * @param hit_from_top 传出（可空），置 1 表示命中来自顶层/模态通道
+ * @return 命中对象；空白处为 NULL（模态激活时恒非空）
+ * @note 只在需要命中结果的分支调用（PRESSED / RELEASED 点击复核）；
+ *       STAY 全部派发给 pressed_obj，不做命中测试。
+ */
+static we_obj_t *_we_resolve_target(we_lcd_t *lcd, we_indev_data_t *data, uint8_t *hit_from_top)
 {
-    if (lcd == NULL || data == NULL)
-        return;
-
-    /* 按压/拖拽状态保存在 we_lcd_t 内（按实例隔离，多屏不串台）。
-     * 防御：若按压对象已被外部置为失效（class_p 为空），立即丢弃引用，
-     * 避免 RELEASED/STAY/SWIPE 分支经空 class_p 调用直接 HardFault。 */
-    if (lcd->pressed_obj != NULL && lcd->pressed_obj->class_p == NULL)
-        lcd->pressed_obj = NULL;
-
-    uint8_t hit_from_top = 0U;
     we_obj_t *target = _we_hit_test(lcd->obj_list_head, data,
                                     0, 0, (int16_t)(lcd->width - 1), (int16_t)(lcd->height - 1));
 
-    (void)hit_from_top; /* 纯触摸或无顶层裁剪档组合下不被读取 */
+    if (hit_from_top != NULL)
+        *hit_from_top = 0U;
 #if (WE_CFG_ENABLE_TOP_LAYER == 1)
     {
         /* 顶层对象绘制在普通层之上，命中优先级同样更高（链序后者更优）；
@@ -2200,19 +2115,39 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
         if (lcd->modal_obj != NULL)
         {
             target = (top_hit != NULL) ? top_hit : lcd->modal_obj;
-            hit_from_top = 1U;
+            if (hit_from_top != NULL)
+                *hit_from_top = 1U;
         }
         else if (top_hit != NULL)
         {
             target = top_hit;
-            hit_from_top = 1U;
+            if (hit_from_top != NULL)
+                *hit_from_top = 1U;
         }
     }
 #endif /* WE_CFG_ENABLE_TOP_LAYER */
+    return target;
+}
+
+void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
+{
+    if (lcd == NULL || data == NULL)
+        return;
+
+    /* 按压/拖拽状态保存在 we_lcd_t 内（按实例隔离，多屏不串台）。
+     * 防御：若按压对象已被外部置为失效（class_p 为空），立即丢弃引用，
+     * 避免 RELEASED/STAY/SWIPE 分支经空 class_p 调用直接 HardFault。 */
+    if (lcd->pressed_obj != NULL && lcd->pressed_obj->class_p == NULL)
+        lcd->pressed_obj = NULL;
 
     // 按触摸状态机分发事件。
     if (data->state == WE_TOUCH_STATE_PRESSED)
     {
+        uint8_t hit_from_top = 0U;
+        we_obj_t *target = _we_resolve_target(lcd, data, &hit_from_top);
+
+        (void)hit_from_top; /* 纯触摸档（无按键焦点跟随）不读取 */
+
         /* 记录按下坐标，用于释放时判定滑动方向 */
         lcd->gesture_press_x = data->x;
         lcd->gesture_press_y = data->y;
@@ -2299,9 +2234,10 @@ void we_gui_indev_handler(we_lcd_t *lcd, we_indev_data_t *data)
                 we_event_t swipe = (dy < 0) ? WE_EVENT_SWIPE_UP : WE_EVENT_SWIPE_DOWN;
                 lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, swipe, data);
             }
-            else if (lcd->pressed_obj == target)
+            else if (lcd->pressed_obj == _we_resolve_target(lcd, data, NULL))
             {
-                /* 位移不足或拖拽后松手，视为点击（拖拽后不在原控件上则不触发） */
+                /* 位移不足或拖拽后松手，视为点击（拖拽后不在原控件上则不触发）。
+                 * 命中测试惰性化：只有走到点击复核才需要"松手时手指下是谁"。 */
                 lcd->pressed_obj->class_p->event_cb(lcd->pressed_obj, WE_EVENT_CLICKED, data);
             }
         }

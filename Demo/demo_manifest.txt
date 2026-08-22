@@ -1,0 +1,41 @@
+﻿# WeGui demo 源文件清单（唯一事实源）
+# 读取方：SimLite/build_lite.ps1、SimLite/build_lite.sh、
+#         AD14N/gen_cbp.ps1、AD14N/build_ad14n.ps1
+# 规则：每行一个 Demo/ 下的 .c 文件名；# 起注释；文件名后可跟空格分隔的标签。
+# 标签：sim-only = 仅模拟器编译（AD14N 两脚本跳过）。
+# 两个 Keil 工程（F103/F030 .uvprojx）仍需手工添加文件，不读本清单。
+demo_showcase.c sim-only
+demo_common.c
+demo_label.c
+demo_btn.c
+demo_img.c
+demo_img_alpha.c
+demo_img_ex.c
+demo_arc.c
+demo_concentric_arc.c
+demo_group.c
+demo_slideshow.c
+demo_checkbox.c
+demo_label_ex.c
+demo_chart.c
+demo_toggle.c
+demo_progress.c
+demo_msgbox.c
+demo_flash_img.c
+demo_flash_font.c
+demo_slider.c
+demo_scroll_panel.c
+demo_dropdown.c
+demo_stepper.c
+demo_indicator.c
+demo_line.c
+demo_box.c
+demo_gauge.c
+demo_list.c
+demo_roller.c
+demo_marquee.c
+demo_toast.c
+demo_focus.c
+demo_focus2.c
+demo_imgbtn.c
+demo_segdisp.c

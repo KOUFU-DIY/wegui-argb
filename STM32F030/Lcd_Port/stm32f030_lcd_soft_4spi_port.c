@@ -74,20 +74,6 @@ void lcd_hw_init(void)
 ----------------------------------------------------------------*/
 static void lcd_spi_send_1byte(uint8_t dat)
 {
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
-    // OLED SPI SCL默认常高,第二个跳变数据沿有效
-    uint8_t i;
-    for (i = 0; i < 8; i++)
-    {
-        LCD_SCL_Clr();
-        if (dat & 0x80)
-            LCD_SDA_Set();
-        else
-            LCD_SDA_Clr();
-        dat <<= 1;
-        LCD_SCL_Set();
-    }
-#else
     // TFT SPI SCL默认常低,第一个跳变数据沿有效
     uint8_t i;
     for (i = 0; i < 8; i++)
@@ -100,7 +86,6 @@ static void lcd_spi_send_1byte(uint8_t dat)
         dat <<= 1;
         LCD_SCL_Clr();
     }
-#endif
 }
 
 /* 发送 1 个命令字节 (DC=0) */
@@ -112,41 +97,28 @@ void lcd_send_1Cmd(uint8_t dat)
     LCD_CS_Set();
 }
 
-/* 发送命令帧：TFT 分支按 p[0]=命令、p[1..]=数据(DC 切换)发送；OLED/GRAY8 分支整帧均作命令(DC=0)连续发送 */
+/* 发送命令帧：按 p[0]=命令、p[1..]=数据(DC 切换)发送（本目标仅 TFT 屏型） */
 void lcd_send_nCmd(uint8_t *p, uint16_t num)
 {
-	//-----------------OLED类型屏幕-------------------
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
-		uint16_t i=0;
-		LCD_DC_Clr();
-		LCD_CS_Clr();
-		while(num>i)
-		{
-			lcd_spi_send_1byte(p[i++]);	  
-		}
-		LCD_CS_Set();
-#else
-	//-----------------TFT类型屏幕-------------------
-		//数组[0]按照指令发送
-		//余下位按照数据发送
-		
-		//1.开始传输第一个命令
-		LCD_DC_Clr();
-		num--;
-		LCD_CS_Clr();
-		lcd_spi_send_1byte(p[0]);
-	
-		//2.发送剩下的按数据发送
-		LCD_DC_Set();
-		while(num-->0)
-		{
-			p++;
-			lcd_spi_send_1byte(*p);
-		}
-		
-		//3.结束
-		LCD_CS_Set();
-	#endif
+	//数组[0]按照指令发送
+	//余下位按照数据发送
+
+	//1.开始传输第一个命令
+	LCD_DC_Clr();
+	num--;
+	LCD_CS_Clr();
+	lcd_spi_send_1byte(p[0]);
+
+	//2.发送剩下的按数据发送
+	LCD_DC_Set();
+	while(num-->0)
+	{
+		p++;
+		lcd_spi_send_1byte(*p);
+	}
+
+	//3.结束
+	LCD_CS_Set();
 }
 
 /* 发送 1 个数据字节 (DC=1) */

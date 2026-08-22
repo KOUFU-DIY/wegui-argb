@@ -73,10 +73,38 @@
         LCD_SDA_Set(); \
     } while (0)
 
-/* RES — PB0 */
-#define LCD_RES_Clr()     do { GPIOB->BRR  = GPIO_Pin_0; } while (0)
-#define LCD_RES_Set()     do { GPIOB->BSRR = GPIO_Pin_0; } while (0)
+/* RES — PB10 */
+#define LCD_RES_Clr()     do { GPIOB->BRR  = GPIO_Pin_10; } while (0)
+#define LCD_RES_Set()     do { GPIOB->BSRR = GPIO_Pin_10; } while (0)
 #define LCD_RES_IO_Init() \
+    do { \
+        GPIO_InitTypeDef gpio; \
+        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE); \
+        gpio.GPIO_Pin   = GPIO_Pin_10; \
+        gpio.GPIO_Speed = GPIO_Speed_50MHz; \
+        gpio.GPIO_Mode  = GPIO_Mode_Out_PP; \
+        GPIO_Init(GPIOB, &gpio); \
+        LCD_RES_Set(); \
+    } while (0)
+
+/* DC — PB11 */
+#define LCD_DC_Clr()     do { GPIOB->BRR  = GPIO_Pin_11; } while (0)
+#define LCD_DC_Set()     do { GPIOB->BSRR = GPIO_Pin_11; } while (0)
+#define LCD_DC_IO_Init() \
+    do { \
+        GPIO_InitTypeDef gpio; \
+        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE); \
+        gpio.GPIO_Pin   = GPIO_Pin_11; \
+        gpio.GPIO_Speed = GPIO_Speed_50MHz; \
+        gpio.GPIO_Mode  = GPIO_Mode_Out_PP; \
+        GPIO_Init(GPIOB, &gpio); \
+        LCD_DC_Set(); \
+    } while (0)
+
+/* BL — PB0 (背光) */
+#define LCD_BL_Clr()     do { GPIOB->BRR  = GPIO_Pin_0; } while (0)
+#define LCD_BL_Set()     do { GPIOB->BSRR = GPIO_Pin_0; } while (0)
+#define LCD_BL_IO_Init() \
     do { \
         GPIO_InitTypeDef gpio; \
         RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE); \
@@ -84,34 +112,6 @@
         gpio.GPIO_Speed = GPIO_Speed_50MHz; \
         gpio.GPIO_Mode  = GPIO_Mode_Out_PP; \
         GPIO_Init(GPIOB, &gpio); \
-        LCD_RES_Set(); \
-    } while (0)
-
-/* DC — PA3 */
-#define LCD_DC_Clr()     do { GPIOA->BRR  = GPIO_Pin_3; } while (0)
-#define LCD_DC_Set()     do { GPIOA->BSRR = GPIO_Pin_3; } while (0)
-#define LCD_DC_IO_Init() \
-    do { \
-        GPIO_InitTypeDef gpio; \
-        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE); \
-        gpio.GPIO_Pin   = GPIO_Pin_3; \
-        gpio.GPIO_Speed = GPIO_Speed_50MHz; \
-        gpio.GPIO_Mode  = GPIO_Mode_Out_PP; \
-        GPIO_Init(GPIOA, &gpio); \
-        LCD_DC_Set(); \
-    } while (0)
-
-/* BL — PA2 (背光) */
-#define LCD_BL_Clr()     do { GPIOA->BRR  = GPIO_Pin_2; } while (0)
-#define LCD_BL_Set()     do { GPIOA->BSRR = GPIO_Pin_2; } while (0)
-#define LCD_BL_IO_Init() \
-    do { \
-        GPIO_InitTypeDef gpio; \
-        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE); \
-        gpio.GPIO_Pin   = GPIO_Pin_2; \
-        gpio.GPIO_Speed = GPIO_Speed_50MHz; \
-        gpio.GPIO_Mode  = GPIO_Mode_Out_PP; \
-        GPIO_Init(GPIOA, &gpio); \
         lcd_bl_on(); \
     } while (0)
 
@@ -142,5 +142,10 @@ void lcd_send_1Dat(uint8_t dat);
 void lcd_send_nDat(uint8_t *p, uint16_t num);
 void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size);
 void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
+/* OLED / 灰度屏配置时提供：lcd_set_windows 存窗口（灰度屏另转发硬件窗口命令），
+ * lcd_oled_port 页式打包刷屏 / lcd_gray_port 4bpp 双像素打包刷屏 */
+void lcd_set_windows(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void lcd_oled_port(uint8_t *gram, uint32_t pix_size);
+void lcd_gray_port(uint8_t *gram, uint32_t pix_size);
 
 #endif

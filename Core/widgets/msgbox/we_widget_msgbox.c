@@ -348,6 +348,31 @@ static void _popup_draw_text_wrapped(we_lcd_t *lcd, const unsigned char *font, c
     }
 }
 
+/* 布局尺度：小屏（SCREEN_HEIGHT<=64）走紧凑档，其余保持原值 */
+#if (SCREEN_HEIGHT <= 64)
+#define _MB_PAD_TOP 3        /* 顶部留白 */
+#define _MB_PAD_SIDE 6       /* 左右内容留白 */
+#define _MB_GAP_TITLE_MSG 3  /* 标题-正文间距 */
+#define _MB_GAP_ACTION 12    /* 正文-动作区间距（含分隔线空间） */
+#define _MB_ACTION_H 15      /* 动作区高度 */
+#define _MB_PAD_BOTTOM 3     /* 底部留白 */
+#define _MB_SEP_LIFT 6       /* 分隔线相对按钮顶的抬升量 */
+#define _MB_BTN_PAD 10       /* 按钮文本两侧留白 */
+#define _MB_BTN_MIN_W 28     /* 空文本按钮最小宽 */
+#define _MB_BTN_GAP 8        /* 双按钮间距/动作区侧边距 */
+#else
+#define _MB_PAD_TOP 18
+#define _MB_PAD_SIDE 18
+#define _MB_GAP_TITLE_MSG 8
+#define _MB_GAP_ACTION 28
+#define _MB_ACTION_H 28
+#define _MB_PAD_BOTTOM 14
+#define _MB_SEP_LIFT 10
+#define _MB_BTN_PAD 20
+#define _MB_BTN_MIN_W 48
+#define _MB_BTN_GAP 24
+#endif
+
 /**
  * @brief 根据文本与按钮内容重新计算弹窗布局。
  * @param obj 目标控件对象指针。
@@ -382,22 +407,22 @@ static void _popup_refresh_layout(we_popup_obj_t *obj)
         uint16_t action_left;
         uint16_t action_right;
 
-        action_left = (uint16_t)((cancel_w > 0U) ? (cancel_w + 20U) : 48U);
-        action_right = (uint16_t)((confirm_w > 0U) ? (confirm_w + 20U) : 48U);
-        btn_need_w = (uint16_t)(action_left + 24U + action_right + 24U);
+        action_left = (uint16_t)((cancel_w > 0U) ? (cancel_w + _MB_BTN_PAD) : _MB_BTN_MIN_W);
+        action_right = (uint16_t)((confirm_w > 0U) ? (confirm_w + _MB_BTN_PAD) : _MB_BTN_MIN_W);
+        btn_need_w = (uint16_t)(action_left + _MB_BTN_GAP + action_right + _MB_BTN_GAP);
     }
     else
     {
         uint16_t action_single;
 
-        action_single = (uint16_t)((confirm_w > 0U) ? (confirm_w + 20U) : 48U);
-        btn_need_w = (uint16_t)(action_single + 24U);
+        action_single = (uint16_t)((confirm_w > 0U) ? (confirm_w + _MB_BTN_PAD) : _MB_BTN_MIN_W);
+        btn_need_w = (uint16_t)(action_single + _MB_BTN_GAP);
     }
 
     content_need_w = title_w;
     if (msg_w > content_need_w)
         content_need_w = msg_w;
-    content_need_w = (uint16_t)(content_need_w + 36U);
+    content_need_w = (uint16_t)(content_need_w + 2U * _MB_PAD_SIDE);
     desired_w = content_need_w;
     if (btn_need_w > desired_w)
         desired_w = btn_need_w;
@@ -408,25 +433,19 @@ static void _popup_refresh_layout(we_popup_obj_t *obj)
     obj->panel_w = desired_w;
 
     title_h = _popup_text_block_height_wrapped(obj->title_font, obj->title,
-                                               (obj->panel_w > 36U) ? (uint16_t)(obj->panel_w - 36U) : obj->panel_w);
+                                               (obj->panel_w > 2U * _MB_PAD_SIDE) ? (uint16_t)(obj->panel_w - 2U * _MB_PAD_SIDE) : obj->panel_w);
     msg_h = _popup_text_block_height_wrapped(obj->message_font, obj->message,
-                                             (obj->panel_w > 36U) ? (uint16_t)(obj->panel_w - 36U) : obj->panel_w);
+                                             (obj->panel_w > 2U * _MB_PAD_SIDE) ? (uint16_t)(obj->panel_w - 2U * _MB_PAD_SIDE) : obj->panel_w);
 
-    /* 扁平版垂直预算：
-     * 顶部留白 18
-     * 标题区
-     * 标题到正文留白 8（正文存在时）
-     * 正文区
-     * 正文到底部分隔线/动作区留白 28
-     * 动作区高度 28
-     * 底部留白 14
-     */
-    min_h = (uint16_t)(18U + 28U + 28U + 14U);
+    /* 扁平版垂直预算：顶部留白 + 标题区 + 标题-正文间距（正文存在时）
+     * + 正文区 + 正文-动作区留白（含分隔线）+ 动作区高 + 底部留白，
+     * 各尺度见 _MB_* 宏（小屏自动紧凑档）。 */
+    min_h = (uint16_t)(_MB_PAD_TOP + _MB_GAP_ACTION + _MB_ACTION_H + _MB_PAD_BOTTOM);
     desired_h = (uint16_t)(min_h + title_h + msg_h);
     if (title_h > 0U && msg_h > 0U)
-        desired_h = (uint16_t)(desired_h + 8U);
+        desired_h = (uint16_t)(desired_h + _MB_GAP_TITLE_MSG);
 
-    /* 双向跟随内容高度（desired_h 自带 88px 结构性下限），
+    /* 双向跟随内容高度（desired_h 自带结构性下限），
      * 不做"只增不减"棘轮，否则长文本切短后面板高度回不去。 */
     obj->panel_h = desired_h;
 
@@ -540,18 +559,18 @@ static void _popup_get_confirm_rect(const we_popup_obj_t *obj,
     int16_t group_x;
 
     panel_x = _popup_panel_x(obj);
-    action_h = 28;
-    action_y = (int16_t)(obj->panel_y + obj->panel_h - action_h - 14);
+    action_h = _MB_ACTION_H;
+    action_y = (int16_t)(obj->panel_y + obj->panel_h - action_h - _MB_PAD_BOTTOM);
     confirm_w = (int16_t)((_popup_text_longest_line_width(obj->button_font, obj->confirm_text) > 0U) ?
-                          (_popup_text_longest_line_width(obj->button_font, obj->confirm_text) + 20U) : 48U);
+                          (_popup_text_longest_line_width(obj->button_font, obj->confirm_text) + _MB_BTN_PAD) : _MB_BTN_MIN_W);
 
     if (obj->layout == WE_POPUP_LAYOUT_CONFIRM_CANCEL)
     {
         cancel_w = (int16_t)((_popup_text_longest_line_width(obj->button_font, obj->cancel_text) > 0U) ?
-                             (_popup_text_longest_line_width(obj->button_font, obj->cancel_text) + 20U) : 48U);
-        group_w = (int16_t)(cancel_w + 24 + confirm_w);
+                             (_popup_text_longest_line_width(obj->button_font, obj->cancel_text) + _MB_BTN_PAD) : _MB_BTN_MIN_W);
+        group_w = (int16_t)(cancel_w + _MB_BTN_GAP + confirm_w);
         group_x = (int16_t)(panel_x + (obj->panel_w - group_w) / 2);
-        *x = (int16_t)(group_x + cancel_w + 24);
+        *x = (int16_t)(group_x + cancel_w + _MB_BTN_GAP);
         *w = confirm_w;
     }
     else
@@ -585,13 +604,13 @@ static void _popup_get_cancel_rect(const we_popup_obj_t *obj,
     int16_t group_x;
 
     panel_x = _popup_panel_x(obj);
-    action_h = 28;
-    action_y = (int16_t)(obj->panel_y + obj->panel_h - action_h - 14);
+    action_h = _MB_ACTION_H;
+    action_y = (int16_t)(obj->panel_y + obj->panel_h - action_h - _MB_PAD_BOTTOM);
     confirm_w = (int16_t)((_popup_text_longest_line_width(obj->button_font, obj->confirm_text) > 0U) ?
-                          (_popup_text_longest_line_width(obj->button_font, obj->confirm_text) + 20U) : 48U);
+                          (_popup_text_longest_line_width(obj->button_font, obj->confirm_text) + _MB_BTN_PAD) : _MB_BTN_MIN_W);
     cancel_w = (int16_t)((_popup_text_longest_line_width(obj->button_font, obj->cancel_text) > 0U) ?
-                         (_popup_text_longest_line_width(obj->button_font, obj->cancel_text) + 20U) : 48U);
-    group_w = (int16_t)(cancel_w + 24 + confirm_w);
+                         (_popup_text_longest_line_width(obj->button_font, obj->cancel_text) + _MB_BTN_PAD) : _MB_BTN_MIN_W);
+    group_w = (int16_t)(cancel_w + _MB_BTN_GAP + confirm_w);
     group_x = (int16_t)(panel_x + (obj->panel_w - group_w) / 2);
     *w = cancel_w;
     *x = group_x;
@@ -768,27 +787,34 @@ static void _popup_draw_cb(void *ptr)
     lcd->opa_scale = we_opa_apply(lcd, obj->fade_opa);
 
     panel_x = _popup_panel_x(obj);
-    inner_w = (int16_t)obj->panel_w - 36;
-    content_x = (int16_t)(panel_x + 18);
+    inner_w = (int16_t)obj->panel_w - 2 * _MB_PAD_SIDE;
+    content_x = (int16_t)(panel_x + _MB_PAD_SIDE);
 
     /* 面板圆角填充：仅 4 个 r×r 角落做抗锯齿，主体/直边走快速矩形填充。
      * 透明度由入口的 opa_scale 级联统一作用，主体与四角同一份，淡入淡出无亮度断层。 */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底面板 + 1px 白描边（深色底二值化后不可见，改描边圈定弹窗） */
+    we_draw_round_rect_outline_fill(lcd, panel_x, obj->panel_y, obj->panel_w, obj->panel_h,
+                                    WE_MSGBOX_RADIUS, RGB888TODEV(255, 255, 255),
+                                    RGB888TODEV(0, 0, 0), 255);
+#else
     we_draw_round_rect_analytic_fill(lcd, panel_x, obj->panel_y, obj->panel_w, obj->panel_h,
                                      WE_MSGBOX_RADIUS, RGB888TODEV(46, 52, 64), 255);
+#endif
 
     if (obj->title != NULL && obj->title_font != NULL)
     {
         title_h = _popup_text_block_height_wrapped(obj->title_font, obj->title, (uint16_t)inner_w);
         we_get_text_bbox(obj->title_font, obj->title, &title_top, &msg_top);
         title_x = content_x;
-        title_y = (int16_t)(obj->panel_y + 18 - title_top);
+        title_y = (int16_t)(obj->panel_y + _MB_PAD_TOP - title_top);
         _popup_draw_text_wrapped(lcd, obj->title_font, obj->title, title_x, title_y,
                                  (uint16_t)inner_w, RGB888TODEV(244, 247, 252), 255);
-        content_y = (int16_t)(obj->panel_y + 18 + title_h);
+        content_y = (int16_t)(obj->panel_y + _MB_PAD_TOP + title_h);
     }
     else
     {
-        content_y = (int16_t)(obj->panel_y + 18);
+        content_y = (int16_t)(obj->panel_y + _MB_PAD_TOP);
     }
 
     _popup_get_confirm_rect(obj, &x, &y, &w, &h);
@@ -796,7 +822,7 @@ static void _popup_draw_cb(void *ptr)
     if (obj->message != NULL && obj->message_font != NULL)
     {
         if (obj->title != NULL && obj->title[0] != '\0')
-            content_y = (int16_t)(content_y + 8);
+            content_y = (int16_t)(content_y + _MB_GAP_TITLE_MSG);
         msg_h = _popup_text_block_height_wrapped(obj->message_font, obj->message, (uint16_t)inner_w);
         (void)msg_h;
         we_get_text_bbox(obj->message_font, obj->message, &msg_top, &title_top);
@@ -807,8 +833,8 @@ static void _popup_draw_cb(void *ptr)
     }
 
     {
-        int16_t sep_y = (int16_t)(y - 10);
-        we_draw_line(lcd, content_x, sep_y, (int16_t)(panel_x + obj->panel_w - 18), sep_y,
+        int16_t sep_y = (int16_t)(y - _MB_SEP_LIFT);
+        we_draw_line(lcd, content_x, sep_y, (int16_t)(panel_x + obj->panel_w - _MB_PAD_SIDE), sep_y,
 1, RGB888TODEV(78, 178, 255), 255);
     }
 
@@ -913,11 +939,22 @@ static void _popup_anim_step_cb(void *owner, uint16_t elapsed_ms)
     if (t > 256U)
         t = 256U;
 
-    /* 透明度淡入/淡出：show 0→255(缓出)，hide 255→0(缓入)。面板位置固定不动。 */
     eased = obj->anim_hiding ? _msgbox_ease_hide(t) : _msgbox_ease_show(t);
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：整体平移代替淡入淡出——show 从屏外上方滑到停靠位，
+     * hide 从当前位置滑出屏外上方（_popup_set_panel_y 自带旧/新区标脏） */
+    {
+        int16_t off_y = (int16_t)-(int16_t)obj->panel_h;
+        int16_t from = obj->anim_hiding ? obj->slide_target_y : off_y;
+        int16_t to = obj->anim_hiding ? off_y : obj->slide_target_y;
+        _popup_set_panel_y(obj, (int16_t)we_lerp(from, to, eased));
+    }
+#else
+    /* 透明度淡入/淡出：show 0→255(缓出)，hide 255→0(缓入)。面板位置固定不动。 */
     obj->fade_opa = obj->anim_hiding ? (uint8_t)we_lerp(255, 0, eased)
                                      : (uint8_t)we_lerp(0, 255, eased);
     _popup_invalidate_panel(obj);
+#endif
 
     if (obj->anim_elapsed_ms >= obj->anim_duration_ms)
     {
@@ -1219,8 +1256,16 @@ void we_popup_show(we_popup_obj_t *obj)
     _popup_refresh_layout(obj);
 
 #if WE_MSGBOX_USE_ANIM
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：不透明度恒 255（阈值二值化下透明度不可用），
+     * 面板从屏幕上方整体平移进场到停靠位 */
+    obj->fade_opa = 255U;
+    obj->slide_target_y = obj->panel_y;
+    obj->panel_y = (int16_t)-(int16_t)obj->panel_h;
+#else
     /* 透明度从 0 淡入；挂入中央动画链表（不占 task 槽、不会失败） */
     obj->fade_opa = 0U;
+#endif
     we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
     obj->animating = 1U;
 #else
@@ -1253,7 +1298,10 @@ void we_popup_hide(we_popup_obj_t *obj)
         obj->anim_duration_ms = 90U;
 
 #if WE_MSGBOX_USE_ANIM
-    /* 透明度 255→0 淡出；挂入中央动画链表（不占 task 槽、不会失败） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->slide_target_y = obj->panel_y; /* 单色平移：从当前位置向上滑出屏外 */
+#endif
+    /* 挂入中央动画链表（不占 task 槽、不会失败）：彩色淡出 / 单色上滑退场 */
     we_anim_start(obj->base.lcd, &obj->anim, _popup_anim_step_cb, obj);
     obj->animating = 1U;
 #else

@@ -1,6 +1,6 @@
 /**
  * @file  demo_showcase.c
- * @brief 全控件汇总演示（仅模拟器）：单画面同时摆放全部 20 个控件。
+ * @brief 多控件汇总演示（仅模拟器）：单画面同时摆放 20 个稳定控件。
  *
  * ⚠️ 分辨率要求：本 demo 按 800×480 布局编写。
  *    请在 we_user_config.h 中设置：
@@ -9,7 +9,7 @@
  *    （USER_GRAM_NUM = SCREEN_WIDTH*8 会自动随宽度放大，模拟器无压力；
  *      多控件动画下建议把 WE_CFG_DIRTY_MAX_NUM 提到 16 以减少爆满合并。）
  *
- * 控件覆盖清单（20/20）：
+ * 控件覆盖清单（20/29 稳定控件）：
  *   A 列：label / btn / toggle / indicator / checkbox / slider / progress /
  *         stepper / dropdown / label_ex
  *   B 列：group（命中转发+子件计数）/ scroll_panel（惯性滚动）/

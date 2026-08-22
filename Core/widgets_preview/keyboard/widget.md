@@ -8,7 +8,7 @@
 
 1. **等分网格无法表达键盘布局**：btnmatrix 每格等宽，而键盘必须有通长空格键（本实现占 9/20 份）、加宽的 Shift/退格/切换键（3~4 份），否则空格只有一格宽、`"123"` 标签在 22px 等分格里放不下；
 2. **组合方案的链表管理成本更高**：btnmatrix 在自身 init 里 `we_obj_attach_to_lcd` 直接挂顶层链表，内嵌后删除/移动/Z 序都要 keyboard 额外同步（还需 offsetof 从 btnmatrix 指针反推 keyboard 实例），复杂度反而高于自绘；
-3. **preview 区允许适度重复**：绘制（圆角键底 + 居中键名）与命中/按压状态机直接借鉴 btnmatrix 的代码结构，重复量小且可控。btnmatrix 本轮**未做任何修改**，其 demo（DEMO_ID 104）行为不变。
+3. **preview 区允许适度重复**：绘制（圆角键底 + 居中键名）与命中/按压状态机直接借鉴 btnmatrix 的代码结构，重复量小且可控。btnmatrix 本轮**未做任何修改**，其 demo（DEMO_ID 115）行为不变。
 
 ## 适用场景
 - 文本输入页：停靠下半屏，与 textarea 等回显控件配合
@@ -24,17 +24,17 @@
 
 ## 弹层模式（隐藏/收回软键盘）
 - `we_keyboard_popup_init(obj, lcd, h, font)` —— 不挂普通对象链表，宽=屏宽、停靠屏底，初始全隐藏
-- `we_keyboard_popup_show(obj, target_textarea)` —— 占用 LCD 弹层（WE_POPUP_TYPE_KEYBOARD）自屏底滑入（Q8 状态机，WE_KEYBOARD_ANIM_MS 默认 220ms，中途可反向）；绑定目标后普通键/退格直接 we_textarea_input 注入
+- `we_keyboard_popup_show(obj, target_textarea)` —— 挂顶层链并声明模态，自屏底滑入（Q8 状态机，WE_KEYBOARD_ANIM_MS 默认 220ms，中途可反向）；绑定目标后普通键/退格直接 we_textarea_input 注入
 - `we_keyboard_popup_hide(obj)` —— 滑出收回；触发途径：点键盘上方区域 / BACK 键 / "OK" 确定键 / 本 API
 - `we_keyboard_set_done_cb(obj, cb)` —— 底行新增 "OK" 确定键（4 份宽）：先收回再回调 cb(kb, target)
 - 被其他弹层顶掉时经 close_cb 自动复位状态（防状态失同步）
 - 顶部回显条（WE_KEYBOARD_ECHO_H，默认 26px，0 关闭）：实时镜像目标输入框内容 + 末尾光标——键盘滑入挡住输入框也能看到正在输入的文本；popup_init 的 h 为含回显条的总高
-- `we_keyboard_key_nav(obj, code)`（公开）：键光标导航核心，供 ime_pinyin 等组合宿主在自己的弹层键通道里转发（BACK 返回 0 交宿主收回）
+- `we_keyboard_key_nav(obj, code)`（公开）：键光标导航核心，供 ime_pinyin 等组合宿主在自己的模态键通道里转发（BACK 返回 0 交宿主收回）
 
 ## 键盘按键聚焦（WE_CFG_ENABLE_KEY_INPUT 且 WE_KEYBOARD_USE_KEY，默认 1）
-- 弹层键通道接管：方向键在键位网格移动键光标（行内回绕，跨行按 x 中心就近落键，行环回绕）
+- 模态键通道接管：方向键在键位网格移动键光标（行内回绕，跨行按 x 中心就近落键，行环回绕）
 - 键光标 = 聚焦键四周 2px 描边（画在键间距带内，用 WE_CFG_FOCUS_CURSOR_* 导航色），新旧键格精细标脏
-- OK 双沿击键：按下沿按压高亮、松开沿触发（弹层键通道的松开沿编码 = 键值|WE_KEY_RELEASE_FLAG）
+- OK 双沿击键：按下沿按压高亮、松开沿触发（模态键通道的松开沿编码 = 键值|WE_KEY_RELEASE_FLAG）
 - BACK 收回键盘；首个方向键落位到第一个键；切页后光标钳制到新页范围
 
 ## 可调宏
@@ -46,7 +46,7 @@
 ## 布局与几何
 - 固定 4 行：3 行字符键 + 底行功能键；每行总宽划分为 20 份，键位表给出每键份数；行内份数不足 20 时自动居中（如字母页第二行 9 键）
 - 键矩形边缘按 `inner_x + units * inner_w / 20` 整数求值，无累计漂移；间距通过两侧各让 `GAP/2` 实现
-- 键位表（labels/spans/row_cnt 平行数组）全部 `static const` 存放在 .c 中，控件零拷贝引用；全部键面字符均在 ASCII `U+0020~U+007E` 内（内置 arial 字库全覆盖）
+- 键位表（labels/spans/row_cnt 平行数组）全部 `static const` 存放在 .c 中，控件零拷贝引用；全部键面字符均在 ASCII `U+0020~U+007E` 内（内置 ASCII 字库全覆盖）
 
 ## 事件与行为
 - `PRESSED` 命中键：记录键序号并切按压底色；命中键间距/面板边距不高亮但**仍消费**（键盘是不透明停靠面板，不允许误触穿透到下层）
@@ -67,4 +67,4 @@
 - 无按键弹起动画/音效钩子
 
 ## 对应 demo
-- `Demo/preview/demo_keyboard.c`（DEMO_ID 115：下半屏键盘 + 顶部 textarea 回显，敲键上屏、退格删除、三页切换）
+- `Demo/preview/demo_keyboard.c`（DEMO_ID 101：下半屏键盘 + 顶部 textarea 回显，敲键上屏、退格删除、三页切换）

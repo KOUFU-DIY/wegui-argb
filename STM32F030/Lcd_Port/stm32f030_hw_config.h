@@ -36,42 +36,37 @@
 #if (LCD_IC == _ST7735)
 #include "st7735.h"
 #define lcd_ic_init() do{st7735_init();}while(0)
-#define lcd_set_addr st7735_set_addr
+#define lcd_set_windows st7735_set_addr
 
 #elif (LCD_IC == _ST7789V3)
 #include "st7789v3.h"
 #define lcd_ic_init() do{st7789v3_init();}while(0)
-#define lcd_set_addr st7789v3_set_addr
+#define lcd_set_windows st7789v3_set_addr
 
 #elif (LCD_IC == _ST7789VW)
 #include "st7789vw.h"
 #define lcd_ic_init() do{st7789vw_init();}while(0)
-#define lcd_set_addr st7789vw_set_addr
+#define lcd_set_windows st7789vw_set_addr
 
 #elif (LCD_IC == _ST7789S)
 #include "st7789s.h"
 #define lcd_ic_init() do{st7789s_init();}while(0)
-#define lcd_set_addr st7789s_set_addr
+#define lcd_set_windows st7789s_set_addr
 
 #elif (LCD_IC == _ST7796S)
 #include "st7796s.h"
 #define lcd_ic_init() do{st7796s_init();}while(0)
-#define lcd_set_addr st7796s_set_addr
+#define lcd_set_windows st7796s_set_addr
 
 #elif (LCD_IC == _GC9A01)
 #include "gc9a01.h"
 #define lcd_ic_init() do{gc9a01_init();}while(0)
-#define lcd_set_addr gc9a01_set_addr
+#define lcd_set_windows gc9a01_set_addr
 
 #else
 #warning ("No screen ic init!")
 #endif
 
 
-#if (LCD_DEEP == DEEP_RGB565)
-#define LCD_FLUSH_PORT lcd_rgb565_port
-#elif (LCD_DEEP == DEEP_RGB888)
-#define LCD_FLUSH_PORT lcd_rgb888_port
-#endif
 
 #endif

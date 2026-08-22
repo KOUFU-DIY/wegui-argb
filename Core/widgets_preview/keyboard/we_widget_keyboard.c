@@ -14,7 +14,7 @@
 #include "we_render.h"
 #include <string.h>
 
-#define _KB_SLIDE_HIDDEN 0U /* 完全隐藏（弹层已释放） */
+#define _KB_SLIDE_HIDDEN 0U /* 完全隐藏（已解除模态并摘离顶层链） */
 #define _KB_SLIDE_IN     1U /* 滑入中 */
 #define _KB_SLIDE_SHOWN  2U /* 完全展开停留 */
 #define _KB_SLIDE_OUT    3U /* 滑出中 */
@@ -86,21 +86,6 @@ static const _kb_page_t _kb_pages[3] = {
 /* --------------------------------------------------------------------------
  * 内部辅助
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 比较两个颜色是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _kb_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
 
 /**
  * @brief 判断键名是否为功能键（SH / 页面切换 / 退格）。
@@ -389,29 +374,17 @@ static void _keyboard_draw_cb(void *ptr)
         if (_kb_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
             const char *text = we_textarea_get_text((const we_textarea_obj_t *)obj->target);
-            we_area_t old_pfb_area = lcd->pfb_area;
-            uint16_t old_y_start = lcd->pfb_y_start;
-            uint16_t old_y_end = lcd->pfb_y_end;
-            colour_t *old_gram = lcd->pfb_gram;
-            int16_t new_x0 = WE_MAX(old_pfb_area.x0, inner_x);
-            int16_t new_y0 = WE_MAX((int16_t)old_y_start, eb_y);
-            int16_t new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(inner_x + inner_w - 1));
-            int16_t new_y1 = WE_MIN((int16_t)old_y_end,
-                                    (int16_t)(eb_y + WE_KEYBOARD_ECHO_H - 1));
+            we_pfb_clip_t sv;
 
-            if (new_x0 <= new_x1 && new_y0 <= new_y1)
+            we_pfb_clip_save(lcd, &sv);
+            if (we_pfb_clip_to(lcd, &sv, inner_x, eb_y,
+                               (int16_t)(inner_x + inner_w - 1),
+                               (int16_t)(eb_y + WE_KEYBOARD_ECHO_H - 1)))
             {
                 uint16_t line_h = we_font_get_line_height(obj->font);
                 int16_t text_y = (int16_t)(eb_y + ((int16_t)WE_KEYBOARD_ECHO_H -
                                                    (int16_t)line_h) / 2);
                 int16_t cursor_x = inner_x;
-
-                lcd->pfb_area.x0 = (uint16_t)new_x0;
-                lcd->pfb_area.x1 = (uint16_t)new_x1;
-                lcd->pfb_y_start = (uint16_t)new_y0;
-                lcd->pfb_y_end = (uint16_t)new_y1;
-                lcd->pfb_gram = old_gram + (new_y0 - (int16_t)old_y_start) * lcd->pfb_width +
-                                (new_x0 - (int16_t)old_pfb_area.x0);
 
                 if (text != NULL && text[0] != '\0')
                 {
@@ -429,11 +402,7 @@ static void _keyboard_draw_cb(void *ptr)
                              (uint16_t)(WE_KEYBOARD_ECHO_H - 8), obj->key_press_color,
                              obj->opacity);
             }
-
-            lcd->pfb_area = old_pfb_area;
-            lcd->pfb_y_start = old_y_start;
-            lcd->pfb_y_end = old_y_end;
-            lcd->pfb_gram = old_gram;
+            we_pfb_clip_restore(lcd, &sv);
         }
     }
 
@@ -631,15 +600,15 @@ static const we_class_t _keyboard_class = {
 /* --------------------------------------------------------------------------
  * 弹层模式：滑入/收回状态机 + 弹层回调
  *
- * 键盘对象不挂普通对象链表，由 LCD 弹层承载绘制与输入；位置用 slide_q8
+ * 键盘对象不挂普通对象链表，由 LCD 顶层链 + 模态承载绘制与输入；位置用 slide_q8
  * （0=全隐藏在屏底外，256=完全展开）经一个中央动画节点推进，toast 同款
- * 可中途反向。每步把弹层 area 与 base.y 同步（set_area 负责新旧区标脏）。
+ * 可中途反向。每步经 we_obj_set_pos 落位（内核完成新旧区标脏）。
  * -------------------------------------------------------------------------- */
 
 
 
 /**
- * @brief 按 slide_q8 计算 base.y（自屏底升起）并同步弹层区域。
+ * @brief 按 slide_q8 计算 base.y（自屏底升起）并经 we_obj_set_pos 落位。
  * @param obj 传入：控件对象指针。
  * @return 无。
  */
@@ -1026,7 +995,7 @@ void we_keyboard_obj_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
 }
 
 /**
- * @brief 初始化弹层模式软键盘（不挂普通对象链表，show 时经 LCD 弹层滑入）。
+ * @brief 初始化弹层模式软键盘（不挂普通对象链表，show 时挂顶层链滑入）。
  * @param obj 控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param h 面板高度（像素）；宽度固定 = 屏宽，停靠屏底。
@@ -1190,10 +1159,10 @@ void we_keyboard_set_colors(we_keyboard_obj_t *obj, colour_t panel,
 {
     if (obj == NULL)
         return;
-    if (_kb_colour_eq(obj->bg_color, panel) &&
-        _kb_colour_eq(obj->key_color, key) &&
-        _kb_colour_eq(obj->key_press_color, key_press) &&
-        _kb_colour_eq(obj->text_color, text))
+    if (we_colour_eq(obj->bg_color, panel) &&
+        we_colour_eq(obj->key_color, key) &&
+        we_colour_eq(obj->key_press_color, key_press) &&
+        we_colour_eq(obj->text_color, text))
         return;
 
     obj->bg_color = panel;

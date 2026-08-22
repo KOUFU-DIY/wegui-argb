@@ -16,16 +16,21 @@ extern "C"
 #define WE_MSGBOX_USE_ANIM 1
 #endif
 
+/* 小屏（高度 <=64）默认收紧边距与圆角，可在用户配置覆盖 */
 #ifndef WE_MSGBOX_EDGE_MARGIN
+#if (SCREEN_HEIGHT <= 64)
+#define WE_MSGBOX_EDGE_MARGIN 4
+#else
 #define WE_MSGBOX_EDGE_MARGIN 12
+#endif
 #endif
 
 #ifndef WE_MSGBOX_RADIUS
+#if (SCREEN_HEIGHT <= 64)
+#define WE_MSGBOX_RADIUS 6
+#else
 #define WE_MSGBOX_RADIUS 14
 #endif
-
-#ifndef WE_MSGBOX_BTN_RADIUS
-#define WE_MSGBOX_BTN_RADIUS 10
 #endif
 
 typedef enum
@@ -49,7 +54,10 @@ typedef struct we_popup_obj_t
     const unsigned char *button_font;
     we_popup_action_cb_t confirm_cb;
     we_popup_action_cb_t cancel_cb;
-    int16_t panel_y; /* 面板停靠 Y（固定，淡入淡出不再移动） */
+    int16_t panel_y; /* 面板停靠 Y（彩色淡入淡出时固定；单色平移动画时为当前位置） */
+#if (WE_CFG_MONO_STYLE == 1)
+    int16_t slide_target_y; /* 单色平移动画端点：show=停靠 Y，hide=滑出起点 Y */
+#endif
     uint16_t panel_min_w;
     uint16_t panel_w;
     uint16_t panel_h;

@@ -50,4 +50,4 @@
 - 弧带扫描目前覆盖整个包围盒行程，可按行预解弧带 x 区间跳过环外大片像素
 
 ## 对应 demo
-- `Demo/preview/demo_knob.c`（DEMO_ID 108：左侧 150px 大旋钮拖拽改值（0~100），右侧 2 倍字号 label_ex 百分比实时联动，changed_cb 驱动）
+- `Demo/preview/demo_knob.c`（DEMO_ID 118：左侧 150px 大旋钮拖拽改值（0~100），右侧 2 倍字号 label_ex 百分比实时联动，changed_cb 驱动）

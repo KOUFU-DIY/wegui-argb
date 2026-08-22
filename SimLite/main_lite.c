@@ -70,7 +70,11 @@ int main(void)
     input_hw_init();
     storage_hw_init();
 
-    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lcd_set_addr, LCD_FLUSH_PORT,
+#if (LCD_DEEP == DEEP_GRAY8)
+    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_gray8_port,
+#else
+    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_rgb565_port,
+#endif
                 we_input_port_read, we_storage_port_read);
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */

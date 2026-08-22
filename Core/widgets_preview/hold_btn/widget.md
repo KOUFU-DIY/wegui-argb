@@ -59,4 +59,4 @@
 - 可选"移出取消"模式与触发时的震动/声音钩子
 
 ## 对应 demo
-- `Demo/preview/demo_hold_btn.c`（DEMO_ID 119：中央 120px "HOLD" 长按钮 + 顶部状态 label（idle / charging % / TRIGGERED! 变色）+ 右下 RESET 小按钮复位）
+- `Demo/preview/demo_hold_btn.c`（DEMO_ID 124：中央 120px "HOLD" 长按钮 + 顶部状态 label（idle / charging % / TRIGGERED! 变色）+ 右下 RESET 小按钮复位）

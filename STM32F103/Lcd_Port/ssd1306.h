@@ -13,19 +13,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-#ifndef __ST7789S_H__
-#define __ST7789S_H__
+#ifndef __SSD1306_H__
+#define __SSD1306_H__
 
 #include "stdint.h"
 
-//-------------------IC最大支持的分辨率-------------------
-//#define TFT_IC_WIDTH_PIXEL (320)
-//#define TFT_IC_HIGH_PIXEL  (240)
-//#define TFT_IC_PIXEL  (TFT_IC_WIDTH_PIXEL*TFT_IC_HIGH_PIXEL)
+/* SSD1306 页式单色 OLED（128x64，最常用）。
+ * 刷屏由 SPI 端口层 lcd_oled_port 完成，本驱动只提供页/列命令与初始化。 */
 
-void st7789s_set_addr(uint16_t x1,uint16_t y1,uint16_t x2,uint16_t y2);
-
-void st7789s_init(void);
-
+void ssd1306_init(void);
+void ssd1306_set_addr(uint8_t page, uint8_t col); /* 设页地址 + 列起始（oled_set_addr 宏路由目标） */
+void ssd1306_set_contrast(uint8_t value);
+void ssd1306_display_on(void);
+void ssd1306_display_off(void);
 
 #endif

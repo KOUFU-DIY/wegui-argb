@@ -79,13 +79,9 @@ void lcd_hw_init(void)
     spi.SPI_Direction = SPI_Direction_2Lines_FullDuplex;
     spi.SPI_Mode = SPI_Mode_Master;
     spi.SPI_DataSize = SPI_DataSize_8b;
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
-    spi.SPI_CPOL = SPI_CPOL_High;
-    spi.SPI_CPHA = SPI_CPHA_2Edge;
-#else
+    /* TFT: SCL 默认低，第一个跳变沿有效（本目标仅 TFT 屏型） */
     spi.SPI_CPOL = SPI_CPOL_Low;
     spi.SPI_CPHA = SPI_CPHA_1Edge;
-#endif
     spi.SPI_NSS = SPI_NSS_Soft;
     spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
     spi.SPI_FirstBit = SPI_FirstBit_MSB;
@@ -144,22 +140,6 @@ void lcd_send_1Cmd(uint8_t dat)
 
 void lcd_send_nCmd(uint8_t *p, uint16_t num)
 {
-#if ((LCD_DEEP == DEEP_OLED) || (LCD_DEEP == DEEP_GRAY8))
-    uint16_t i = 0;
-    wait_lcd_dma_free();
-    send_lcd_spi_done();
-    spi_set_8b();
-    LCD_DC_Clr();
-    LCD_CS_Clr();
-    while (num > i)
-    {
-        wait_lcd_spi_txtemp_free();
-        send_lcd_spi_dat8(p[i++]);
-    }
-    wait_lcd_spi_txtemp_free();
-    send_lcd_spi_done();
-    LCD_CS_Set();
-#else
     wait_lcd_dma_free();
     send_lcd_spi_done();
     spi_set_8b();
@@ -178,7 +158,6 @@ void lcd_send_nCmd(uint8_t *p, uint16_t num)
     wait_lcd_spi_txtemp_free();
     send_lcd_spi_done();
     LCD_CS_Set();
-#endif
 }
 
 void lcd_send_1Dat(uint8_t dat)

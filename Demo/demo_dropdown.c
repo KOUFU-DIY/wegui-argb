@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t    dd_title;
 static we_label_obj_t    dd_fps_label;
 static we_label_obj_t    dd_hint;
@@ -144,4 +146,86 @@ void we_dropdown_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
                        &dd_last_frames, dd_fps_buf, ms_tick);
 }
 
+#else /* ==================== 128x64 小屏版 ==================== */
 
+static we_label_obj_t    dd_title;
+static we_label_obj_t    dd_status_label;
+static we_dropdown_obj_t dd_top;
+
+static char dd_status_buf[20];
+
+/* 短列表：主题模式 */
+static const we_dropdown_option_t dd_mode_opts[] = {
+    {"Auto",  0, 0},
+    {"Light", 1, 0},
+    {"Dark",  2, 0},
+};
+
+/**
+ * @brief 刷新底部状态行，显示当前选中值。
+ * @return 无。
+ */
+static void _dd_update_status(void)
+{
+    int16_t mi = we_dropdown_get_selected(&dd_top);
+    const char *mode = (mi >= 0) ? dd_mode_opts[mi].text : "-";
+
+    sprintf(dd_status_buf, "Mode:%s", mode);
+    we_label_set_text(&dd_status_label, dd_status_buf);
+}
+
+/**
+ * @brief 选中改变回调：刷新底部状态行。
+ * @param obj 触发回调的 dropdown 对象。
+ * @param selected_idx 新选中项索引。
+ * @param value 新选中项关联值。
+ * @return 无。
+ */
+static void _dd_changed_cb(we_dropdown_obj_t *obj, int16_t selected_idx, int32_t value)
+{
+    (void)obj;
+    (void)selected_idx;
+    (void)value;
+    _dd_update_status();
+}
+
+/**
+ * @brief 初始化 dropdown demo（128x64 布局）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_dropdown_simple_demo_init(we_lcd_t *lcd)
+{
+    memset(dd_status_buf, 0, sizeof(dd_status_buf));
+
+    we_label_obj_init(&dd_title, lcd, 2, 2,
+                      "DROP", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    /* 展开列表贴近下缘时由控件自动向上展开 */
+    we_dropdown_obj_init(&dd_top, lcd, 2, 18, 84, 20, we_font_consolas_18);
+    we_dropdown_set_options(&dd_top, dd_mode_opts,
+                            (uint16_t)(sizeof(dd_mode_opts) / sizeof(dd_mode_opts[0])));
+    we_dropdown_set_max_visible_items(&dd_top, 2);
+    we_dropdown_set_selected(&dd_top, 0);
+    we_dropdown_set_changed_cb(&dd_top, _dd_changed_cb);
+
+    _dd_update_status();
+    we_label_obj_init(&dd_status_label, lcd, 2, 48,
+                      dd_status_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+/**
+ * @brief dropdown demo 周期更新（控件本身事件驱动）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_dropdown_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

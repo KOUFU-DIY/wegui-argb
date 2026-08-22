@@ -4,7 +4,6 @@
 #include <stdio.h>
 
 #define WE_DEMO_DESIGN_W WE_DEMO_BASE_W
-#define WE_DEMO_DESIGN_H WE_DEMO_BASE_H
 
 /**
  * @brief 按目标分辨率执行正数尺寸/坐标缩放。
@@ -42,39 +41,6 @@ int16_t we_demo_scale_x(const we_lcd_t *lcd, int16_t base_x)
 }
 
 /**
- * @brief 按当前屏幕高度缩放 Y 坐标。
- * @param lcd LCD 运行实例。
- * @param base_y 基准坐标（以 280x240 为基准）。
- * @return 缩放后的 Y 坐标。
- */
-int16_t we_demo_scale_y(const we_lcd_t *lcd, int16_t base_y)
-{
-    return _we_demo_scale(base_y, WE_DEMO_DESIGN_H, lcd->height);
-}
-
-/**
- * @brief 按当前屏幕宽度缩放宽度值。
- * @param lcd LCD 运行实例。
- * @param base_w 基准宽度（以 280x240 为基准）。
- * @return 缩放后的宽度。
- */
-int16_t we_demo_scale_w(const we_lcd_t *lcd, int16_t base_w)
-{
-    return _we_demo_scale(base_w, WE_DEMO_DESIGN_W, lcd->width);
-}
-
-/**
- * @brief 按当前屏幕高度缩放高度值。
- * @param lcd LCD 运行实例。
- * @param base_h 基准高度（以 280x240 为基准）。
- * @return 缩放后的高度。
- */
-int16_t we_demo_scale_h(const we_lcd_t *lcd, int16_t base_h)
-{
-    return _we_demo_scale(base_h, WE_DEMO_DESIGN_H, lcd->height);
-}
-
-/**
  * @brief 计算对象右对齐时的 X 坐标。
  * @param lcd LCD 运行实例。
  * @param right_margin 距右边距（基准分辨率下）。
@@ -84,18 +50,6 @@ int16_t we_demo_scale_h(const we_lcd_t *lcd, int16_t base_h)
 int16_t we_demo_right_x(const we_lcd_t *lcd, int16_t right_margin, int16_t obj_w)
 {
     return (int16_t)(lcd->width - we_demo_scale_x(lcd, right_margin) - obj_w);
-}
-
-/**
- * @brief 计算对象底对齐时的 Y 坐标。
- * @param lcd LCD 运行实例。
- * @param bottom_margin 距底边距（基准分辨率下）。
- * @param obj_h 对象高度（当前分辨率下）。
- * @return 底对齐后对象左上角 Y 坐标。
- */
-int16_t we_demo_bottom_y(const we_lcd_t *lcd, int16_t bottom_margin, int16_t obj_h)
-{
-    return (int16_t)(lcd->height - we_demo_scale_y(lcd, bottom_margin) - obj_h);
 }
 
 /**
@@ -157,15 +111,19 @@ void we_demo_update_fps(we_lcd_t *lcd,
     delta_frames = frames_now - *last_frames;
     fps = (delta_frames * 1000U) / *fps_timer;
 #else
-    /* 未启用渲染统计时无法计算真实帧率，显示占位提示。 */
+    /* 未启用渲染统计时无法计算真实帧率，显示占位提示
+     * （只写一次：占位文本不变，无需每 500ms 重排版标脏）。 */
     (void)frames_now;
     (void)delta_frames;
     (void)fps;
-    sprintf(fps_buf, "FPS --");
-    we_label_set_text(fps_label, fps_buf);
-    fps_x = we_demo_fps_x(lcd, fps_buf, fps_label->font);
-    fps_y = fps_label->base.y;
-    we_label_obj_set_pos(fps_label, fps_x, fps_y);
+    if (fps_buf[0] == '\0')
+    {
+        sprintf(fps_buf, "FPS --");
+        we_label_set_text(fps_label, fps_buf);
+        fps_x = we_demo_fps_x(lcd, fps_buf, fps_label->font);
+        fps_y = fps_label->base.y;
+        we_label_obj_set_pos(fps_label, fps_x, fps_y);
+    }
     *last_frames = 0U;
     *fps_timer = 0U;
     return;

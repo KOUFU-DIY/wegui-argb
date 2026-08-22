@@ -9,7 +9,8 @@
  */
 
 #include "we_widget_scale.h"
-#include "we_motion.h"
+#include "we_render.h" /* 公共微助手 */
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -26,21 +27,6 @@ static const we_class_t _scale_class = {
 /* --------------------------------------------------------------------------
  * 内部工具
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 比较两个颜色是否相等（setter 幂等判断用）。
- * @param a 颜色 A。
- * @param b 颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _scale_col_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#else
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
 
 /**
  * @brief 将数值钳制到量程内。
@@ -498,9 +484,9 @@ void we_scale_set_colors(we_scale_obj_t *obj, colour_t line_color,
 {
     if (obj == NULL)
         return;
-    if (_scale_col_eq(obj->line_color, line_color) &&
-        _scale_col_eq(obj->text_color, text_color) &&
-        _scale_col_eq(obj->pointer_color, pointer_color))
+    if (we_colour_eq(obj->line_color, line_color) &&
+        we_colour_eq(obj->text_color, text_color) &&
+        we_colour_eq(obj->pointer_color, pointer_color))
         return;
 
     obj->line_color    = line_color;

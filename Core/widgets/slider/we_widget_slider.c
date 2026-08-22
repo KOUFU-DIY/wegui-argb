@@ -77,7 +77,12 @@ static const we_class_t _slider_class = {
 #endif
 };
 
+#if (WE_CFG_MONO_STYLE == 0)
 static const colour_t _slider_black = RGB888_CONST(0, 0, 0);
+#else
+static const colour_t _slider_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+static const colour_t _slider_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
 /**
  * @brief 将输入值限制到滑条当前 min/max 范围内。
@@ -479,6 +484,29 @@ static void _slider_draw_thumb(we_slider_obj_t *obj, we_lcd_t *lcd,
     we_draw_round_rect_analytic_fill(lcd, x, y, size, size, (uint16_t)(size / 2U), color, obj->opacity);
 }
 
+#if (WE_CFG_MONO_STYLE == 1)
+/**
+ * @brief 单色样式：描边轨道（外白内黑，1px 边）。
+ * @param obj 滑条对象指针。
+ * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param x 绘制区域左上角 X 坐标。
+ * @param y 绘制区域左上角 Y 坐标。
+ * @param w 绘制区域宽度。
+ * @param h 绘制区域高度。
+ * @return 无。
+ */
+static void _slider_draw_track_outline(we_slider_obj_t *obj, we_lcd_t *lcd,
+                                       int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+    uint16_t m = (w < h) ? w : h;
+
+    if (obj == NULL || lcd == NULL || w == 0U || h == 0U)
+        return;
+    we_draw_round_rect_outline_fill(lcd, x, y, w, h, (uint16_t)(m / 2U),
+                                    _slider_mono_fg, _slider_mono_bg, obj->opacity);
+}
+#endif
+
 /**
  * @brief 控件绘制回调，绘制轨道、填充段和滑块圆头。
  * @param ptr 回调透传对象指针。
@@ -498,7 +526,9 @@ static void _slider_draw_cb(void *ptr)
     int16_t thumb_y;
     int16_t thumb_cx;
     int16_t thumb_cy;
+#if (WE_CFG_MONO_STYLE == 0)
     colour_t thumb_color;
+#endif
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -520,6 +550,15 @@ static void _slider_draw_cb(void *ptr)
         thumb_cx = (int16_t)(obj->base.x + obj->base.w / 2);
         thumb_cy = (int16_t)(obj->base.y + obj->base.h - (int16_t)(thumb_size / 2U) - (int16_t)fill_len);
 
+#if (WE_CFG_MONO_STYLE == 1)
+        _slider_draw_track_outline(obj, lcd, rail_x, rail_y, track_thickness, travel_len);
+        _slider_draw_track(obj, lcd,
+                           rail_x,
+                           (int16_t)(rail_y + (int16_t)(travel_len - fill_len)),
+                           track_thickness,
+                           fill_len,
+                           _slider_mono_fg);
+#else
         _slider_draw_track(obj, lcd, rail_x, rail_y, track_thickness, travel_len, obj->track_color);
         _slider_draw_track(obj, lcd,
                            rail_x,
@@ -527,6 +566,7 @@ static void _slider_draw_cb(void *ptr)
                            track_thickness,
                            fill_len,
                            obj->fill_color);
+#endif
     }
     else
 #endif
@@ -536,19 +576,32 @@ static void _slider_draw_cb(void *ptr)
         thumb_cx = (int16_t)(rail_x + (int16_t)fill_len);
         thumb_cy = (int16_t)(obj->base.y + obj->base.h / 2);
 
+#if (WE_CFG_MONO_STYLE == 1)
+        _slider_draw_track_outline(obj, lcd, rail_x, rail_y, travel_len, track_thickness);
+        _slider_draw_track(obj, lcd, rail_x, rail_y, fill_len, track_thickness, _slider_mono_fg);
+#else
         _slider_draw_track(obj, lcd, rail_x, rail_y, travel_len, track_thickness, obj->track_color);
         _slider_draw_track(obj, lcd, rail_x, rail_y, fill_len, track_thickness, obj->fill_color);
+#endif
     }
 
     thumb_x = (int16_t)(thumb_cx - (int16_t)(thumb_size / 2U));
     thumb_y = (int16_t)(thumb_cy - (int16_t)(thumb_size / 2U));
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色滑块：黑圈 + 白芯（压在白色已填段上仍可辨） */
+    _slider_draw_thumb(obj, lcd, thumb_x, thumb_y, thumb_size, _slider_mono_bg);
+    if (thumb_size > 2U)
+        _slider_draw_thumb(obj, lcd, (int16_t)(thumb_x + 1), (int16_t)(thumb_y + 1),
+                           (uint8_t)(thumb_size - 2U), _slider_mono_fg);
+#else
     if (obj->pressed)
         thumb_color = we_colour_blend(_slider_black, obj->thumb_color, 40U);
     else
         thumb_color = obj->thumb_color;
 
     _slider_draw_thumb(obj, lcd, thumb_x, thumb_y, thumb_size, thumb_color);
+#endif
 }
 
 /**

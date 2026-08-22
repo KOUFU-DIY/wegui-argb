@@ -2,7 +2,7 @@
 #define __WE_WIDGET_TABVIEW_H
 
 #include "we_gui_driver.h"
-#include "we_motion.h"
+#include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 页签条控件（tabview）—— preview 孵化区实验控件

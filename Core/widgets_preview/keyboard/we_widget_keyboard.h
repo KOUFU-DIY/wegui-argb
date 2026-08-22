@@ -27,14 +27,14 @@
  * shift 语义：点 SH 切大写页，敲出一个字母后自动回小写页（非 sticky）。
  *
  * 弹层模式（隐藏/收回软键盘）：
- *   we_keyboard_popup_init 创建的键盘不挂普通对象链表，经 LCD 弹层
- *   （LCD 顶层链 + 模态）承载：we_keyboard_popup_show 从屏底滑入
+ *   we_keyboard_popup_init 创建的键盘不挂普通对象链表，经 LCD 顶层链
+ *   与模态承载：we_keyboard_popup_show 从屏底滑入
  *   （toast 同款 Q8 状态机，一个中央动画节点），点击键盘外部区域或
  *   BACK 键滑出收回；show 可绑定目标输入框（we_textarea_obj_t*），
  *   普通键/退格直接 we_textarea_input 注入，"OK" 确定键触发 done_cb
  *   并收回。滑入/滑出中途重复调用 show/hide 从当前位置平滑反向。
  *
- *   按键导航（WE_CFG_ENABLE_KEY_INPUT 且 WE_KEYBOARD_USE_KEY）：弹层键
+ *   按键导航（WE_CFG_ENABLE_KEY_INPUT 且 WE_KEYBOARD_USE_KEY）：模态键
  *   通道接管——方向键在键位网格上移动键光标（换行按 x 中心就近落键、
  *   行内回绕），OK 双沿击键（按下沿按压高亮、松开沿触发），BACK 收回。
  *
@@ -189,7 +189,7 @@ void we_keyboard_set_colors(we_keyboard_obj_t *obj, colour_t panel,
 void we_keyboard_set_opacity(we_keyboard_obj_t *obj, uint8_t opacity);
 
 /**
- * @brief 初始化弹层模式软键盘（不挂普通对象链表，show 时经 LCD 弹层滑入）。
+ * @brief 初始化弹层模式软键盘（不挂普通对象链表，show 时挂顶层链滑入）。
  * @param obj 控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param h 面板总高（像素，含顶部回显条 WE_KEYBOARD_ECHO_H）；
@@ -203,18 +203,18 @@ void we_keyboard_popup_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
                             int16_t h, const unsigned char *font);
 
 /**
- * @brief 弹出软键盘：占用 LCD 弹层并从屏底滑入。
+ * @brief 弹出软键盘：挂 LCD 顶层链、声明模态，并从屏底滑入。
  * @param obj 控件对象指针（须为 popup_init 创建）。
  * @param target_textarea 绑定的目标输入框（we_textarea_obj_t*，可 NULL）。
  * @return 无。
  * @note 绑定后普通键/退格直接注入目标（we_textarea_input），无需 key_cb；
  *       滑出中途调用则从当前位置反向滑入；重复 show 仅更新绑定目标。
- *       同屏唯一弹层：会自动替换已打开的其他弹层（dropdown 等）。
+ *       同屏唯一模态：会自动替换已打开的其他模态（dropdown 等）。
  */
 void we_keyboard_popup_show(we_keyboard_obj_t *obj, void *target_textarea);
 
 /**
- * @brief 收回软键盘：滑出到屏外后释放 LCD 弹层。
+ * @brief 收回软键盘：滑出到屏外后解除模态并摘离顶层链。
  * @param obj 控件对象指针。
  * @return 无。
  * @note 触发途径：点击键盘外部区域 / BACK 键 / "OK" 确定键 / 本 API。

@@ -3,6 +3,7 @@
 
 #include "stdint.h"
 
+#define DEEP_GRAY8 (3)  /* 8位灰度（单色/灰度 OLED：内核按灰度渲染，端口 flush 时量化打包） */
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
 
@@ -72,6 +73,12 @@
 #error "PFB row count (USER_GRAM_NUM / SCREEN_WIDTH) must be a multiple of WE_LCD_FLUSH_ALIGN_Y: we_push_pfb splits each dirty rect into PFB-row chunks after one set_addr, and chunk boundaries inherit the Y alignment only if the PFB row capacity is itself a multiple of it (page-packing flush ports rely on whole pages per chunk)."
 #endif
 
+/* 真双缓冲会把可用 PFB 砍半：砍半后的行容量也必须够出至少一个 Y 对齐块，
+ * 否则 we_push_pfb 的切片行数向下对齐后为 0，页打包端口将收不到任何数据 */
+#if (GRAM_DMA_BUFF_EN == 1) && (WE_PORT_FLUSH_ASYNC == 1) && ((((USER_GRAM_NUM / 2) / SCREEN_WIDTH) % WE_LCD_FLUSH_ALIGN_Y) != 0)
+#error "With true double buffering (GRAM_DMA_BUFF_EN=1 on an async port) each half of the PFB must still hold a multiple of WE_LCD_FLUSH_ALIGN_Y rows: enlarge USER_GRAM_NUM or disable double buffering."
+#endif
+
 #ifndef WE_CFG_DIRTY_STRATEGY
 #error "WE_CFG_DIRTY_STRATEGY must be defined by platform port config."
 #endif
@@ -137,12 +144,13 @@
 #define WE_ASSERT(expr) ((void)0)
 #endif
 
-/* 定时器单帧补偿上限：主循环被长时间阻塞（flash 擦写/长中断）后恢复时，
- * 周期定时器按补偿语义会在一帧内连续补发错过的节拍——本宏给补发次数
- * 封顶，超出部分丢弃（从当前时刻重新计时），避免恢复帧被回调风暴卡死。
- * 正常运行（每帧最多触发 1~2 次）不受影响。 */
-#ifndef WE_CFG_TIMER_CATCHUP_MAX
-#define WE_CFG_TIMER_CATCHUP_MAX 4
+/* 单色样式（MONO 优化）：面向 1bpp 页式 OLED 的控件级高对比画法。
+ * 1 = 参与的控件只用纯黑/纯白绘制：实体填充改描边+实体字、按压/选中
+ *     反白+挖空字、弱对比装饰省略，端口阈值二值化后对比关系仍可读；
+ * 0 = 默认关闭，控件按彩色样式绘制（灰度屏靠端口阈值自然二值化）。
+ * 渲染管线不受影响（仍按 LCD_DEEP 渲染），仅控件绘制策略分支。 */
+#ifndef WE_CFG_MONO_STYLE
+#define WE_CFG_MONO_STYLE 0
 #endif
 
 /* 手势接管阈值（像素）：按压后位移超过此值，内核沿祖先链发起
@@ -206,8 +214,8 @@
 #endif
 
 /* 语义键环形队列深度（须为 2 的幂且 >= 4；SPSC 单生产者单消费者语义，
- * 实际容量 = 深度-1，队满时丢弃新注入的键值；OK 松开沿被丢弃时消费侧
- * 会对账补投，不会卡在按压态）。
+ * 实际容量 = 深度-1，队满时丢弃新注入的键值；OK 松开沿被丢弃时由
+ * key_ok_down 电平兜底收尾，不会卡在按压态）。
  * 按下/松开双沿各占一个槽位，tap 式注入一次占两格——深度 2（容量 1）
  * 连一次 tap 都装不下，故下限 4；默认给到 8。 */
 #ifndef WE_CFG_KEY_QUEUE_LEN
@@ -237,17 +245,6 @@
 #endif
 #ifndef WE_CFG_FOCUS_CURSOR_B
 #define WE_CFG_FOCUS_CURSOR_B 255
-#endif
-
-/* OK 最短按压窗口（毫秒，≤255）：tap 式注入（一按一松同周期到达）时，
- * 松开沿会挂起到窗口结束再交付，保证按压视觉至少可见这么久；
- * 端口双沿上报且真实按住超过窗口时不引入任何额外延迟。 */
-#ifndef WE_CFG_FOCUS_FLASH_MS
-#define WE_CFG_FOCUS_FLASH_MS 90U
-#endif
-
-#if (WE_CFG_FOCUS_FLASH_MS) > 255
-#error "WE_CFG_FOCUS_FLASH_MS must fit in uint8 (<= 255): we_lcd_t stores the countdown in one byte."
 #endif
 
 /* 编辑态焦点光标颜色（RGB888）：值类控件 OK 进入编辑后光标换此色，

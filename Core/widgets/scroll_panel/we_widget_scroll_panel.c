@@ -275,15 +275,8 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
 {
     we_lcd_t *lcd;
     we_obj_t *child;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     uint8_t old_scale;
-    int16_t new_x0;
-    int16_t new_y0;
-    int16_t new_x1;
-    int16_t new_y1;
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -305,28 +298,17 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
                      obj->bg_color, obj->opacity);
     }
 
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
+    we_pfb_clip_save(lcd, &sv);
     old_scale = lcd->opa_scale;
 
     /* 子控件透明度级联（嵌套自动链乘） */
     lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
 
-    new_x0 = WE_MAX(old_pfb_area.x0, obj->inner_x);
-    new_y0 = WE_MAX(old_y_start, obj->inner_y);
-    new_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->inner_x + obj->inner_w - 1));
-    new_y1 = WE_MIN(old_y_end, (int16_t)(obj->inner_y + obj->inner_h - 1));
-
-    if (new_x0 <= new_x1 && new_y0 <= new_y1 && draw_children)
+    if (draw_children &&
+        we_pfb_clip_to(lcd, &sv, obj->inner_x, obj->inner_y,
+                       (int16_t)(obj->inner_x + obj->inner_w - 1),
+                       (int16_t)(obj->inner_y + obj->inner_h - 1)))
     {
-        lcd->pfb_area.x0 = new_x0;
-        lcd->pfb_area.x1 = new_x1;
-        lcd->pfb_y_start = new_y0;
-        lcd->pfb_y_end = new_y1;
-        lcd->pfb_gram = old_gram + (new_y0 - old_y_start) * lcd->pfb_width + (new_x0 - old_pfb_area.x0);
-
         child = obj->children_head;
         while (child != NULL)
         {
@@ -341,10 +323,7 @@ static void _scroll_panel_draw_core(we_scroll_panel_obj_t *obj, uint8_t draw_chi
     }
 
     lcd->opa_scale = old_scale;
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 
     if (draw_scrollbar)
         _scroll_panel_draw_scrollbar(obj);

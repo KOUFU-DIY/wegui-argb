@@ -46,5 +46,5 @@ HSV 色轮取色控件：在 size×size 包围盒内画一圈内切色环（S=V=
 - 可选增补：S/V 二维选择（中心三角/方块）、双击回默认色
 
 ## 对应 demo
-- `Demo/preview/demo_colorwheel.c`（DEMO_ID 109）：色轮 + 右侧大色块 box
+- `Demo/preview/demo_colorwheel.c`（DEMO_ID 119）：色轮 + 右侧大色块 box
   实时显示选中色 + 三行 label 显示 R/G/B 数值（整数 sprintf 静态缓冲）

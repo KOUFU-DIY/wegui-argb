@@ -37,10 +37,10 @@ int main(void)
 
 #if (LCD_DEEP == DEEP_RGB565)
     we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb565_port, we_input_port_read, NULL);
+                lcd_set_windows, lcd_rgb565_port, we_input_port_read, NULL);
 #elif (LCD_DEEP == DEEP_RGB888)
     we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb888_port, we_input_port_read, NULL);
+                lcd_set_windows, lcd_rgb888_port, we_input_port_read, NULL);
 #endif
 
     /* DEMO_ID（编译期宏切换，改这一行即可）；编号三目标统一，

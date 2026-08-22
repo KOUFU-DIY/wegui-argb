@@ -20,6 +20,8 @@
 #include "widgets/img/we_widget_img.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t ia_title;
 static we_label_obj_t ia_note;
 static we_label_obj_t ia_fps;
@@ -124,3 +126,61 @@ void we_img_alpha_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ia_fps, &ia_fps_timer,
                        &ia_last_frames, ia_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t ia_title;
+static we_img_obj_t   ia_tint[2]; /* [0] raw 循环变色，[1] 压缩图标透明度呼吸 */
+
+static uint32_t ia_ticks_ms;
+
+/**
+ * @brief 初始化透明位图演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @details 左 raw 图标前景色循环渐变，右 索引QOI_MASK 压缩图标透明度
+ *          呼吸——一屏同时验证两种 A8 编码与上色/乘 opacity 路径。
+ */
+void we_img_alpha_simple_demo_init(we_lcd_t *lcd)
+{
+    ia_ticks_ms = 0U;
+
+    we_label_obj_init(&ia_title, lcd, 2, 2,
+                      "A8 RAW|IQM", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+
+    we_img_obj_init(&ia_tint[0], lcd, 10, 14, demo_powerdrill_a8_raw_be_48x48, 255);
+    we_img_obj_init(&ia_tint[1], lcd, 70, 14, demo_windows_a8_indexqoimask_be_48x48, 255);
+    we_img_obj_set_color(&ia_tint[1], RGB888TODEV(102, 178, 255));
+}
+
+/**
+ * @brief 透明位图演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_img_alpha_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    int16_t phase;
+    uint8_t r, g, b, opacity;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    ia_ticks_ms += ms_tick;
+
+    /* 三相位色相环：R/G/B 相位各差 1/3 圈（512 步制 ≈ 171） */
+    phase = (int16_t)((ia_ticks_ms * 4U) / 100U);
+    r = (uint8_t)(128 + ((we_sin((int16_t)(phase & 0x1FF)) * 120) >> 15));
+    g = (uint8_t)(128 + ((we_sin((int16_t)((phase + 171) & 0x1FF)) * 120) >> 15));
+    b = (uint8_t)(128 + ((we_sin((int16_t)((phase + 341) & 0x1FF)) * 120) >> 15));
+    we_img_obj_set_color(&ia_tint[0], RGB888TODEV(r, g, b));
+
+    /* 透明度呼吸：验证 压缩流 alpha x 控件 opacity 的乘法路径 */
+    opacity = (uint8_t)(90U + (((uint32_t)(we_sin((int16_t)((ia_ticks_ms * 6U) / 100U) & 0x1FF))
+                                + 32768U) * 130U >> 16));
+    we_img_obj_set_opacity(&ia_tint[1], opacity);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

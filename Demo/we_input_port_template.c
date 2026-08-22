@@ -40,3 +40,17 @@ void we_input_port_read(we_indev_data_t *data)
     data->y = 0;
     data->state = WE_TOUCH_STATE_NONE;
 }
+
+/* --------------------------------------------------------------------------
+ * 语义按键注入参考（无按键设备时删除本段即可）
+ *
+ * 按键不走轮询：端口消抖后主动注入语义键，注入函数 ISR 安全。
+ * 典型写法（按键扫描定时器 / EXTI 回调里）：
+ *
+ *     if (key_ok_pressed_edge)   we_gui_key_press(&mylcd, WE_KEY_OK);
+ *     if (key_ok_released_edge)  we_gui_key_release(&mylcd, WE_KEY_OK);
+ *     if (key_next_tapped)       we_gui_key_inject(&mylcd, WE_KEY_NEXT);
+ *
+ * OK 键务必双沿上报（按住期间保持按压视觉）；方向/NEXT 类键可只报
+ * 按下沿，长按自动重复由端口重复注入按下沿实现。
+ * -------------------------------------------------------------------------- */

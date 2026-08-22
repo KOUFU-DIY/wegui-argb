@@ -13,6 +13,81 @@
  * 拆出来，也可以继续放到这里统一管理。
  * -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+ * PFB 裁剪窗三件套（save / clip_to / restore）
+ *
+ * 控件把 PFB 窗口临时收窄到某个矩形（子控件区、单元格、滑入可见区……），
+ * 画完恢复。clip_to 始终以 save 保存的"原始现场"为基准计算（非嵌套，
+ * 同一现场可反复收窄），窗口无交集返回 0，本次不必绘制。
+ * 窗口四字段与 pfb_gram 偏移一体维护——该算术写错即越界写 PFB，
+ * 务必经由本组接口，不要在控件里手抄。
+ * -------------------------------------------------------------------------- */
+typedef struct
+{
+    we_area_t area;   /* pfb_area 现场（x0/x1 有效） */
+    uint16_t y_start; /* pfb_y_start 现场 */
+    uint16_t y_end;   /* pfb_y_end 现场 */
+    colour_t *gram;   /* pfb_gram 现场 */
+} we_pfb_clip_t;
+
+/**
+ * @brief 保存当前 PFB 裁剪现场
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param sv 传出：现场保存结构
+ * @return 无
+ */
+static __inline void we_pfb_clip_save(const we_lcd_t *lcd, we_pfb_clip_t *sv)
+{
+    sv->area = lcd->pfb_area;
+    sv->y_start = lcd->pfb_y_start;
+    sv->y_end = lcd->pfb_y_end;
+    sv->gram = lcd->pfb_gram;
+}
+
+/**
+ * @brief 从原始现场出发把 PFB 窗口收窄到指定矩形
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param sv 传入：save 保存的原始现场（收窄基准，始终相对它计算）
+ * @param x0 传入：目标矩形左缘（屏幕绝对坐标）
+ * @param y0 传入：目标矩形上缘
+ * @param x1 传入：目标矩形右缘（含端点）
+ * @param y1 传入：目标矩形下缘（含端点）
+ * @return 1 收窄后窗口非空；0 无交集（窗口未改动，本次不必绘制）
+ */
+static __inline uint8_t we_pfb_clip_to(we_lcd_t *lcd, const we_pfb_clip_t *sv,
+                                       int16_t x0, int16_t y0, int16_t x1, int16_t y1)
+{
+    int16_t cx0 = WE_MAX((int16_t)sv->area.x0, x0);
+    int16_t cy0 = WE_MAX((int16_t)sv->y_start, y0);
+    int16_t cx1 = WE_MIN((int16_t)sv->area.x1, x1);
+    int16_t cy1 = WE_MIN((int16_t)sv->y_end, y1);
+
+    if (cx0 > cx1 || cy0 > cy1)
+        return 0U;
+
+    lcd->pfb_area.x0 = (uint16_t)cx0;
+    lcd->pfb_area.x1 = (uint16_t)cx1;
+    lcd->pfb_y_start = (uint16_t)cy0;
+    lcd->pfb_y_end = (uint16_t)cy1;
+    lcd->pfb_gram = sv->gram + (int32_t)(cy0 - (int16_t)sv->y_start) * lcd->pfb_width +
+                    (cx0 - (int16_t)sv->area.x0);
+    return 1U;
+}
+
+/**
+ * @brief 恢复 PFB 裁剪现场
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param sv 传入：save 保存的现场
+ * @return 无
+ */
+static __inline void we_pfb_clip_restore(we_lcd_t *lcd, const we_pfb_clip_t *sv)
+{
+    lcd->pfb_area = sv->area;
+    lcd->pfb_y_start = sv->y_start;
+    lcd->pfb_y_end = sv->y_end;
+    lcd->pfb_gram = sv->gram;
+}
+
 #if (LCD_DEEP == DEEP_RGB565)
 /* --------------------------------------------------------------------------
  * RGB565 快速混色公共内联
@@ -34,19 +109,32 @@
  * @return 混合后的 RGB565 颜色值
  * @note 内含近全透/近全不透明快速路径，并使用 255 分母四舍五入混色
  */
+static __inline uint16_t _we_blend_rgb565_core(uint16_t fg, uint16_t bg, uint8_t alpha)
+{
+    /* 核心公式（无快速路径判定）：仅供带判定入口内部复用，
+     * 调用方必须已确认 alpha 落在 6..249 中段。
+     * 输入 alpha 仍是 0~255，先无成本扩展到 0~256：
+     *   a256 = alpha + (alpha >> 7)  →  0→0, 255→256, 中间近似线性
+     * 这样分母变成 256，三个通道的 /255 全部替换为 >>8，
+     * 在没有硬件除法的 Cortex-M0（如 STM32F030）上能省掉大量软除法周期。
+     * 误差 < 0.4%，RGB565 5/6 位深度下视觉无差异。 */
+    uint32_t a = (uint32_t)alpha + (uint32_t)(alpha >> 7);
+    uint32_t ia = 256U - a;
+    uint32_t fg_r = (fg >> 11) & 0x1FU;
+    uint32_t fg_g = (fg >> 5) & 0x3FU;
+    uint32_t fg_b = fg & 0x1FU;
+    uint32_t bg_r = (bg >> 11) & 0x1FU;
+    uint32_t bg_g = (bg >> 5) & 0x3FU;
+    uint32_t bg_b = bg & 0x1FU;
+    uint32_t r = (fg_r * a + bg_r * ia) >> 8;
+    uint32_t g = (fg_g * a + bg_g * ia) >> 8;
+    uint32_t b = (fg_b * a + bg_b * ia) >> 8;
+
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
 static __inline uint16_t we_blend_rgb565(uint16_t fg, uint16_t bg, uint8_t alpha)
 {
-    uint32_t ia;
-    uint32_t r;
-    uint32_t g;
-    uint32_t b;
-    uint32_t fg_r;
-    uint32_t fg_g;
-    uint32_t fg_b;
-    uint32_t bg_r;
-    uint32_t bg_g;
-    uint32_t bg_b;
-
     if (alpha >= 250U)
     {
         return fg;
@@ -55,31 +143,43 @@ static __inline uint16_t we_blend_rgb565(uint16_t fg, uint16_t bg, uint8_t alpha
     {
         return bg;
     }
-
-    /* 输入 alpha 仍是 0~255，先无成本扩展到 0~256：
-     *   a256 = alpha + (alpha >> 7)  →  0→0, 255→256, 中间近似线性
-     * 这样分母变成 256，三个通道的 /255 全部替换为 >>8，
-     * 在没有硬件除法的 Cortex-M0（如 STM32F030）上能省掉大量软除法周期。
-     * 误差 < 0.4%，RGB565 5/6 位深度下视觉无差异。 */
-    {
-        uint32_t a = (uint32_t)alpha + (uint32_t)(alpha >> 7);
-        ia = 256U - a;
-
-        fg_r = (fg >> 11) & 0x1FU;
-        fg_g = (fg >> 5) & 0x3FU;
-        fg_b = fg & 0x1FU;
-        bg_r = (bg >> 11) & 0x1FU;
-        bg_g = (bg >> 5) & 0x3FU;
-        bg_b = bg & 0x1FU;
-
-        r = (fg_r * a + bg_r * ia) >> 8;
-        g = (fg_g * a + bg_g * ia) >> 8;
-        b = (fg_b * a + bg_b * ia) >> 8;
-    }
-
-    return (uint16_t)((r << 11) | (g << 5) | b);
+    return _we_blend_rgb565_core(fg, bg, alpha);
 }
 #endif
+
+/**
+ * @brief 核心混色（无快速路径判定，按当前色深）
+ * @param fg 传入：前景色
+ * @param bg 传入：背景色
+ * @param alpha 传入：前景透明度（调用方保证已落在 6..249 中段）
+ * @return 混合后的颜色
+ * @note 仅供 we_colour_blend / we_store_blended_color 等带判定入口内部
+ *       复用：入口判定一次后逐像素直进公式，省去逐层重复的快路径比较。
+ */
+static __inline colour_t _we_colour_blend_core(colour_t fg, colour_t bg, uint8_t alpha)
+{
+    colour_t out;
+
+#if (LCD_DEEP == DEEP_RGB565)
+    out.dat16 = _we_blend_rgb565_core(fg.dat16, bg.dat16, alpha);
+#elif (LCD_DEEP == DEEP_RGB888)
+    {
+        uint32_t a  = (uint32_t)alpha + (uint32_t)(alpha >> 7);
+        uint32_t ia = 256U - a;
+        out.rgb.r = (uint8_t)(((uint32_t)fg.rgb.r * a + (uint32_t)bg.rgb.r * ia) >> 8);
+        out.rgb.g = (uint8_t)(((uint32_t)fg.rgb.g * a + (uint32_t)bg.rgb.g * ia) >> 8);
+        out.rgb.b = (uint8_t)(((uint32_t)fg.rgb.b * a + (uint32_t)bg.rgb.b * ia) >> 8);
+    }
+#elif (LCD_DEEP == DEEP_GRAY8)
+    {
+        /* 单通道亮度线性插值，比 RGB565 拆位更快 */
+        uint32_t a  = (uint32_t)alpha + (uint32_t)(alpha >> 7);
+        uint32_t ia = 256U - a;
+        out.dat8 = (uint8_t)(((uint32_t)fg.dat8 * a + (uint32_t)bg.dat8 * ia) >> 8);
+    }
+#endif
+    return out;
+}
 
 /* --------------------------------------------------------------------------
  * 通用双色混合，返回混合后的 colour_t，RGB565 和 RGB888 均适用。
@@ -100,25 +200,11 @@ static __inline uint16_t we_blend_rgb565(uint16_t fg, uint16_t bg, uint8_t alpha
  */
 static __inline colour_t we_colour_blend(colour_t fg, colour_t bg, uint8_t alpha)
 {
-    colour_t out;
-
     if (alpha >= 250U)
         return fg;
     if (alpha <= 5U)
         return bg;
-
-#if (LCD_DEEP == DEEP_RGB565)
-    out.dat16 = we_blend_rgb565(fg.dat16, bg.dat16, alpha);
-#elif (LCD_DEEP == DEEP_RGB888)
-    {
-        uint32_t a  = (uint32_t)alpha + (uint32_t)(alpha >> 7);
-        uint32_t ia = 256U - a;
-        out.rgb.r = (uint8_t)(((uint32_t)fg.rgb.r * a + (uint32_t)bg.rgb.r * ia) >> 8);
-        out.rgb.g = (uint8_t)(((uint32_t)fg.rgb.g * a + (uint32_t)bg.rgb.g * ia) >> 8);
-        out.rgb.b = (uint8_t)(((uint32_t)fg.rgb.b * a + (uint32_t)bg.rgb.b * ia) >> 8);
-    }
-#endif
-    return out;
+    return _we_colour_blend_core(fg, bg, alpha);
 }
 
 /* --------------------------------------------------------------------------
@@ -136,6 +222,69 @@ static __inline colour_t we_colour_blend(colour_t fg, colour_t bg, uint8_t alpha
 static __inline uint8_t we_div255(uint32_t v)
 {
     return (uint8_t)((v + (v >> 8) + 1U) >> 8);
+}
+
+/**
+ * @brief 比较两个颜色是否相等（按当前色深逐通道比较）
+ * @param a 传入：颜色 A
+ * @param b 传入：颜色 B
+ * @return 1 相等；0 不等
+ */
+static __inline uint8_t we_colour_eq(colour_t a, colour_t b)
+{
+#if (LCD_DEEP == DEEP_RGB565)
+    return (uint8_t)(a.dat16 == b.dat16);
+#elif (LCD_DEEP == DEEP_GRAY8)
+    return (uint8_t)(a.dat8 == b.dat8);
+#elif (LCD_DEEP == DEEP_RGB888)
+    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
+#endif
+}
+
+/**
+ * @brief 将透明度按控件整体不透明度缩放
+ * @param a 传入：原始透明度（0~255）
+ * @param opacity 传入：控件整体不透明度（0~255）
+ * @return 缩放后的透明度（0~255）
+ */
+static __inline uint8_t we_opa_scale(uint8_t a, uint8_t opacity)
+{
+    if (opacity == 255U)
+        return a;
+    return we_div255((uint32_t)a * (uint32_t)opacity);
+}
+
+/**
+ * @brief 滚动条滑块几何：滑块高 = 轨道高 × 视口高/内容高，位置按滚动比例落轨
+ * @param track_y0 传入：轨道顶部 Y（屏幕绝对坐标）
+ * @param track_h 传入：轨道高度（像素）
+ * @param view_h 传入：视口高度（像素）
+ * @param content_h 传入：内容总高度（像素，调用方保证 > 0）
+ * @param scroll 传入：当前滚动量（自动夹紧到 [0, max_scroll]）
+ * @param max_scroll 传入：最大滚动量（调用方保证 > 0）
+ * @param min_h 传入：滑块最小高度（像素）
+ * @param thumb_y 传出：滑块顶部 Y
+ * @param thumb_h 传出：滑块高度
+ * @return 无
+ */
+static __inline void we_scroll_bar_geom(int16_t track_y0, int16_t track_h,
+                                        int32_t view_h, int32_t content_h,
+                                        int32_t scroll, int32_t max_scroll,
+                                        int16_t min_h,
+                                        int16_t *thumb_y, int16_t *thumb_h)
+{
+    int16_t th = (int16_t)(((int32_t)track_h * view_h) / content_h);
+
+    if (th < min_h)
+        th = min_h;
+    if (th > track_h)
+        th = track_h;
+    if (scroll < 0)
+        scroll = 0;
+    if (scroll > max_scroll)
+        scroll = max_scroll;
+    *thumb_h = th;
+    *thumb_y = (int16_t)(track_y0 + (int32_t)(track_h - th) * scroll / max_scroll);
 }
 
 /* --------------------------------------------------------------------------
@@ -158,6 +307,8 @@ static __inline void we_store_color(colour_t *dst, colour_t color)
     dst->rgb.r = color.rgb.r;
     dst->rgb.g = color.rgb.g;
     dst->rgb.b = color.rgb.b;
+#elif (LCD_DEEP == DEEP_GRAY8)
+    dst->dat8 = color.dat8;
 #endif
 }
 
@@ -180,7 +331,8 @@ static __inline void we_store_blended_color(colour_t *dst, colour_t fg, uint8_t 
     {
         return;
     }
-    *dst = we_colour_blend(fg, *dst, alpha);
+    /* 快路径已在本入口判定完，直进核心公式（省去内层逐级重复比较） */
+    *dst = _we_colour_blend_core(fg, *dst, alpha);
 }
 
 #define WE_MASK_QUADRANT_LT 0U
@@ -251,6 +403,25 @@ void we_draw_round_rect_analytic_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
                                       colour_t color, uint8_t opacity);
 
 /**
+ * @brief 绘制 1px 描边 + 内填充的双色圆角矩形（描边套路的单点实现）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x 传入：外接矩形左上角 X 坐标
+ * @param y 传入：外接矩形左上角 Y 坐标
+ * @param w 传入：外接矩形宽度
+ * @param h 传入：外接矩形高度
+ * @param radius 传入：外轮廓圆角半径（内填充自动取同心半径 radius-1）
+ * @param outline 传入：描边颜色
+ * @param fill 传入：内填充颜色
+ * @param opacity 传入：整体透明度（0~255，两层同一份，无亮度断层）
+ * @return 无
+ * @note 实现为外层整填 + 内缩 1px 再填：w/h 不足 3px 时退化为纯描边色块。
+ *       单色样式的"白描边黑底"面板统一经此绘制，口径只此一处。
+ */
+void we_draw_round_rect_outline_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
+                                     uint16_t w, uint16_t h, uint16_t radius,
+                                     colour_t outline, colour_t fill, uint8_t opacity);
+
+/**
  * @brief 将 RGB565 像素值转换为当前色深颜色类型
  * @param pixel 传入：RGB565 像素值
  * @return 转换后的 colour_t 颜色
@@ -265,6 +436,14 @@ static __inline colour_t we_color_from_rgb565(uint16_t pixel)
     out.rgb.r = (uint8_t)(((pixel >> 11) & 0x1FU) << 3);
     out.rgb.g = (uint8_t)(((pixel >> 5) & 0x3FU) << 2);
     out.rgb.b = (uint8_t)((pixel & 0x1FU) << 3);
+#elif (LCD_DEEP == DEEP_GRAY8)
+    {
+        /* 565 → 8 位通道 → 整数亮度 */
+        uint16_t r = (uint16_t)(((pixel >> 11) & 0x1FU) << 3);
+        uint16_t g = (uint16_t)(((pixel >> 5) & 0x3FU) << 2);
+        uint16_t b = (uint16_t)((pixel & 0x1FU) << 3);
+        out.dat8 = (uint8_t)((r * 77U + g * 150U + b * 29U) >> 8);
+    }
 #endif
     return out;
 }
@@ -301,7 +480,7 @@ void we_img_render_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8
  * @param opacity 传入：整体透明度（0~255）
  * @return 无
  * @note 取模数据每行按字节对齐（行末补零）、位序高位在前；
- *       与 we_draw_alpha_mask 的连续位流布局不同，不能混用
+ *       连续位流布局的取模数据与此不兼容，不能混用
  */
 void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, colour_t fg_color, uint8_t opacity);
 

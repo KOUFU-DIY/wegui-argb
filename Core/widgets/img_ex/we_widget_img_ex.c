@@ -67,20 +67,16 @@ static __inline colour_t _blend_fast(colour_t fg, colour_t bg, uint8_t alpha)
     return we_colour_blend(fg, bg, alpha);
 }
 
-#if (LCD_DEEP == DEEP_RGB888)
+#if (LCD_DEEP != DEEP_RGB565)
 
 /**
- * @brief 将 RGB565 像素扩展为 RGB888 colour_t（5/6/5 位左移补齐）。
+ * @brief 将 RGB565 像素转换为当前色深 colour_t（RGB888 位扩展 / GRAY8 取亮度）。
  * @param pixel RGB565 原始像素值。
- * @return 展开后的 colour_t。
+ * @return 转换后的 colour_t。
  */
 static colour_t _img_ex_color_from_rgb565(uint16_t pixel)
 {
-    colour_t out;
-    out.rgb.r = (uint8_t)(((pixel >> 11) & 0x1FU) << 3);
-    out.rgb.g = (uint8_t)(((pixel >> 5) & 0x3FU) << 2);
-    out.rgb.b = (uint8_t)((pixel & 0x1FU) << 3);
-    return out;
+    return we_color_from_rgb565(pixel); /* 统一委托渲染层的色深转换 */
 }
 #endif
 #endif
@@ -499,21 +495,15 @@ img_w = IMG_DAT_WIDTH(img);
 pixel_color = _blend_fast(fg, *p_dst, (uint8_t)final_alpha);
                     p_dst->dat16 = pixel_color.dat16;
                 }
-#elif (LCD_DEEP == DEEP_RGB888)
+#else /* RGB888 / GRAY8：统一共用体赋值 */
                 if (final_alpha >= 250U)
                 {
-colour_t fg = _img_ex_color_from_rgb565(final_color);
-                    p_dst->rgb.r = fg.rgb.r;
-                    p_dst->rgb.g = fg.rgb.g;
-                    p_dst->rgb.b = fg.rgb.b;
+                    *p_dst = _img_ex_color_from_rgb565(final_color);
                 }
                 else if (final_alpha > 5U)
                 {
-colour_t fg = _img_ex_color_from_rgb565(final_color);
-colour_t pixel_color = _blend_fast(fg, *p_dst, (uint8_t)final_alpha);
-                    p_dst->rgb.r = pixel_color.rgb.r;
-                    p_dst->rgb.g = pixel_color.rgb.g;
-                    p_dst->rgb.b = pixel_color.rgb.b;
+                    colour_t fg = _img_ex_color_from_rgb565(final_color);
+                    *p_dst = _blend_fast(fg, *p_dst, (uint8_t)final_alpha);
                 }
 #endif
 
@@ -534,25 +524,19 @@ colour_t pixel_color = _blend_fast(fg, *p_dst, (uint8_t)final_alpha);
                  * 3. 这是最适合当前性能测试页的路径
                  * -------------------------------------------------- */
                 {
-colour_t fg = _img_ex_color_from_rgb565(final_color);
 #if (LCD_DEEP == DEEP_RGB565)
-                    p_dst->dat16 = fg.dat16;
+                    p_dst->dat16 = final_color;
 #else
-                    p_dst->rgb.r = fg.rgb.r;
-                    p_dst->rgb.g = fg.rgb.g;
-                    p_dst->rgb.b = fg.rgb.b;
+                    *p_dst = _img_ex_color_from_rgb565(final_color);
 #endif
                 }
 #else
                 if (eff_op >= 250U)
                 {
-colour_t fg = _img_ex_color_from_rgb565(final_color);
 #if (LCD_DEEP == DEEP_RGB565)
-                    p_dst->dat16 = fg.dat16;
+                    p_dst->dat16 = final_color;
 #else
-                    p_dst->rgb.r = fg.rgb.r;
-                    p_dst->rgb.g = fg.rgb.g;
-                    p_dst->rgb.b = fg.rgb.b;
+                    *p_dst = _img_ex_color_from_rgb565(final_color);
 #endif
                 }
                 else
@@ -561,17 +545,9 @@ colour_t fg = _img_ex_color_from_rgb565(final_color);
 p_dst->dat16 = we_blend_rgb565(final_color, p_dst->dat16, eff_op);
 #else
                     colour_t fg;
-                    colour_t pixel_color;
 
 fg = _img_ex_color_from_rgb565(final_color);
-pixel_color = _blend_fast(fg, *p_dst, eff_op);
-#if (LCD_DEEP == DEEP_RGB565)
-                    p_dst->dat16 = pixel_color.dat16;
-#else
-                    p_dst->rgb.r = pixel_color.rgb.r;
-                    p_dst->rgb.g = pixel_color.rgb.g;
-                    p_dst->rgb.b = pixel_color.rgb.b;
-#endif
+                    *p_dst = _blend_fast(fg, *p_dst, eff_op);
 #endif
                 }
 #endif

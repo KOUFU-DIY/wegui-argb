@@ -6,21 +6,6 @@
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 比较两个颜色是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 相等，0 不等。
- */
-static uint8_t _radio_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (a.dat16 == b.dat16) ? 1U : 0U;
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b) ? 1U : 0U;
-#endif
-}
-
-/**
  * @brief 触点命中检测：返回命中的行序号。
  * @param obj 传入：控件对象指针。
  * @param px 传入：触点 X（屏幕绝对坐标）。
@@ -428,9 +413,9 @@ void we_radio_set_colors(we_radio_obj_t *obj, colour_t ring,
 {
     if (obj == NULL)
         return;
-    if (_radio_colour_eq(obj->ring_color, ring) &&
-        _radio_colour_eq(obj->sel_color, sel) &&
-        _radio_colour_eq(obj->text_color, text))
+    if (we_colour_eq(obj->ring_color, ring) &&
+        we_colour_eq(obj->sel_color, sel) &&
+        we_colour_eq(obj->text_color, text))
         return;
 
     obj->ring_color = ring;

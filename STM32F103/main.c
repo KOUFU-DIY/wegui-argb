@@ -91,15 +91,20 @@ int main(void)
     w25qxx_init();
 
 #if (LCD_DEEP == DEEP_RGB565)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb565_port, we_input_port_read, w25qxx_read_data);
+    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_rgb565_port, we_input_port_read, w25qxx_read_data);
 #elif (LCD_DEEP == DEEP_RGB888)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_addr, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
+    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
+#elif (LCD_DEEP == DEEP_GRAY8)
+  #if (LCD_TYPE == HW_LCD_OLED)
+	    /* 页式单色 OLED */
+      we_gui_init(&g_lcd, RGB888TODEV(0, 0, 0), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_oled_port, we_input_port_read, w25qxx_read_data);
+  #else
+      /* 灰度 OLED */
+      we_gui_init(&g_lcd, RGB888TODEV(0, 0, 0), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_gray_port, we_input_port_read, w25qxx_read_data);
+  #endif
 #endif
 
-    /* DEMO_ID（编译期宏切换，改这一行即可）；编号三目标统一，
-     * 0 = showcase 仅模拟器（需 800x480，此处回退 label）：
+    /* DEMO_ID（编译期宏切换，改这一行即可）；
      * 1  = label (标签)           2  = btn (按钮)
      * 3  = img (图片)             4  = img_ex (旋转缩放图)
      * 5  = arc (圆弧)             6  = group (控件组)
@@ -118,7 +123,7 @@ int main(void)
      * 31 = img_alpha (A1/A2/A4/A8 透明位图)
      * 32 = imgbtn (图片按钮)      33 = segdisp (数码管)
      *
-     * preview 孵化区（101 起，未打磨、随时可能下架；2026-07 重排：
+     * preview 孵化区（101 起，未打磨、随时可能下架
      * 常用 12 个在前、其余靠后，今后毕业迁出的编号留空洞不复用）：
      * 101 = keyboard (软键盘)     102 = textarea (输入框+弹层键盘)
      * 103 = menu (多级菜单)       104 = spectrum (频谱柱)
@@ -133,7 +138,7 @@ int main(void)
      * 121 = animimg (帧动画)      122 = canvas (自绘画布)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
      * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
-#define DEMO_ID (3)
+#define DEMO_ID (33)
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
 #if (DEMO_ID == 1)

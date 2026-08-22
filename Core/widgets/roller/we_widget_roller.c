@@ -30,19 +30,6 @@
 static const uint8_t _roller_alpha_tab[5] = { 255U, 160U, 90U, 55U, 40U };
 
 /**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _roller_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
-
-/**
  * @brief 按距中心的像素距离计算行文字透明度（分档 + 线性插值）。
  * @param dist_px 传入：行中心距控件中心的像素距离（>= 0）。
  * @param row_h 传入：行高（像素，> 0）。
@@ -500,20 +487,17 @@ static void _roller_draw_cb(void *ptr)
 {
     we_roller_obj_t *obj = (we_roller_obj_t *)ptr;
     we_lcd_t *lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
+    we_pfb_clip_t sv;
     int16_t half_rows;
     int16_t center_top;
     int32_t center_idx;
     int32_t i0;
     int32_t i1;
     int32_t i;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -524,6 +508,21 @@ static void _roller_draw_cb(void *ptr)
     half_rows = (int16_t)(obj->visible_rows / 2U);
     center_top = (int16_t)(obj->base.y + half_rows * (int16_t)obj->row_h);
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 1. 单色样式面板：黑底 + 1px 白描边 */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    WE_ROLLER_PANEL_RADIUS, mono_fg, mono_bg, obj->opacity);
+
+    /* 2. 中心行反白条 */
+    we_draw_round_rect_analytic_fill(lcd,
+                                     (int16_t)(obj->base.x + WE_ROLLER_BAR_INSET),
+                                     (int16_t)(center_top + 1),
+                                     (uint16_t)(obj->base.w - 2 * WE_ROLLER_BAR_INSET),
+                                     (uint16_t)(obj->row_h - 2U),
+                                     WE_ROLLER_BAR_RADIUS, mono_fg,
+                                     obj->opacity);
+#else
     /* 1. 面板背景 */
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
@@ -538,30 +537,18 @@ static void _roller_draw_cb(void *ptr)
                                      (uint16_t)(obj->row_h - 2U),
                                      WE_ROLLER_BAR_RADIUS, obj->bar_color,
                                      obj->opacity);
+#endif
 
     if (obj->options == NULL || obj->option_cnt == 0U || obj->font == NULL)
         return;
 
     /* 3. PFB 窗口收窄：把行文字裁剪在控件矩形内（save/restore 套路） */
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
+    we_pfb_clip_save(lcd, &sv);
 
-    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-    clip_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                       (int16_t)(obj->base.x + obj->base.w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
     {
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (clip_x0 - old_pfb_area.x0);
-
         /* 只遍历可能可见的行：中心行索引 ± (半屏 + 1) */
         center_idx = obj->scroll_px / (int32_t)obj->row_h;
         i0 = center_idx - (int32_t)half_rows - 1;
@@ -589,15 +576,23 @@ static void _roller_draw_cb(void *ptr)
             /* 距中心半行以内视为"中心行"：主色 + 满透明度 */
             if (ady <= (int32_t)(obj->row_h / 2U))
             {
+#if (WE_CFG_MONO_STYLE == 1)
+                tc = mono_bg; /* 反白条上的挖空字 */
+#else
                 tc = obj->text_sel_color;
+#endif
                 alpha = 255U;
             }
             else
             {
+#if (WE_CFG_MONO_STYLE == 1)
+                tc = mono_fg;
+#else
                 tc = obj->text_color;
+#endif
                 alpha = _roller_row_alpha(ady, obj->row_h);
             }
-            alpha = _roller_scale_opa(alpha, obj->opacity);
+            alpha = we_opa_scale(alpha, obj->opacity);
 
             /* 水平居中（行宽走缓存）+ 行内垂直居中（bbox 常量派生 text_dy） */
             text_w = _roller_text_width_cached(obj, i);
@@ -608,10 +603,7 @@ static void _roller_draw_cb(void *ptr)
         }
     }
 
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 }
 
 /* --------------------------------------------------------------------------

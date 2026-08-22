@@ -17,6 +17,8 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t ln_title;
 static we_label_obj_t ln_fps_label;
 static we_label_obj_t ln_ease_lbl;   /* ease 行标签（内容随缓动名切换） */
@@ -214,3 +216,105 @@ void we_line_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ln_fps_label, &ln_fps_timer,
                        &ln_last_frames, ln_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t ln_ease_lbl;   /* ease 行标签（内容随缓动名切换） */
+static we_label_obj_t ln_fade_lbl;
+static we_line_obj_t  ln_ease;
+static we_line_obj_t  ln_fade;
+
+static uint32_t ln_ease_t;
+static uint32_t ln_fade_t;
+static uint8_t  ln_ease_idx;
+static uint8_t  ln_fade_dim;
+
+#define LN_PERIOD 1200U
+#define LN_DUR    800U
+
+#define LN_EASE_CY  16
+#define LN_FADE_CY  46
+
+#define LN_LX    44
+#define LN_RX    124
+#define LN_SWING 10
+#define LN_DIM   40
+
+/**
+ * @brief 初始化 line demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_line_simple_demo_init(we_lcd_t *lcd)
+{
+    ln_ease_idx = 0U;
+    ln_fade_dim = 0U;
+    /* 错相位起始，画面持续有动作 */
+    ln_ease_t = LN_PERIOD;
+    ln_fade_t = LN_PERIOD / 2U;
+
+    we_label_obj_init(&ln_ease_lbl, lcd, 2, 10,
+                      "linear", we_font_consolas_18, RGB888TODEV(170, 180, 196), 255);
+    we_label_obj_init(&ln_fade_lbl, lcd, 2, 40,
+                      "fade", we_font_consolas_18, RGB888TODEV(170, 180, 196), 255);
+
+    /* ease：左端固定，右端钟摆扫动（缓动每次换） */
+    we_line_obj_init(&ln_ease, lcd, LN_LX, LN_EASE_CY, LN_RX, LN_EASE_CY);
+    we_line_set_width(&ln_ease, 4U);
+    we_line_set_color(&ln_ease, RGB888TODEV(88, 166, 240));
+
+    /* fade：透明度呼吸 */
+    we_line_obj_init(&ln_fade, lcd, LN_LX, LN_FADE_CY, LN_RX, LN_FADE_CY);
+    we_line_set_width(&ln_fade, 4U);
+    we_line_set_color(&ln_fade, RGB888TODEV(250, 160, 60));
+}
+
+/**
+ * @brief line demo 周期更新（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_line_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    ln_ease_t += ms_tick;
+    ln_fade_t += ms_tick;
+
+    /* ease：每个周期换一种缓动——直接列出，函数与显示名一眼对照 */
+    if (ln_ease_t >= LN_PERIOD)
+    {
+        we_ease_fn_t ease;
+        const char  *name;
+        int16_t      ty;
+
+        ln_ease_t = 0U;
+        switch (ln_ease_idx)
+        {
+        case 0:  ease = we_ease_linear;      name = "linear"; break;
+        case 1:  ease = we_ease_in_out_quad; name = "quad";   break;
+        case 2:  ease = we_ease_out_cubic;   name = "cubic";  break;
+        case 3:  ease = we_ease_in_out_sine; name = "sine";   break;
+        case 4:  ease = we_ease_out_back;    name = "back";   break;
+        default: ease = we_ease_out_bounce;  name = "bounce"; break;
+        }
+        ty = (int16_t)(LN_EASE_CY + ((ln_ease_idx & 1U) ? -LN_SWING : LN_SWING));
+
+        we_label_set_text(&ln_ease_lbl, name);
+        we_line_anim_points(&ln_ease, LN_LX, LN_EASE_CY, LN_RX, ty, LN_DUR, ease);
+        ln_ease_idx = (uint8_t)((ln_ease_idx + 1U) % 6U);
+    }
+
+    /* fade：每个周期在明/暗之间过渡（透明度动画，in_out_sine） */
+    if (ln_fade_t >= LN_PERIOD)
+    {
+        ln_fade_t = 0U;
+        ln_fade_dim ^= 1U;
+        we_line_anim_opacity(&ln_fade, (uint8_t)(ln_fade_dim ? LN_DIM : 255U), LN_DUR,
+                             we_ease_in_out_sine);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

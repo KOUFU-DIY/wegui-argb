@@ -76,6 +76,8 @@ static void _stepper_put_uint(char *buf, uint8_t *pos, uint8_t cap,
  *
  * 真实值 = value / 10^decimals。注意 value 为 -1~-(divisor-1) 时整数部分
  * 为 0、负号会丢失，这里用独立的 neg 标志统一在最前补 '-'。
+ * 只在值变更点调用（init / set_value / 步进 / set_range 夹紧），
+ * draw_cb 直读 obj->buf——含软除的格式化不进每帧绘制路径。
  * @param obj 控件对象指针（结果写入 obj->buf）。
  * @return 无。
  */
@@ -118,6 +120,7 @@ static int16_t _stepper_btn_w(const we_stepper_obj_t *obj)
     return bw;
 }
 
+#if (WE_CFG_MONO_STYLE == 0) /* 单色样式无灰阶禁用态，仅彩色绘制引用 */
 /**
  * @brief 减按钮是否禁用（非回绕且已到下限）。
  * @param obj 控件对象指针。
@@ -137,6 +140,7 @@ static uint8_t _stepper_inc_disabled(const we_stepper_obj_t *obj)
 {
     return (uint8_t)(!obj->wrap && obj->value >= obj->max_value);
 }
+#endif
 
 /**
  * @brief 按方向步进一次（处理回绕/夹紧、触发回调、标脏全控件）。
@@ -166,6 +170,7 @@ static uint8_t _stepper_apply(we_stepper_obj_t *obj, int8_t dir)
         return 0U;
 
     obj->value = nv;
+    _stepper_format(obj);
     we_obj_invalidate((we_obj_t *)obj);
     if (obj->changed_cb != NULL)
         obj->changed_cb(obj, obj->value);
@@ -218,13 +223,10 @@ static void _stepper_draw_text_centered(we_lcd_t *lcd, const unsigned char *font
                                         int16_t box_x, int16_t box_y,
                                         int16_t box_w, int16_t box_h, uint8_t opacity)
 {
-    we_area_t old_pfb_area;
-    uint16_t old_y_start, old_y_end;
-    colour_t *old_gram;
+    we_pfb_clip_t sv;
     int8_t y_top, y_bot;
     uint16_t tw;
     int16_t txt_x, txt_y;
-    int16_t cx0, cy0, cx1, cy1;
 
     if (text == NULL || font == NULL)
         return;
@@ -234,32 +236,13 @@ static void _stepper_draw_text_centered(we_lcd_t *lcd, const unsigned char *font
     txt_x = (int16_t)(box_x + (box_w - (int16_t)tw) / 2);
     txt_y = (int16_t)(box_y + box_h / 2 - (y_top + y_bot) / 2);
 
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
-
-    cx0 = WE_MAX(old_pfb_area.x0, box_x);
-    cy0 = WE_MAX((int16_t)old_y_start, box_y);
-    cx1 = WE_MIN(old_pfb_area.x1, (int16_t)(box_x + box_w - 1));
-    cy1 = WE_MIN((int16_t)old_y_end, (int16_t)(box_y + box_h - 1));
-
-    if (cx0 <= cx1 && cy0 <= cy1)
+    we_pfb_clip_save(lcd, &sv);
+    if (we_pfb_clip_to(lcd, &sv, box_x, box_y,
+                       (int16_t)(box_x + box_w - 1), (int16_t)(box_y + box_h - 1)))
     {
-        lcd->pfb_area.x0 = cx0;
-        lcd->pfb_area.x1 = cx1;
-        lcd->pfb_y_start = (uint16_t)cy0;
-        lcd->pfb_y_end = (uint16_t)cy1;
-        lcd->pfb_gram = old_gram + (cy0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (cx0 - old_pfb_area.x0);
-
         we_draw_string(lcd, txt_x, txt_y, font, text, color, opacity);
     }
-
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 }
 
 /**
@@ -279,16 +262,47 @@ static void _stepper_draw_cb(void *ptr)
     uint16_t r = obj->radius;
     int16_t sign_half = (int16_t)(h / 6);
     int16_t sign_thick = (int16_t)(h / 10);
+#if (WE_CFG_MONO_STYLE == 0)
     uint8_t dec_dis = _stepper_dec_disabled(obj);
     uint8_t inc_dis = _stepper_inc_disabled(obj);
     colour_t num_col;
     colour_t sc;
+#endif
 
     if (sign_thick < 2)
         sign_thick = 2;
     if (sign_half < 4)
         sign_half = 4;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：描边底框 + 三区分隔竖线，按下侧反白+挖空符号 */
+    {
+        static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
+        static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+        uint16_t zr = (r > 0U) ? (uint16_t)(r - 1U) : 0U;
+        colour_t sign_l = (obj->pressed && obj->active_side < 0) ? mono_bg : mono_fg;
+        colour_t sign_r = (obj->pressed && obj->active_side > 0) ? mono_bg : mono_fg;
+
+        we_draw_round_rect_outline_fill(lcd, x, y, (uint16_t)w, (uint16_t)h, r,
+                                        mono_fg, mono_bg, 255U);
+        if (obj->pressed && obj->active_side < 0)
+            we_draw_round_rect_analytic_fill(lcd, (int16_t)(x + 1), (int16_t)(y + 1),
+                                             (uint16_t)(bw - 1), (uint16_t)(h - 2), zr, mono_fg, 255U);
+        if (obj->pressed && obj->active_side > 0)
+            we_draw_round_rect_analytic_fill(lcd, (int16_t)(x + w - bw), (int16_t)(y + 1),
+                                             (uint16_t)(bw - 1), (uint16_t)(h - 2), zr, mono_fg, 255U);
+        we_fill_rect(lcd, (int16_t)(x + bw), (int16_t)(y + 1), 1U, (uint16_t)(h - 2), mono_fg, 255U);
+        we_fill_rect(lcd, (int16_t)(x + w - bw - 1), (int16_t)(y + 1), 1U, (uint16_t)(h - 2), mono_fg, 255U);
+
+        _stepper_draw_sign(lcd, (int16_t)(x + bw / 2), (int16_t)(y + h / 2),
+                           sign_half, sign_thick, 0U, sign_l);
+        _stepper_draw_sign(lcd, (int16_t)(x + w - bw / 2), (int16_t)(y + h / 2),
+                           sign_half, sign_thick, 1U, sign_r);
+
+        _stepper_draw_text_centered(lcd, obj->font, obj->buf, mono_fg,
+                                    (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h, 255U);
+    }
+#else
     /* 整体底框（中间数值区背景） */
     we_draw_round_rect_analytic_fill(lcd, x, y, (uint16_t)w, (uint16_t)h, r, _SP_COL_BG, 255U);
 
@@ -320,11 +334,11 @@ static void _stepper_draw_cb(void *ptr)
     _stepper_draw_sign(lcd, (int16_t)(x + w - bw / 2), (int16_t)(y + h / 2),
                        sign_half, sign_thick, 1U, sc);
 
-    /* 中间数值 */
-    _stepper_format(obj);
+    /* 中间数值（obj->buf 由值变更点预格式化） */
     num_col = obj->enabled ? _SP_COL_TEXT : _SP_COL_TEXT_DIS;
     _stepper_draw_text_centered(lcd, obj->font, obj->buf, num_col,
                                 (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h, 255U);
+#endif
 }
 
 /**
@@ -518,7 +532,7 @@ void we_stepper_obj_init(we_stepper_obj_t *obj, we_lcd_t *lcd,
     obj->pressed = 0U;
     obj->hold_cnt = 0U;
     obj->value = _stepper_clamp(obj, init_value);
-    obj->buf[0] = '\0';
+    _stepper_format(obj);
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     we_obj_invalidate((we_obj_t *)obj);
@@ -539,6 +553,7 @@ void we_stepper_set_value(we_stepper_obj_t *obj, int32_t value)
     if (nv == obj->value)
         return;
     obj->value = nv;
+    _stepper_format(obj);
     we_obj_invalidate((we_obj_t *)obj);
     if (obj->changed_cb != NULL)
         obj->changed_cb(obj, obj->value);
@@ -591,6 +606,7 @@ void we_stepper_set_range(we_stepper_obj_t *obj, int32_t min_value, int32_t max_
     if (nv != obj->value)
     {
         obj->value = nv;
+        _stepper_format(obj);
         if (obj->changed_cb != NULL)
             obj->changed_cb(obj, obj->value);
     }

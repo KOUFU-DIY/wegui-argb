@@ -46,4 +46,4 @@
 - alpha 衰减曲线可换缓动（当前线性），头部可加 1 格"亮尾"提升方向感
 
 ## 对应 demo
-- `Demo/preview/demo_spinner.c`（DEMO_ID 101：三个不同直径/颜色/速度的 spinner 并排，中间那个每 1.6s 自动 stop/start 演示启停，下方 label 显示其运行状态）
+- `Demo/preview/demo_spinner.c`（DEMO_ID 114：三个不同直径/颜色/速度的 spinner 并排，中间那个每 1.6s 自动 stop/start 演示启停，下方 label 显示其运行状态）

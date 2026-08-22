@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t arc_title;
 static we_label_obj_t arc_note;
 static we_label_obj_t arc_fps;
@@ -105,3 +107,73 @@ void we_arc_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &arc_fps, &arc_fps_timer,
                        &arc_last_frames, arc_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t arc_title;
+static we_label_obj_t arc_stat;
+static we_arc_obj_t   arc_main;
+static we_arc_obj_t   arc_sub;
+
+static uint32_t arc_ticks_ms;
+static char     arc_stat_buf[16];
+
+/**
+ * @brief 初始化圆弧控件演示场景（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ */
+void we_arc_simple_demo_init(we_lcd_t *lcd)
+{
+    arc_ticks_ms = 0U;
+    memset(arc_stat_buf, 0, sizeof(arc_stat_buf));
+
+    we_label_obj_init(&arc_title, lcd, 2, 2,
+                      "ARC", we_font_consolas_18,
+                      RGB888TODEV(236, 241, 248), 255);
+    we_label_obj_init(&arc_stat, lcd, 2, 28,
+                      "VAL 000", we_font_consolas_18,
+                      RGB888TODEV(120, 230, 205), 255);
+
+    /* 双同心弧居右，左侧留给文字 */
+    we_arc_obj_init(&arc_main, lcd, 92, 32,
+                    26, 8,
+                    WE_DEG(135), WE_DEG(405),
+                    RGB888TODEV(255, 154, 102), RGB888TODEV(50, 60, 76), 255);
+
+    we_arc_obj_init(&arc_sub, lcd, 92, 32,
+                    15, 5,
+                    WE_DEG(225), WE_DEG(495),
+                    RGB888TODEV(120, 230, 205), RGB888TODEV(30, 40, 52), 180);
+}
+
+/**
+ * @brief 圆弧演示周期更新函数（128x64 布局）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ */
+void we_arc_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t value;
+    uint8_t opacity;
+
+    if (lcd == NULL || ms_tick == 0U)
+    {
+        return;
+    }
+
+    arc_ticks_ms += ms_tick;
+
+    value = (uint8_t)(((uint32_t)(we_sin((int16_t)((arc_ticks_ms * 5U) / 100U) & 0x1FF))
+                        + 32768U) >> 8);
+    opacity = (uint8_t)(110U + (((uint32_t)(we_sin((int16_t)((arc_ticks_ms * 4U) / 100U) & 0x1FF))
+                                  + 32768U) * 110U >> 16));
+
+    we_arc_set_value(&arc_main, value);
+    we_arc_set_value(&arc_sub, (uint8_t)(255U - value));
+    we_arc_set_opacity(&arc_sub, opacity);
+
+    snprintf(arc_stat_buf, sizeof(arc_stat_buf), "VAL %03u", (unsigned)value);
+    we_label_set_text(&arc_stat, arc_stat_buf);
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

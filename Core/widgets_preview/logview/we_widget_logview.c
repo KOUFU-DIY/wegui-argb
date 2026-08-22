@@ -1,5 +1,5 @@
 #include "we_widget_logview.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 /* 滚动物理参数：无惯性无过冲档。scroll_px 语义为"距底偏移"（下拉看历史
  * 时增大），与组件"pos = press_pos - 位移"的常规方向相反，因此喂入的
@@ -22,34 +22,6 @@ static const we_scroll_cfg_t _lv_scroll_cfg = {
  * push 时跟随态钉在 0；非跟随态 scroll_px += row_h 保持视口画面不动
  *（写满覆盖最旧行时同样成立，夹紧兜底）。
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 比较两个颜色值是否相等（按当前色深逐通道比较）。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 表示相等，0 表示不等。
- */
-static uint8_t _lv_color_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#else
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _lv_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
 
 /**
  * @brief 取逻辑行的物理槽起始地址（j=0 为最旧行）。
@@ -160,7 +132,7 @@ static void _lv_draw_scrollbar(we_logview_obj_t *obj)
                                      (uint16_t)WE_LOGVIEW_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_LOGVIEW_SB_WIDTH / 2),
                                      obj->sb_color,
-                                     _lv_scale_opa(WE_LOGVIEW_SB_OPA, obj->opacity));
+                                     we_opa_scale(WE_LOGVIEW_SB_OPA, obj->opacity));
 }
 
 /**
@@ -172,14 +144,7 @@ static void _lv_draw_cb(void *ptr)
 {
     we_logview_obj_t *obj = (we_logview_obj_t *)ptr;
     we_lcd_t *lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
+    we_pfb_clip_t sv;
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -196,18 +161,12 @@ static void _lv_draw_cb(void *ptr)
         return;
 
     /* 2. PFB 窗口收窄：把行内容裁剪在面板内边距矩形内（半露行不渗出） */
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
+    we_pfb_clip_save(lcd, &sv);
 
-    clip_x0 = WE_MAX(old_pfb_area.x0, (int16_t)(obj->base.x + 2));
-    clip_y0 = WE_MAX((int16_t)old_y_start, (int16_t)(obj->base.y + WE_LOGVIEW_V_PAD));
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 3));
-    clip_y1 = WE_MIN((int16_t)old_y_end,
-                     (int16_t)(obj->base.y + obj->base.h - WE_LOGVIEW_V_PAD - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    if (we_pfb_clip_to(lcd, &sv, (int16_t)(obj->base.x + 2),
+                       (int16_t)(obj->base.y + WE_LOGVIEW_V_PAD),
+                       (int16_t)(obj->base.x + obj->base.w - 3),
+                       (int16_t)(obj->base.y + obj->base.h - WE_LOGVIEW_V_PAD - 1)))
     {
         int16_t view_y0 = (int16_t)(obj->base.y + WE_LOGVIEW_V_PAD);
         int32_t view_h = _lv_view_h(obj);
@@ -220,13 +179,6 @@ static void _lv_draw_cb(void *ptr)
 
         j = top_c / (int32_t)obj->row_h;                       /* 首个（可能半露）行 */
         iy = (int16_t)(view_y0 - (int16_t)(top_c % (int32_t)obj->row_h));
-
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (clip_x0 - old_pfb_area.x0);
 
         for (; j < (int32_t)obj->used; j++)
         {
@@ -251,10 +203,7 @@ static void _lv_draw_cb(void *ptr)
         }
     }
 
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 
     /* 3. 内容溢出时叠加右缘滚动条 */
     _lv_draw_scrollbar(obj);
@@ -511,7 +460,7 @@ void we_logview_set_colors(we_logview_obj_t *obj, colour_t bg, colour_t text)
 {
     if (obj == NULL)
         return;
-    if (_lv_color_eq(obj->bg_color, bg) && _lv_color_eq(obj->text_color, text))
+    if (we_colour_eq(obj->bg_color, bg) && we_colour_eq(obj->text_color, text))
         return;
 
     obj->bg_color = bg;

@@ -38,27 +38,17 @@ we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      0U, obj->bg_color, obj->opacity);
 
     {
-        we_area_t old_pfb_area = lcd->pfb_area;
-        uint16_t old_y_start = lcd->pfb_y_start;
-        uint16_t old_y_end = lcd->pfb_y_end;
-        colour_t *old_gram = lcd->pfb_gram;
+        we_pfb_clip_t sv;
         uint8_t old_scale = lcd->opa_scale;
 
         /* 子控件透明度级联：把本容器 opacity 乘进全局乘子（嵌套自动链乘） */
         lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
-int16_t new_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-int16_t new_y0 = WE_MAX(old_y_start, obj->base.y);
-int16_t new_x1 = WE_MIN(old_pfb_area.x1, obj->base.x + obj->base.w - 1);
-int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
-
-        if (new_x0 <= new_x1 && new_y0 <= new_y1)
+        we_pfb_clip_save(lcd, &sv);
+        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                           (int16_t)(obj->base.x + obj->base.w - 1),
+                           (int16_t)(obj->base.y + obj->base.h - 1)))
         {
             we_obj_t *child = obj->children_head;
-            lcd->pfb_area.x0 = new_x0;
-            lcd->pfb_area.x1 = new_x1;
-            lcd->pfb_y_start = new_y0;
-            lcd->pfb_y_end = new_y1;
-            lcd->pfb_gram = old_gram + (new_y0 - old_y_start) * lcd->pfb_width + (new_x0 - old_pfb_area.x0);
 
             while (child != NULL)
             {
@@ -73,10 +63,7 @@ int16_t new_y1 = WE_MIN(old_y_end, obj->base.y + obj->base.h - 1);
         }
 
         lcd->opa_scale = old_scale;
-        lcd->pfb_area = old_pfb_area;
-        lcd->pfb_y_start = old_y_start;
-        lcd->pfb_y_end = old_y_end;
-        lcd->pfb_gram = old_gram;
+        we_pfb_clip_restore(lcd, &sv);
     }
 }
 

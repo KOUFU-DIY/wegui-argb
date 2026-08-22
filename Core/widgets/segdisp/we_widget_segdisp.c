@@ -52,21 +52,6 @@ static const uint8_t _segdisp_digit_map[16] = {
 };
 
 /**
- * @brief 颜色相等比较（RGB565/RGB888），供 setter 的"值未变则跳过"守卫使用。
- * @param a 传入：颜色 A。
- * @param b 传入：颜色 B。
- * @return 1 = 相等，0 = 不等。
- */
-static __inline uint8_t _segdisp_colour_eq(colour_t a, colour_t b)
-{
-#if (LCD_DEEP == DEEP_RGB565)
-    return (uint8_t)(a.dat16 == b.dat16);
-#elif (LCD_DEEP == DEEP_RGB888)
-    return (uint8_t)(a.rgb.r == b.rgb.r && a.rgb.g == b.rgb.g && a.rgb.b == b.rgb.b);
-#endif
-}
-
-/**
  * @brief 字符解码为段码。
  * @param ch 传入：待解码字符。
  * @return 段码位图（bit0~bit6 = a~g，bit7 = dp），不支持的字符返回 0（全灭）。
@@ -513,8 +498,8 @@ void we_segdisp_set_colors(we_segdisp_obj_t *obj, colour_t on_color, colour_t of
 {
     if (obj == NULL)
         return;
-    if (_segdisp_colour_eq(obj->on_color, on_color) &&
-        _segdisp_colour_eq(obj->off_color, off_color))
+    if (we_colour_eq(obj->on_color, on_color) &&
+        we_colour_eq(obj->off_color, off_color))
         return;
     obj->on_color  = on_color;
     obj->off_color = off_color;

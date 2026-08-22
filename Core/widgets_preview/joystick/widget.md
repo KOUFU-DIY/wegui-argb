@@ -51,4 +51,4 @@
 - 十字准线在摇杆头下方被整体重绘，可预烘焙进底盘减少一次原语调用
 
 ## 对应 demo
-- `Demo/preview/demo_joystick.c`（DEMO_ID 128：左侧 110px 摇杆，右侧 120×120 围栏内小圆点按矢量速度移动（碰壁夹紧），顶部 label 实时显示 "dx,dy"，changed_cb 驱动）
+- `Demo/preview/demo_joystick.c`（DEMO_ID 111：左侧 110px 摇杆，右侧 120×120 围栏内小圆点按矢量速度移动（碰壁夹紧），顶部 label 实时显示 "dx,dy"，changed_cb 驱动）

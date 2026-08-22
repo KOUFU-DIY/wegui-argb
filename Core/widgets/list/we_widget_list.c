@@ -1,5 +1,5 @@
 #include "we_widget_list.h"
-#include "we_scroll.h"
+#include "components/we_scroll.h"
 
 /* 滚动物理参数（沿用本控件既有宏值，交给 we_scroll_t 状态机执行） */
 static const we_scroll_cfg_t _list_scroll_cfg = {
@@ -24,19 +24,6 @@ static const we_scroll_cfg_t _list_scroll_cfg = {
  * 标脏粒度：行按压/释放只标该行条带；滚动位移标内容裁剪矩形
  * （= 面板矩形，不越过面板边界）；滚动条淡出只标滚动条条带。
  * -------------------------------------------------------------------------- */
-
-/**
- * @brief 将透明度按控件整体不透明度缩放。
- * @param a 传入：原始透明度（0~255）。
- * @param opacity 传入：控件整体不透明度（0~255）。
- * @return 缩放后的透明度（0~255）。
- */
-static uint8_t _list_scale_opa(uint8_t a, uint8_t opacity)
-{
-    if (opacity == 255U)
-        return a;
-    return we_div255((uint32_t)a * (uint32_t)opacity);
-}
 
 /**
  * @brief 内容总高度（条目数 × 行高）。
@@ -317,7 +304,6 @@ static void _list_draw_scrollbar(we_list_obj_t *obj)
     we_lcd_t *lcd = obj->base.lcd;
     int32_t content_h = _list_content_h(obj);
     int32_t max_scroll = _list_max_scroll(obj);
-    int32_t sc;
     int16_t track_x;
     int16_t track_y0;
     int16_t track_h;
@@ -335,25 +321,14 @@ static void _list_draw_scrollbar(we_list_obj_t *obj)
     if (track_h < (int16_t)obj->row_h)
         track_h = obj->base.h; /* 圆角过大时退化为整高轨道 */
 
-    thumb_h = (int16_t)(((int32_t)track_h * (int32_t)obj->base.h) / content_h);
-    if (thumb_h < 8)
-        thumb_h = 8;
-    if (thumb_h > track_h)
-        thumb_h = track_h;
-
-    sc = obj->sc.pos;
-    if (sc < 0)
-        sc = 0;
-    if (sc > max_scroll)
-        sc = max_scroll;
-    thumb_y = (int16_t)(track_y0 +
-              (int32_t)(track_h - thumb_h) * sc / max_scroll);
+    we_scroll_bar_geom(track_y0, track_h, obj->base.h, content_h,
+                       obj->sc.pos, max_scroll, 8, &thumb_y, &thumb_h);
 
     we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y,
                                      (uint16_t)WE_LIST_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_LIST_SB_WIDTH / 2),
                                      obj->sb_color,
-                                     _list_scale_opa(obj->sb_alpha, obj->opacity));
+                                     we_opa_scale(obj->sb_alpha, obj->opacity));
 }
 
 /**
@@ -365,14 +340,11 @@ static void _list_draw_cb(void *ptr)
 {
     we_list_obj_t *obj = (we_list_obj_t *)ptr;
     we_lcd_t *lcd;
-    we_area_t old_pfb_area;
-    uint16_t old_y_start;
-    uint16_t old_y_end;
-    colour_t *old_gram;
-    int16_t clip_x0;
-    int16_t clip_y0;
-    int16_t clip_x1;
-    int16_t clip_y1;
+    we_pfb_clip_t sv;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj == NULL || obj->opacity == 0U)
         return;
@@ -380,27 +352,28 @@ static void _list_draw_cb(void *ptr)
     if (lcd == NULL)
         return;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 1. 单色样式面板：黑底 + 1px 白描边 */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    obj->radius, mono_fg, mono_bg, obj->opacity);
+#else
     /* 1. 面板背景（radius 为 0 时解析填充自动退化为直角矩形） */
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      obj->radius, obj->bg_color, obj->opacity);
+#endif
 
     if (obj->items == NULL || obj->item_cnt == 0U ||
         obj->row_h == 0U || obj->font == NULL)
         return;
 
     /* 2. PFB 窗口收窄：把行内容裁剪在控件矩形内（save/restore 套路） */
-    old_pfb_area = lcd->pfb_area;
-    old_y_start = lcd->pfb_y_start;
-    old_y_end = lcd->pfb_y_end;
-    old_gram = lcd->pfb_gram;
+    we_pfb_clip_save(lcd, &sv);
 
-    clip_x0 = WE_MAX(old_pfb_area.x0, obj->base.x);
-    clip_y0 = WE_MAX((int16_t)old_y_start, obj->base.y);
-    clip_x1 = WE_MIN(old_pfb_area.x1, (int16_t)(obj->base.x + obj->base.w - 1));
-    clip_y1 = WE_MIN((int16_t)old_y_end, (int16_t)(obj->base.y + obj->base.h - 1));
-
-    if (clip_x0 <= clip_x1 && clip_y0 <= clip_y1)
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                       (int16_t)(obj->base.x + obj->base.w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
     {
         /* 首个（可能半露）可见行：负向过冲时 first 会算成负/零，统一
          * 夹到 0 并由"行号反推屏幕 Y"公式覆盖过冲露出的顶部空隙。 */
@@ -412,17 +385,14 @@ static void _list_draw_cb(void *ptr)
             first = 0;
         iy = (int16_t)((int32_t)obj->base.y + first * (int32_t)obj->row_h - obj->sc.pos);
 
-        lcd->pfb_area.x0 = clip_x0;
-        lcd->pfb_area.x1 = clip_x1;
-        lcd->pfb_y_start = (uint16_t)clip_y0;
-        lcd->pfb_y_end = (uint16_t)clip_y1;
-        lcd->pfb_gram = old_gram + (clip_y0 - (int16_t)old_y_start) * lcd->pfb_width
-                                 + (clip_x0 - old_pfb_area.x0);
-
         for (idx = first; idx < (int32_t)obj->item_cnt; idx++)
         {
             const char *text = obj->items[idx];
+#if (WE_CFG_MONO_STYLE == 1)
+            colour_t tc = ((int16_t)idx == obj->pressed_row) ? mono_bg : mono_fg; /* 反白行挖空字 */
+#else
             colour_t tc = obj->text_color;
+#endif
             int16_t ty;
             int8_t y_top;
             int8_t y_bot;
@@ -457,9 +427,15 @@ static void _list_draw_cb(void *ptr)
                         if (cr > hr)
                             hr = cr;
                     }
+#if (WE_CFG_MONO_STYLE == 1)
+                    we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
+                                                     (uint16_t)(hy1 - hy0 + 1),
+                                                     hr, mono_fg, obj->opacity); /* 反白条 */
+#else
                     we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
                                                      (uint16_t)(hy1 - hy0 + 1),
                                                      hr, obj->press_color, obj->opacity);
+#endif
                 }
             }
 
@@ -470,10 +446,11 @@ static void _list_draw_cb(void *ptr)
                 ty = (int16_t)(iy + (int16_t)obj->row_h / 2 - (y_top + y_bot) / 2);
                 we_draw_string(lcd, (int16_t)(obj->base.x + WE_LIST_TEXT_PAD), ty,
                                obj->font, text, tc,
-                               _list_scale_opa(255U, obj->opacity));
+                               we_opa_scale(255U, obj->opacity));
             }
 
-            /* 行底 1px 分隔线（低透明度，最后一行不画） */
+#if (WE_CFG_MONO_STYLE == 0)
+            /* 行底 1px 分隔线（低透明度，最后一行不画；单色样式省略弱对比装饰） */
             if (idx < (int32_t)(obj->item_cnt - 1U))
             {
                 we_fill_rect(lcd,
@@ -481,17 +458,15 @@ static void _list_draw_cb(void *ptr)
                              (int16_t)(iy + (int16_t)obj->row_h - 1),
                              (uint16_t)(obj->base.w - 2 * WE_LIST_TEXT_PAD), 1U,
                              obj->sep_color,
-                             _list_scale_opa(WE_LIST_SEP_OPA, obj->opacity));
+                             we_opa_scale(WE_LIST_SEP_OPA, obj->opacity));
             }
+#endif
 
             iy = (int16_t)(iy + (int16_t)obj->row_h);
         }
     }
 
-    lcd->pfb_area = old_pfb_area;
-    lcd->pfb_y_start = old_y_start;
-    lcd->pfb_y_end = old_y_end;
-    lcd->pfb_gram = old_gram;
+    we_pfb_clip_restore(lcd, &sv);
 
     /* 3. 内容溢出时叠加右缘滚动条（透明度由淡出动画驱动） */
     _list_draw_scrollbar(obj);

@@ -33,23 +33,18 @@ if ($Dev) {
     $sources += Get-ChildItem "$Lite\*.c"
 }
 $sources += Get-ChildItem "$Repo\Core\*.c" | Where-Object Name -notlike "*_bckup.c"
+$sources += Get-ChildItem "$Repo\Core\components\*.c"
 $sources += Get-ChildItem "$Repo\Core\widgets\*\*.c" | Where-Object Name -notlike "*_bckup.c"
 $sources += Get-ChildItem "$Repo\Core\widgets_preview\*\*.c"
-$DemoSources = @(
-    "demo_showcase.c",
-    "demo_common.c", "demo_label.c", "demo_btn.c", "demo_img.c", "demo_img_alpha.c",
-    "demo_img_ex.c", "demo_arc.c", "demo_concentric_arc.c", "demo_group.c",
-    "demo_slideshow.c", "demo_checkbox.c", "demo_label_ex.c", "demo_chart.c",
-    "demo_toggle.c", "demo_progress.c", "demo_msgbox.c", "demo_flash_img.c",
-    "demo_flash_font.c", "demo_slider.c", "demo_scroll_panel.c", "demo_dropdown.c",
-    "demo_stepper.c", "demo_indicator.c", "demo_line.c", "demo_box.c", "demo_gauge.c",
-    "demo_list.c", "demo_roller.c", "demo_marquee.c", "demo_toast.c", "demo_focus.c",
-    "demo_focus2.c", "demo_imgbtn.c", "demo_segdisp.c"
-)
+# 稳定 demo 清单唯一事实源 Demo/demo_manifest.txt（新增 demo 只改清单一处；模拟器编译全部条目）
+$DemoSources = @(Get-Content "$Repo\Demo\demo_manifest.txt" | ForEach-Object {
+    ((($_ -split '#')[0].Trim()) -split '\s+')[0]
+} | Where-Object { $_ -like "*.c" })
 $sources += $DemoSources | ForEach-Object { Get-Item "$Repo\Demo\$_" }
 $sources += Get-ChildItem "$Repo\Demo\preview\*.c"
 $sources += @(
     "$Repo\tool\1.font2c\output\simli_16_2bpp.c",
+    "$Repo\tool\1.font2c\output\simsun_12_2bpp.c",
     "$Repo\tool\1.font2c\output\msyh_16_4bpp_ime.c",
     "$Repo\tool\1.font2c\output\gbsn00lp_2_16_4bpp.c",
     "$Repo\tool\2.img2c\output\c\res_img.c",
