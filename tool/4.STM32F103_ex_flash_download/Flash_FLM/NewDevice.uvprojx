@@ -338,9 +338,9 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>USE_STDPERIPH_DRIVER</Define>
+              <Define></Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\Libraries\STM32F10x_StdPeriph_Driver\inc;..\..\Libraries\CMSIS\CM3\CoreSupport;..\Flash_FLM</IncludePath>
+              <IncludePath></IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -409,101 +409,20 @@
               <FileType>1</FileType>
               <FilePath>.\FlashDev.c</FilePath>
             </File>
+            <File>
+              <FileName>FlashStk.s</FileName>
+              <FileType>2</FileType>
+              <FilePath>.\FlashStk.s</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
           <GroupName>bsp</GroupName>
           <Files>
             <File>
-              <FileName>stm32f103_flash_soft_stdspi_port.c</FileName>
+              <FileName>stm32f103_flash_spi_port.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\stm32f103_flash_soft_stdspi_port.c</FilePath>
-              <FileOption>
-                <CommonProperty>
-                  <UseCPPCompiler>2</UseCPPCompiler>
-                  <RVCTCodeConst>0</RVCTCodeConst>
-                  <RVCTZI>0</RVCTZI>
-                  <RVCTOtherData>0</RVCTOtherData>
-                  <ModuleSelection>0</ModuleSelection>
-                  <IncludeInBuild>0</IncludeInBuild>
-                  <AlwaysBuild>2</AlwaysBuild>
-                  <GenerateAssemblyFile>2</GenerateAssemblyFile>
-                  <AssembleAssemblyFile>2</AssembleAssemblyFile>
-                  <PublicsOnly>2</PublicsOnly>
-                  <StopOnExitCode>11</StopOnExitCode>
-                  <CustomArgument></CustomArgument>
-                  <IncludeLibraryModules></IncludeLibraryModules>
-                  <ComprImg>1</ComprImg>
-                </CommonProperty>
-                <FileArmAds>
-                  <Cads>
-                    <interw>2</interw>
-                    <Optim>0</Optim>
-                    <oTime>2</oTime>
-                    <SplitLS>2</SplitLS>
-                    <OneElfS>2</OneElfS>
-                    <Strict>2</Strict>
-                    <EnumInt>2</EnumInt>
-                    <PlainCh>2</PlainCh>
-                    <Ropi>2</Ropi>
-                    <Rwpi>2</Rwpi>
-                    <wLevel>0</wLevel>
-                    <uThumb>2</uThumb>
-                    <uSurpInc>2</uSurpInc>
-                    <uC99>2</uC99>
-                    <uGnu>2</uGnu>
-                    <useXO>2</useXO>
-                    <v6Lang>0</v6Lang>
-                    <v6LangP>0</v6LangP>
-                    <vShortEn>2</vShortEn>
-                    <vShortWch>2</vShortWch>
-                    <v6Lto>2</v6Lto>
-                    <v6WtE>2</v6WtE>
-                    <v6Rtti>2</v6Rtti>
-                    <VariousControls>
-                      <MiscControls></MiscControls>
-                      <Define></Define>
-                      <Undefine></Undefine>
-                      <IncludePath></IncludePath>
-                    </VariousControls>
-                  </Cads>
-                </FileArmAds>
-              </FileOption>
-            </File>
-            <File>
-              <FileName>stm32f103_flash_hard_stdspi_port.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\stm32f103_flash_hard_stdspi_port.c</FilePath>
-            </File>
-            <File>
-              <FileName>w25qxx.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\w25qxx.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f10x_gpio.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Libraries\STM32F10x_StdPeriph_Driver\src\stm32f10x_gpio.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f10x_rcc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Libraries\STM32F10x_StdPeriph_Driver\src\stm32f10x_rcc.c</FilePath>
-            </File>
-            <File>
-              <FileName>system_stm32f10x.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\system_stm32f10x.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f10x_spi.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Libraries\STM32F10x_StdPeriph_Driver\src\stm32f10x_spi.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f10x_dma.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Libraries\STM32F10x_StdPeriph_Driver\src\stm32f10x_dma.c</FilePath>
+              <FilePath>.\stm32f103_flash_spi_port.c</FilePath>
             </File>
           </Files>
         </Group>

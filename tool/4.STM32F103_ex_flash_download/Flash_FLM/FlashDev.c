@@ -1,6 +1,6 @@
 /**************************************************************************//**
  * @file     FlashDev.c
- * @brief    Flash Device Description for New Device Flash
+ * @brief    Flash Device Description for STM32F103 + W25Q128 (SPI2)
  * @version  V1.0.0
  * @date     10. January 2018
  ******************************************************************************/
@@ -21,23 +21,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
-#include "FlashOS.H"        // FlashOS Structures
+
+#include "FlashOS.h"        // FlashOS Structures
 
 
 struct FlashDevice const FlashDevice  =  {
    FLASH_DRV_VERS,             // Driver Version, do not modify!
-   "SC_STM32F103C8_W25Q128",   // Device Name 
+   "WE_STM32F103_W25Q128",     // Device Name
    EXTSPI,                     // Device Type
    0x00000000,                 // Device Start Address
-   0X01000000,                 // Device Size in Bytes (16MB)
-   256,                       // Programming Page Size
+   0x01000000,                 // Device Size in Bytes (8MB:0x00800000)(16MB:0x01000000)
+   2048,                       // Programming Page Size（调试器一次下发的字节数，算法内部按 256 字节页写入）
    0,                          // Reserved, must be 0
    0xFF,                       // Initial Content of Erased Memory
-   10000,                        // Program Page Timeout 100 Sec
-   10000,                       // Erase Sector Timeout  100 Sec
+   10000,                      // Program Page Timeout 10 Sec
+   300000,                     // Erase Sector Timeout 300 Sec（整片擦除也用这个时间，16MB 最长约 200 秒）
 
 // Specify Size and Address of Sectors
-	 0x1000, 0x000000,         // Sector Size  4kB (Sectors)
-   SECTOR_END
+   {
+      { 0x1000, 0x000000 },    // Sector Size  4kB (Sectors)
+      { SECTOR_END }
+   }
 };

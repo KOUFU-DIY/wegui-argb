@@ -1,0 +1,11 @@
+; 外挂 Flash 烧录工程的分散加载文件
+; 整个镜像就是 merged_bin.c 里的数据，按外挂 Flash 的地址空间（0 地址起，16MB）排布。
+; 资源数据 g_merged_bin_data 必须从 0 地址开始（程序里的资源地址都是相对它算的），
+; 所以用 +FIRST 把它固定在最前面，地址表 bin_addr_table 等其余内容跟在后面。
+
+LR_EXT_FLASH 0x00000000 0x01000000  {
+  ER_EXT_FLASH 0x00000000 0x01000000  {
+   * (:gdef:g_merged_bin_data, +FIRST)
+   * (+RO)
+  }
+}
