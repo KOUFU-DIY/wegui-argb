@@ -5,14 +5,12 @@
             "name": "SimLite: Debug (gcc)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/SimLite/build/wegui_lite_dev.exe",
-            "args": [
-                "33"
-            ],
+            "program": "${workspaceFolder}/SimLite/build/wegui_lite.exe",
+            "args": [],
             "cwd": "${workspaceFolder}/SimLite/build",
             "MIMode": "gdb",
             "miDebuggerPath": "D:/msys64/mingw64/bin/gdb.exe",
-            "preLaunchTask": "lite: build dev (gcc, debug)",
+            "preLaunchTask": "lite: build (gcc, debug)",
             "setupCommands": [
                 {
                     "description": "Enable pretty printing",

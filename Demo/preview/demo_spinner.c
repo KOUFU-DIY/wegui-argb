@@ -13,20 +13,27 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
+/* 三个 spinner 与启停状态为大小屏共享；标题/FPS 仅大屏版有 */
 static we_spinner_obj_t sp_small;
 static we_spinner_obj_t sp_mid;      /* 该实例周期性 stop/start */
 static we_spinner_obj_t sp_big;
-static we_label_obj_t   sp_title;
-static we_label_obj_t   sp_fps_label;
 static we_label_obj_t   sp_state_label;
+
+static uint32_t sp_toggle_acc;       /* 启停切换计时器 */
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t sp_title;
+static we_label_obj_t sp_fps_label;
 
 static uint32_t sp_fps_timer;
 static uint32_t sp_last_frames;
 static char     sp_fps_buf[16];
-static uint32_t sp_toggle_acc;       /* 启停切换计时器 */
+#endif
 
 /* 中间 spinner 启停切换周期（毫秒） */
 #define SP_TOGGLE_MS 1600U
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 spinner preview demo。
@@ -99,3 +106,64 @@ void we_spinner_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &sp_fps_label, &sp_fps_timer,
                        &sp_last_frames, sp_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 spinner preview demo（128x64 布局：三径并排 + 状态回显）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_spinner_preview_demo_init(we_lcd_t *lcd)
+{
+    sp_toggle_acc = 0U;
+
+    /* 三个 spinner 中心同高（y=32）并排：直径 24 / 32 / 40，速度渐慢 */
+    we_spinner_obj_init(&sp_small, lcd, 6, 20, 24U);
+    we_spinner_set_speed(&sp_small, 70U); /* 默认主色（单色档纯白） */
+
+    we_spinner_obj_init(&sp_mid, lcd, 44, 16, 32U);
+    we_spinner_set_colors(&sp_mid, RGB888TODEV(120, 220, 130));
+    we_spinner_set_speed(&sp_mid, 80U);
+
+    we_spinner_obj_init(&sp_big, lcd, 84, 12, 40U);
+    we_spinner_set_colors(&sp_big, RGB888TODEV(250, 170, 70));
+    we_spinner_set_speed(&sp_big, 90U);
+
+    /* 中间 spinner 的运行状态提示 */
+    we_label_obj_init(&sp_state_label, lcd, 48, 50,
+                      "RUN", we_font_consolas_18,
+                      RGB888TODEV(120, 220, 130), 255);
+}
+
+/**
+ * @brief spinner preview demo 周期更新（128x64：定时启停演示）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_spinner_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    sp_toggle_acc += ms_tick;
+    if (sp_toggle_acc >= SP_TOGGLE_MS)
+    {
+        sp_toggle_acc = 0U;
+        if (we_spinner_is_running(&sp_mid))
+        {
+            we_spinner_stop(&sp_mid);
+            we_label_set_text(&sp_state_label, "STOP");
+            we_label_set_color(&sp_state_label, RGB888TODEV(240, 130, 120));
+        }
+        else
+        {
+            we_spinner_start(&sp_mid);
+            we_label_set_text(&sp_state_label, "RUN");
+            we_label_set_color(&sp_state_label, RGB888TODEV(120, 220, 130));
+        }
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

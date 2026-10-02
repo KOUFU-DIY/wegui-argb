@@ -12,7 +12,7 @@
  */
 
 #include "we_widget_colorwheel.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -147,17 +147,17 @@ static void _cw_draw_cb(void *ptr)
     cy0 = o->base.y;
     cx1 = (int16_t)(o->base.x + o->base.w - 1);
     cy1 = (int16_t)(o->base.y + o->base.h - 1);
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
+    if (cx0 < (int16_t)lcd->clip.x0) cx0 = (int16_t)lcd->clip.x0;
+    if (cy0 < (int16_t)lcd->clip.y0) cy0 = (int16_t)lcd->clip.y0;
+    if (cx1 > (int16_t)lcd->clip.x1) cx1 = (int16_t)lcd->clip.x1;
+    if (cy1 > (int16_t)lcd->clip.y1) cy1 = (int16_t)lcd->clip.y1;
     if (cx0 > cx1 || cy0 > cy1)
         return;
 
     stride = lcd->pfb_width;
     row = lcd->pfb_gram
-        + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
+        + (uint32_t)(cy0 - (int16_t)lcd->clip.y0) * stride
+        + (uint32_t)(cx0 - (int16_t)lcd->clip.x0);
 
     for (py = cy0; py <= cy1; py++, row += stride)
     {

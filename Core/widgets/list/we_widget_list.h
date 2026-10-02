@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_LIST_H
 #define __WE_WIDGET_LIST_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_scroll.h"
 
 #ifdef __cplusplus
@@ -37,7 +37,8 @@ extern "C"
  * 交互：
  *   - PRESSED 记录命中行 + 起点 Y，命中行进入按压高亮（只标脏该行条带）；
  *   - STAY 位移超 WE_LIST_DRAG_THRESHOLD 进入拖拽滚动（取消行按压态）；
- *   - RELEASED 未拖拽且释放点仍在同一行 → 触发 clicked 回调；
+ *   - 未拖拽松手且松手点仍在同一行 → 触发 clicked 回调（按内核 CLICKED 判定，
+ *     快扫不算点击；滑行/回弹中按下只让列表停住，也不算点击）；
  *   - 拖拽松手带惯性：速度每步衰减 7/8，经中央动画引擎推进；
  *   - 快速轻扫（无 STAY，内核 SWIPE_UP/DOWN）按"总位移 / 固定时间片"
  *     估算初速度注入同一惯性动画，快扫与拖拽手感统一。
@@ -47,12 +48,11 @@ extern "C"
  *   - 滚动位移标脏内容裁剪矩形（= 面板矩形，不越过面板边界）；
  *   - 滚动条淡出只标脏右缘滚动条条带。
  *
- * 行内容经 PFB 窗口收窄裁剪在控件矩形内（scroll_panel 同款
- * save/restore 套路），半露行不会渗出控件边界。首/末行按压高亮在
- * 面板圆角带内改用同心半径（面板半径 - 内缩），不溢出直角。
+ * 行内容由内核按控件包围盒裁剪，半露行不会渗出控件边界；每个切片只画
+ * 与之相交的行。首/末行按压高亮在面板圆角带内改用同心半径（面板半径 -
+ * 内缩），不溢出直角。
  *
- * 零 malloc、渲染内环零浮点。删除前必须 we_list_obj_delete
- * （内部先摘除惯性与滚动条淡出两个动画节点再 we_obj_delete）。
+ * 零 malloc、渲染内环零浮点。删除时两个动画节点由内核一并摘链。
  * -------------------------------------------------------------------------- */
 
 /* 行内上下边距（像素）：默认行高 = 字体行高 + 2 * PAD */
@@ -158,14 +158,16 @@ typedef struct we_list_obj_t
     const unsigned char *font;  /* 字体资源（init 传入，可 set_font） */
     we_list_clicked_cb_t clicked_cb; /* 行点击回调（可为 NULL） */
     we_scroll_t sc;             /* 滚动物理状态机（拖拽/惯性/回弹；sc.pos 即滚动偏移） */
-    we_anim_t anim;             /* 惯性/回弹动画节点（归控件所有，删除前必须摘链） */
-    we_anim_t sb_anim;          /* 滚动条淡出动画节点（归控件所有，删除前必须摘链） */
+    we_anim_t anim;             /* 惯性/回弹动画节点（删除控件时由内核摘链） */
+    we_anim_t sb_anim;          /* 滚动条淡出动画节点（删除控件时由内核摘链） */
+    const char *ymid_txt;       /* 行文字竖直中线缓存：对应的文字指针（NULL = 无缓存） */
 
     /* 2 字节成员 */
     uint16_t item_cnt;          /* 条目个数 */
     uint16_t row_h;             /* 行高（像素） */
     uint16_t radius;            /* 面板圆角半径（0 = 直角） */
     int16_t pressed_row;        /* 当前按压高亮行索引，-1 = 无 */
+    int16_t click_row;          /* 已松手、等待 CLICKED 判定的行，-1 = 无 */
     uint16_t sb_idle_ms;        /* 自上次滚动以来累计的空闲毫秒 */
     colour_t bg_color;          /* 面板背景色 */
     colour_t text_color;        /* 行文字色 */
@@ -176,6 +178,7 @@ typedef struct we_list_obj_t
     /* 1 字节成员与状态位域 */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
     uint8_t sb_alpha;           /* 滚动条当前透明度（0~255），0 = 完全隐藏 */
+    int8_t ymid;                /* 行文字竖直中线缓存值 */
 } we_list_obj_t;
 
 /**
@@ -202,7 +205,8 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
  * @param count 条目个数。
  * @return 无。
  * @note 绑定后滚动复位到顶部并清除按压态；内容溢出时滚动条会短暂
- *       全显提示"此处可滚动"，随后自动渐隐；数组指针与个数均未变时直接返回。
+ *       全显提示"此处可滚动"，随后自动渐隐。数组指针与个数均未变时只重绘
+ *       （原地改写了字符串内容后再调一次即可刷新）。
  */
 void we_list_set_options(we_list_obj_t *obj,
                          const char *const *items, uint16_t count);
@@ -252,11 +256,11 @@ void we_list_set_radius(we_list_obj_t *obj, uint16_t radius);
 void we_list_set_scroll(we_list_obj_t *obj, int32_t scroll_px);
 
 /**
- * @brief 删除列表控件：先摘除惯性与滚动条淡出动画节点（we_anim_stop）再摘链。
+ * @brief 删除列表控件并从对象链表移除（惯性与滚动条淡出两个动画节点由内核一并摘链）。
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_list_obj_delete(we_list_obj_t *obj);
+static inline void we_list_obj_delete(we_list_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #ifdef __cplusplus
 }

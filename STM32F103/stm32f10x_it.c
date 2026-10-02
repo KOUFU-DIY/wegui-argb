@@ -22,7 +22,7 @@
 
 #include "stm32f10x_it.h"
 
-volatile uint8_t  g_sys_tick;
+volatile uint32_t g_sys_ms;
 volatile uint32_t g_sys_delay;
 
 /**
@@ -95,14 +95,11 @@ void PendSV_Handler(void)
 
 /**
  * @brief SysTick 中断处理函数
- * @details 每 1ms 递增系统节拍计数, 并递减软件延时计数器
+ * @details 每 1ms 递增系统毫秒计数, 并递减软件延时计数器
  */
 void SysTick_Handler(void)
 {
-    if (g_sys_tick < 255U)
-    {
-        g_sys_tick++;
-    }
+    g_sys_ms++;
     if (g_sys_delay > 0U)
     {
         g_sys_delay--;

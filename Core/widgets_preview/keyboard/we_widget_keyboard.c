@@ -11,13 +11,28 @@
 
 #include "we_widget_keyboard.h"
 #include "../textarea/we_widget_textarea.h" /* 弹层模式绑定目标输入框直接注入 */
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
 
 #define _KB_SLIDE_HIDDEN 0U /* 完全隐藏（已解除模态并摘离顶层链） */
 #define _KB_SLIDE_IN     1U /* 滑入中 */
 #define _KB_SLIDE_SHOWN  2U /* 完全展开停留 */
 #define _KB_SLIDE_OUT    3U /* 滑出中 */
+
+/* 默认调色盘宏组：单色样式（WE_CFG_MONO_STYLE=1）切白边黑底高对比盘——
+ * 面板黑、键面黑（绘制处补 1px 白描边）、按压键反白（键名挖空为黑）、
+ * 文字白；彩色档保持原深蓝盘。 */
+#if (WE_CFG_MONO_STYLE == 1)
+#define _KB_DEF_BG        RGB888TODEV(0, 0, 0)
+#define _KB_DEF_KEY       RGB888TODEV(0, 0, 0)
+#define _KB_DEF_KEY_PRESS RGB888TODEV(255, 255, 255)
+#define _KB_DEF_TEXT      RGB888TODEV(255, 255, 255)
+#else
+#define _KB_DEF_BG        RGB888TODEV(26, 32, 44)
+#define _KB_DEF_KEY       RGB888TODEV(58, 66, 82)
+#define _KB_DEF_KEY_PRESS RGB888TODEV(64, 152, 231)
+#define _KB_DEF_TEXT      RGB888TODEV(239, 243, 250)
+#endif
 
 /* 固定 4 行布局：3 行字符键 + 底行功能键 */
 #define WE_KEYBOARD_ROWS  4
@@ -349,6 +364,10 @@ static void _keyboard_draw_cb(void *ptr)
     we_lcd_t *lcd = obj->base.lcd;
     const _kb_page_t *page = _kb_cur_page(obj);
     int16_t idx;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _kb_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t _kb_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj->opacity == 0U)
         return;
@@ -370,6 +389,12 @@ static void _keyboard_draw_cb(void *ptr)
 
         we_fill_rect(lcd, obj->base.x, eb_y, (uint16_t)obj->base.w,
                      (uint16_t)WE_KEYBOARD_ECHO_H, obj->fn_color, obj->opacity);
+
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：回显条与键区同为黑底，补 1px 白分隔线区隔两带 */
+        we_fill_rect(lcd, obj->base.x, (int16_t)(eb_y + WE_KEYBOARD_ECHO_H - 1),
+                     (uint16_t)obj->base.w, 1U, _kb_mono_fg, obj->opacity);
+#endif
 
         if (_kb_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
@@ -431,8 +456,15 @@ static void _keyboard_draw_cb(void *ptr)
             draw_r = (uint16_t)(kw / 2);
         if (draw_r > (uint16_t)(kh / 2))
             draw_r = (uint16_t)(kh / 2);
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：键面统一补 1px 白描边（黑键面与黑面板否则不可辨），
+         * 按压键 bg 为反白色，描边与填充连成实心白块 */
+        we_draw_round_rect_outline_fill(lcd, kx, ky, (uint16_t)kw, (uint16_t)kh,
+                                        draw_r, _kb_mono_fg, bg, obj->opacity);
+#else
         we_draw_round_rect_analytic_fill(lcd, kx, ky, (uint16_t)kw, (uint16_t)kh,
                                          draw_r, bg, obj->opacity);
+#endif
 
         /* 键名文字（水平按测宽、垂直按有效像素区 bbox 居中）；空格键面为空白 */
         if (obj->font != NULL && label[0] != ' ')
@@ -442,12 +474,18 @@ static void _keyboard_draw_cb(void *ptr)
             int8_t y_bot;
             int16_t txt_x;
             int16_t txt_y;
+#if (WE_CFG_MONO_STYLE == 1)
+            /* 反白键挖空字：按压键名用黑字 */
+            colour_t tc = (obj->pressed && idx == obj->press_idx) ? _kb_mono_bg
+                                                                  : obj->text_color;
+#else
+            colour_t tc = obj->text_color;
+#endif
 
             we_get_text_bbox(obj->font, label, &y_top, &y_bot);
             txt_x = (int16_t)(kx + kw / 2 - (int16_t)(txt_w / 2U));
             txt_y = (int16_t)(ky + kh / 2 - (y_top + y_bot) / 2);
-            we_draw_string(lcd, txt_x, txt_y, obj->font, label,
-                           obj->text_color, obj->opacity);
+            we_draw_string(lcd, txt_x, txt_y, obj->font, label, tc, obj->opacity);
         }
     }
 
@@ -963,10 +1001,10 @@ void we_keyboard_obj_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
     obj->base.parent = NULL;
     obj->base.next = NULL;
 
-    obj->bg_color = RGB888TODEV(26, 32, 44);
-    obj->key_color = RGB888TODEV(58, 66, 82);
-    obj->key_press_color = RGB888TODEV(64, 152, 231);
-    obj->text_color = RGB888TODEV(239, 243, 250);
+    obj->bg_color = _KB_DEF_BG;
+    obj->key_color = _KB_DEF_KEY;
+    obj->key_press_color = _KB_DEF_KEY_PRESS;
+    obj->text_color = _KB_DEF_TEXT;
     _kb_update_fn_color(obj);
     if (font == NULL)
         return; /* 字体必传 */
@@ -1017,10 +1055,10 @@ void we_keyboard_popup_init(we_keyboard_obj_t *obj, we_lcd_t *lcd,
     obj->base.parent = NULL;
     obj->base.next = NULL;
 
-    obj->bg_color = RGB888TODEV(26, 32, 44);
-    obj->key_color = RGB888TODEV(58, 66, 82);
-    obj->key_press_color = RGB888TODEV(64, 152, 231);
-    obj->text_color = RGB888TODEV(239, 243, 250);
+    obj->bg_color = _KB_DEF_BG;
+    obj->key_color = _KB_DEF_KEY;
+    obj->key_press_color = _KB_DEF_KEY_PRESS;
+    obj->text_color = _KB_DEF_TEXT;
     _kb_update_fn_color(obj);
     obj->font = font;
 

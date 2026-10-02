@@ -1,5 +1,5 @@
 #include "we_widget_radio.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部辅助
@@ -339,9 +339,17 @@ void we_radio_obj_init(we_radio_obj_t *obj, we_lcd_t *lcd,
     obj->count = count;
     obj->selected = 0U;
 
+    /* 默认调色盘：单色样式切白边黑底盘（选中=白环内白芯，行底掏空由
+     * lcd 背景色承担，二值化后环/芯/字均可辨） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->ring_color = RGB888TODEV(255, 255, 255);
+    obj->sel_color = RGB888TODEV(255, 255, 255);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+#else
     obj->ring_color = RGB888TODEV(120, 135, 155);
     obj->sel_color = RGB888TODEV(50, 130, 240);
     obj->text_color = RGB888TODEV(220, 228, 238);
+#endif
     if (font == NULL)
         return; /* 字体必传 */
     obj->font = font;

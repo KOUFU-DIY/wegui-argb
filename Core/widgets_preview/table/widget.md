@@ -43,7 +43,7 @@
 - 列边界 `col_edge[]` 由权重前缀和整数比例推得并缓存
   （末列自动吸收除法余数像素），set_col_weights 时重算
 - 表头文本与数据单元格文本均按"列边界 ∩ 所在行区"做 PFB 窗口收窄
-  （save/restore `pfb_area`/`pfb_y_start`/`pfb_y_end`/`pfb_gram` 套路，
+  （`we_pfb_clip_save/_to/_restore` 套路，
   每次从进入 draw 时保存的原始现场推导，非嵌套）；数据区收窄总是
   从表头行以下开始，半露行/超宽文本都不会渗出边界
 - 数据单元格按"每列收窄一次、列内逐可见行绘制"组织，

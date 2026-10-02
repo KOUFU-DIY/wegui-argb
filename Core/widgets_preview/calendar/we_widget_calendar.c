@@ -1,5 +1,5 @@
 #include "we_widget_calendar.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * calendar —— 月视图日历（preview 孵化区）
@@ -381,11 +381,21 @@ static void _calendar_draw_cb(void *ptr)
     int16_t col;
     uint8_t day;
     uint8_t today_here;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _cal_mono_bg = RGB888_CONST(0, 0, 0); /* 反白块挖空字色 */
+    colour_t arrow_prev;
+    colour_t arrow_next;
+#endif
 
     if (obj == NULL || obj->opacity == 0U || obj->base.lcd == NULL || obj->font == NULL)
         return;
     if (!_cal_layout(obj, &cw, &rh, &ox, &oy))
         return;
+
+#if (WE_CFG_MONO_STYLE == 1)
+    arrow_prev = obj->title_color;
+    arrow_next = obj->title_color;
+#endif
 
     x0 = (int16_t)(obj->base.x + ox);
     y0 = (int16_t)(obj->base.y + oy);
@@ -395,14 +405,32 @@ static void _calendar_draw_cb(void *ptr)
     {
         int16_t zx = (obj->press_zone == _CAL_ZONE_PREV) ? x0 : (int16_t)(x0 + 5 * cw);
 
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：半透明按压块经二值化后消失，改全不透明反白 + 箭头挖空 */
+        we_draw_round_rect_analytic_fill(obj->base.lcd, (int16_t)(zx + 2), (int16_t)(y0 + 2),
+                                         (uint16_t)(2 * cw - 4), (uint16_t)(rh - 4),
+                                         (uint16_t)((rh - 4) / 2), obj->sel_bg_color,
+                                         obj->opacity);
+        if (obj->press_zone == _CAL_ZONE_PREV)
+            arrow_prev = _cal_mono_bg;
+        else
+            arrow_next = _cal_mono_bg;
+#else
         we_draw_round_rect_analytic_fill(obj->base.lcd, (int16_t)(zx + 2), (int16_t)(y0 + 2),
                                          (uint16_t)(2 * cw - 4), (uint16_t)(rh - 4),
                                          (uint16_t)((rh - 4) / 2), obj->sel_bg_color,
                                          we_opa_scale(WE_CALENDAR_PRESS_OPA, obj->opacity));
+#endif
     }
+#if (WE_CFG_MONO_STYLE == 1)
+    _cal_draw_text_center(obj, "<", x0, y0, (int16_t)(2 * cw), rh, arrow_prev);
+    _cal_draw_text_center(obj, ">", (int16_t)(x0 + 5 * cw), y0, (int16_t)(2 * cw), rh,
+                          arrow_next);
+#else
     _cal_draw_text_center(obj, "<", x0, y0, (int16_t)(2 * cw), rh, obj->title_color);
     _cal_draw_text_center(obj, ">", (int16_t)(x0 + 5 * cw), y0, (int16_t)(2 * cw), rh,
                           obj->title_color);
+#endif
     _cal_draw_text_center(obj, obj->title_buf, x0, y0, (int16_t)(7 * cw), rh, obj->title_color);
 
     /* 2. 星期表头 Su Mo Tu We Th Fr Sa */
@@ -452,20 +480,36 @@ static void _calendar_draw_cb(void *ptr)
         else if (obj->pressed &&
                  obj->press_zone == (int16_t)(_CAL_ZONE_DAY_BASE + (int16_t)day))
         {
-            /* 按压中的日期格：半透明预览块 */
+            /* 按压中的日期格：半透明预览块（单色样式改全不透明反白，
+             * 半透明块经二值化后消失） */
+#if (WE_CFG_MONO_STYLE == 1)
+            we_draw_round_rect_analytic_fill(obj->base.lcd,
+                                             (int16_t)(dx + (dw - bw) / 2),
+                                             (int16_t)(dy + (dh - bh) / 2),
+                                             (uint16_t)bw, (uint16_t)bh, br,
+                                             obj->sel_bg_color, obj->opacity);
+#else
             we_draw_round_rect_analytic_fill(obj->base.lcd,
                                              (int16_t)(dx + (dw - bw) / 2),
                                              (int16_t)(dy + (dh - bh) / 2),
                                              (uint16_t)bw, (uint16_t)bh, br,
                                              obj->sel_bg_color,
                                              we_opa_scale(WE_CALENDAR_PRESS_OPA, obj->opacity));
+#endif
         }
 
         if (today_here && day == obj->today_day)
         {
             /* 今日：圆角描边环（叠加在选中块之上仍可辨识） */
+#if (WE_CFG_MONO_STYLE == 1)
+            /* 反白选中块上的今日环换黑色，白环白底否则不可辨 */
+            _cal_draw_ring(obj, (int16_t)(dx + (dw - bw) / 2), (int16_t)(dy + (dh - bh) / 2),
+                           bw, bh, br,
+                           (day == obj->sel_day) ? _cal_mono_bg : obj->today_ring_color);
+#else
             _cal_draw_ring(obj, (int16_t)(dx + (dw - bw) / 2), (int16_t)(dy + (dh - bh) / 2),
                            bw, bh, br, obj->today_ring_color);
+#endif
         }
 
         /* 日期数字（1~31，无前导零） */
@@ -480,7 +524,17 @@ static void _calendar_draw_cb(void *ptr)
             num_buf[0] = (char)('0' + day);
             num_buf[1] = '\0';
         }
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 反白块（选中日/按压日）上的数字挖空为黑 */
+        _cal_draw_text_center(obj, num_buf, dx, dy, dw, dh,
+                              (day == obj->sel_day ||
+                               (obj->pressed &&
+                                obj->press_zone == (int16_t)(_CAL_ZONE_DAY_BASE + (int16_t)day)))
+                                  ? _cal_mono_bg
+                                  : obj->day_color);
+#else
         _cal_draw_text_center(obj, num_buf, dx, dy, dw, dh, obj->day_color);
+#endif
     }
 }
 
@@ -721,11 +775,20 @@ void we_calendar_obj_init(we_calendar_obj_t *obj, we_lcd_t *lcd,
     if (font == NULL)
         return; /* 字体必传 */
     obj->font = font;
+    /* 默认调色盘：单色样式切白边黑底盘（选中块反白、数字挖空在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->title_color = RGB888TODEV(255, 255, 255);
+    obj->weekday_color = RGB888TODEV(255, 255, 255);
+    obj->day_color = RGB888TODEV(255, 255, 255);
+    obj->sel_bg_color = RGB888TODEV(255, 255, 255);
+    obj->today_ring_color = RGB888TODEV(255, 255, 255);
+#else
     obj->title_color = RGB888TODEV(236, 241, 248);
     obj->weekday_color = RGB888TODEV(130, 148, 176);
     obj->day_color = RGB888TODEV(214, 221, 233);
     obj->sel_bg_color = RGB888TODEV(56, 128, 220);
     obj->today_ring_color = RGB888TODEV(120, 230, 205);
+#endif
     obj->opacity = 255U;
 
     obj->changed_cb = NULL;

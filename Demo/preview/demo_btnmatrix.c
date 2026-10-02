@@ -16,15 +16,20 @@
 /* 回显缓冲上限（含结尾 0），写满清空重来 */
 #define BM_ECHO_MAX 14U
 
-static we_label_obj_t     bm_title;
-static we_label_obj_t     bm_fps_label;
+/* 键矩阵/回显与点击回调为大小屏共享；标题/FPS 仅大屏版有 */
 static we_label_obj_t     bm_echo;
 static we_btnmatrix_obj_t bm_pad;
+
+static char bm_echo_buf[BM_ECHO_MAX];
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t bm_title;
+static we_label_obj_t bm_fps_label;
 
 static uint32_t bm_fps_timer;
 static uint32_t bm_last_frames;
 static char     bm_fps_buf[16];
-static char     bm_echo_buf[BM_ECHO_MAX];
+#endif
 
 /* 键名数组（行优先 4x3）：demo 静态持有，控件只存指针 */
 static const char *const bm_keys[12] = {
@@ -63,6 +68,8 @@ static void _bm_key_clicked(void *bm, uint8_t key_idx, const char *label)
 
     we_label_set_text(&bm_echo, bm_echo_buf);
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 btnmatrix preview demo
@@ -109,3 +116,38 @@ void we_btnmatrix_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &bm_fps_label, &bm_fps_timer,
                        &bm_last_frames, bm_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 btnmatrix preview demo（128x64 布局：3x3 九宫格 + 顶部回显）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_btnmatrix_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(bm_echo_buf, 0, sizeof(bm_echo_buf));
+
+    /* 顶部回显：初始为空缓冲，点击后实时刷新 */
+    we_label_obj_init(&bm_echo, lcd, 2, 0,
+                      bm_echo_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    /* 3x3 九宫格（同一键名数组取前 9 键）：格高 (50-2*5)/3=13 */
+    we_btnmatrix_obj_init(&bm_pad, lcd, 0, 14, 128, 50, bm_keys, 3U, 3U, we_font_consolas_18);
+    we_btnmatrix_set_clicked_cb(&bm_pad, _bm_key_clicked);
+}
+
+/**
+ * @brief btnmatrix preview demo 周期更新（交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_btnmatrix_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

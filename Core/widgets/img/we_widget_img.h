@@ -2,7 +2,7 @@
 #define WE_WIDGET_IMG_H
 
 #include "image_res.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 typedef struct {
     we_obj_t base;
@@ -20,7 +20,7 @@ typedef struct {
  */
 static inline void we_img_obj_set_pos(we_img_obj_t *img_obj, int16_t x, int16_t y)
 {
-we_obj_set_pos((we_obj_t *)img_obj, x, y);
+    we_obj_set_pos((we_obj_t *)img_obj, x, y);
 }
 
 /**
@@ -30,7 +30,7 @@ we_obj_set_pos((we_obj_t *)img_obj, x, y);
  */
 static inline void we_img_obj_delete(we_img_obj_t *img_obj)
 {
-we_obj_delete((we_obj_t *)img_obj);
+    we_obj_delete((we_obj_t *)img_obj);
 }
 
 /**
@@ -46,12 +46,7 @@ we_obj_delete((we_obj_t *)img_obj);
 void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, const uint8_t *img, uint8_t opacity);
 
 /* --------------------------------------------------------------------------
- * 图片控件透明度修改
- *
- * 这里改成头文件内联，原因是：
- * 1. 逻辑非常短
- * 2. 当前工程里调用点很少
- * 3. 比单独保留一个外部函数实体更有机会省 ROM
+ * 平凡 setter 放在头文件内联：逻辑短、调用点少，比单独保留函数实体更省 ROM
  * -------------------------------------------------------------------------- */
 
 /**
@@ -62,17 +57,11 @@ void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, con
  */
 static inline void we_img_obj_set_opacity(we_img_obj_t *obj, uint8_t new_opacity)
 {
-    if (obj == NULL || obj->base.lcd == NULL)
-    {
+    if (obj == NULL || obj->base.lcd == NULL || obj->opacity == new_opacity)
         return;
-    }
-    if (obj->opacity == new_opacity)
-    {
-        return;
-    }
 
     obj->opacity = new_opacity;
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -83,50 +72,12 @@ we_obj_invalidate((we_obj_t *)obj);
  */
 static inline void we_img_obj_set_color(we_img_obj_t *obj, colour_t new_color)
 {
-    if (obj == NULL || obj->base.lcd == NULL)
-    {
+    if (obj == NULL || obj->base.lcd == NULL || we_colour_eq(obj->color, new_color))
         return;
-    }
-#if (LCD_DEEP == DEEP_RGB565)
-    if (obj->color.dat16 == new_color.dat16)
-    {
-        return;
-    }
-#elif (LCD_DEEP == DEEP_RGB888)
-    if (obj->color.rgb.r == new_color.rgb.r && obj->color.rgb.g == new_color.rgb.g &&
-        obj->color.rgb.b == new_color.rgb.b)
-    {
-        return;
-    }
-#endif
 
     obj->color = new_color;
     if (obj->opacity > 0)
-    {
         we_obj_invalidate((we_obj_t *)obj);
-    }
-}
-
-/* --------------------------------------------------------------------------
- * 主动触发图片控件绘制
- *
- * 当前仓库里没有实际调用这个接口，因此也收成头文件内联。
- * 如果后面确实有模块要主动调 draw_cb，这里仍然可以继续保留兼容。
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 执行该控件的绘制流程。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static inline void we_img_obj_draw(we_img_obj_t *obj)
-{
-    if (obj == NULL || obj->base.class_p == NULL || obj->base.class_p->draw_cb == NULL)
-    {
-        return;
-    }
-
-    obj->base.class_p->draw_cb(obj);
 }
 
 #endif

@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_TEXTAREA_H
 #define __WE_WIDGET_TEXTAREA_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 单行输入框控件（textarea）—— preview 孵化区实验控件

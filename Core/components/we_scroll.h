@@ -1,7 +1,7 @@
 #ifndef WE_SCROLL_H
 #define WE_SCROLL_H
 
-#include "we_gui_driver.h"
+#include "we_types.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -12,10 +12,10 @@ extern "C"
  * 可嵌入单轴滚动物理组件
  *
  * 把 list/menu/table/logview/dropdown 等控件里逐份手写的同一套滚动物理
- * （拖拽跟手 / 橡皮筋越界 / 惯性 7/8 衰减 / 回弹 / 无 STAY 快扫测速 /
- * 滚动条空闲淡出）收敛为一份纯状态机。组件不做任何绘制、不标脏、不挂
- * 动画节点：控件把触摸序列喂进来，读回 pos 变化后自行提交（各控件的
- * 精细标脏策略不变），动画节点仍归控件所有（删除契约不变）。
+ * （拖拽跟手 / 橡皮筋越界 / 惯性 7/8 衰减 / 回弹 / 无 STAY 快扫测速）
+ * 收敛为一份纯状态机，外加滚动条滑块几何计算。组件不做任何绘制、不标脏、
+ * 不挂动画节点：控件把触摸序列喂进来，读回 pos 变化后自行提交（各控件的
+ * 精细标脏策略不变），动画节点仍内嵌在控件里。
  *
  * 方向约定：c 为主轴触摸坐标（垂直滚动传 y）；pos 正向 = 内容向坐标负
  * 方向滚出（与各控件现行 scroll_px 语义一致：手指下移 → pos 减小）。
@@ -94,6 +94,39 @@ uint8_t we_scroll_anim_step(we_scroll_t *sc, const we_scroll_cfg_t *cfg,
  * @return 非 0 = pos 有变化。
  */
 uint8_t we_scroll_set(we_scroll_t *sc, int32_t pos, int32_t max_scroll);
+
+/**
+ * @brief 滚动条滑块几何：滑块高 = 轨道高 × 视口高/内容高，位置按滚动比例落轨
+ * @param track_y0 传入：轨道顶部 Y（屏幕绝对坐标）
+ * @param track_h 传入：轨道高度（像素）
+ * @param view_h 传入：视口高度（像素）
+ * @param content_h 传入：内容总高度（像素，调用方保证 > 0）
+ * @param scroll 传入：当前滚动量（自动夹紧到 [0, max_scroll]）
+ * @param max_scroll 传入：最大滚动量（调用方保证 > 0）
+ * @param min_h 传入：滑块最小高度（像素）
+ * @param thumb_y 传出：滑块顶部 Y
+ * @param thumb_h 传出：滑块高度
+ * @return 无
+ */
+static __inline void we_scroll_bar_geom(int16_t track_y0, int16_t track_h,
+                                        int32_t view_h, int32_t content_h,
+                                        int32_t scroll, int32_t max_scroll,
+                                        int16_t min_h,
+                                        int16_t *thumb_y, int16_t *thumb_h)
+{
+    int16_t th = (int16_t)(((int32_t)track_h * view_h) / content_h);
+
+    if (th < min_h)
+        th = min_h;
+    if (th > track_h)
+        th = track_h;
+    if (scroll < 0)
+        scroll = 0;
+    if (scroll > max_scroll)
+        scroll = max_scroll;
+    *thumb_h = th;
+    *thumb_y = (int16_t)(track_y0 + (int32_t)(track_h - th) * scroll / max_scroll);
+}
 
 #ifdef __cplusplus
 }

@@ -30,7 +30,7 @@
  */
 
 #include "we_widget_mask_group.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* 切角边框的内轮廓收缩系数（与 box 保持一致）：
  * 45° 切角若同样减 bw，对角段的垂直厚度只有 bw/√2（视觉偏细）。
@@ -156,6 +156,8 @@ static void _mg_build_geo(const we_mask_group_obj_t *obj, _mg_geo_t *g)
  * @note 投影 p(x,y) = cos·(x-x0) + sin·(y-y0)（Q15），alpha 沿全矩形投影
  *       范围从 a0 线性过渡到 a1；步进用 int64 除法一次算好（Q16），
  *       内环每像素一次加法 + 混色。m=255 保留内容（跳过写入）。
+ *       起点值从控件左上角按"行列偏移 × 步进"推出，每个像素的 alpha 只取决于
+ *       它的屏幕坐标，与切片高度、脏矩形的切法无关。
  */
 static void _mg_pass_gradient(const we_mask_group_obj_t *obj,
                               int16_t rx0, int16_t ry0, int16_t rx1, int16_t ry1)
@@ -181,18 +183,17 @@ static void _mg_pass_gradient(const we_mask_group_obj_t *obj,
 
         if (span > 0 && da != 0)
         {
-            int32_t p00 = c * (int32_t)(rx0 - obj->base.x) + s * (int32_t)(ry0 - obj->base.y);
-
             step_x = (int32_t)((((int64_t)da * c) << 16) / span);
             step_y = (int32_t)((((int64_t)da * s) << 16) / span);
-            acc_row += (int32_t)((((int64_t)da * (p00 - pmin)) << 16) / span);
+            acc_row += (int32_t)((((int64_t)da * (-pmin)) << 16) / span) /* 控件左上角的值 */
+                     + (int32_t)(rx0 - obj->base.x) * step_x + (int32_t)(ry0 - obj->base.y) * step_y;
         }
     }
 
     stride = lcd->pfb_width;
     row = lcd->pfb_gram
-        + (uint32_t)(ry0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(rx0 - (int16_t)lcd->pfb_area.x0);
+        + (uint32_t)(ry0 - (int16_t)lcd->clip.y0) * stride
+        + (uint32_t)(rx0 - (int16_t)lcd->clip.x0);
 
     for (py = ry0; py <= ry1; py++, row += stride, acc_row += step_y)
     {
@@ -252,17 +253,17 @@ static void _mg_corner_round(const we_mask_group_obj_t *obj, const _mg_geo_t *g,
            ? g->y : (int16_t)(y1 - (int16_t)r + 1);
     has_in = (uint8_t)((g->bw > 0U) && (g->wi > 0) && (g->hi > 0));
 
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
+    if (cx0 < (int16_t)lcd->clip.x0) cx0 = (int16_t)lcd->clip.x0;
+    if (cy0 < (int16_t)lcd->clip.y0) cy0 = (int16_t)lcd->clip.y0;
+    if (cx1 > (int16_t)lcd->clip.x1) cx1 = (int16_t)lcd->clip.x1;
+    if (cy1 > (int16_t)lcd->clip.y1) cy1 = (int16_t)lcd->clip.y1;
     if (cx0 > cx1 || cy0 > cy1)
         return;
 
     stride = lcd->pfb_width;
     row = lcd->pfb_gram
-        + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
+        + (uint32_t)(cy0 - (int16_t)lcd->clip.y0) * stride
+        + (uint32_t)(cx0 - (int16_t)lcd->clip.x0);
 
     for (py = cy0; py <= cy1; py++, row += stride)
     {
@@ -398,17 +399,17 @@ static void _mg_corner_chamfer(const we_mask_group_obj_t *obj, const _mg_geo_t *
     uint16_t stride;
     colour_t *row;
 
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
+    if (cx0 < (int16_t)lcd->clip.x0) cx0 = (int16_t)lcd->clip.x0;
+    if (cy0 < (int16_t)lcd->clip.y0) cy0 = (int16_t)lcd->clip.y0;
+    if (cx1 > (int16_t)lcd->clip.x1) cx1 = (int16_t)lcd->clip.x1;
+    if (cy1 > (int16_t)lcd->clip.y1) cy1 = (int16_t)lcd->clip.y1;
     if (cx0 > cx1 || cy0 > cy1)
         return;
 
     stride = lcd->pfb_width;
     row = lcd->pfb_gram
-        + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
+        + (uint32_t)(cy0 - (int16_t)lcd->clip.y0) * stride
+        + (uint32_t)(cx0 - (int16_t)lcd->clip.x0);
 
     for (py = cy0; py <= cy1; py++, row += stride)
     {
@@ -498,7 +499,7 @@ static void _mg_corner_chamfer(const we_mask_group_obj_t *obj, const _mg_geo_t *
  * @brief 对（容器 ∩ 当前 PFB 条带）区域执行蒙版合成。
  * @param obj 控件对象指针。
  * @return 无。
- * @note 调用时 PFB 窗口必须已恢复为进入容器前的状态。
+ * @note 调用时窗口为本容器包围盒（内核在子控件画完后恢复）。
  *       顺序：渐变 pass（内容渐隐）→ 边框直条 → 四角合成。
  *       全部几何均为绝对坐标纯函数，脏矩形局部重绘可无缝拼接。
  */
@@ -523,10 +524,10 @@ static void _mask_group_apply_mask(we_mask_group_obj_t *obj)
     y1 = (int16_t)(g.y + g.h - 1);
 
     /* 与当前 PFB 条带求交 */
-    rx0 = WE_MAX((int16_t)lcd->pfb_area.x0, g.x);
-    ry0 = WE_MAX((int16_t)lcd->pfb_y_start, g.y);
-    rx1 = WE_MIN((int16_t)lcd->pfb_area.x1, x1);
-    ry1 = WE_MIN((int16_t)lcd->pfb_y_end, y1);
+    rx0 = WE_MAX((int16_t)lcd->clip.x0, g.x);
+    ry0 = WE_MAX((int16_t)lcd->clip.y0, g.y);
+    rx1 = WE_MIN((int16_t)lcd->clip.x1, x1);
+    ry1 = WE_MIN((int16_t)lcd->clip.y1, y1);
     if (rx0 > rx1 || ry0 > ry1)
         return;
 
@@ -590,53 +591,30 @@ static void _mask_group_apply_mask(we_mask_group_obj_t *obj)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件绘制回调：子控件阶段（PFB 收窄 + 透明度级联）+ 蒙版后处理阶段。
+ * @brief 子控件区：整个包围盒，透明度随本容器级联（0 = 子树不画不命中）。
+ * @param ptr 回调透传对象指针。
+ * @param area 子控件区（默认已是包围盒，这里不改）。
+ * @return 子控件级联透明度。
+ */
+static uint8_t _mask_group_content_cb(void *ptr, we_rect_t *area)
+{
+    (void)area;
+    return ((we_mask_group_obj_t *)ptr)->opacity;
+}
+
+/**
+ * @brief 子控件画完后的蒙版后处理：圆角裁剪 + 渐变（radius=0 且无渐变时内部直接返回）。
  * @param ptr 回调透传对象指针。
  * @return 无。
  */
-static void _mask_group_draw_cb(void *ptr)
+static void _mask_group_draw_post_cb(void *ptr)
 {
     we_mask_group_obj_t *obj = (we_mask_group_obj_t *)ptr;
-    we_lcd_t *lcd = obj->base.lcd;
 
     if (obj->opacity == 0U)
         return;
-
-    {
-        we_pfb_clip_t sv;
-        uint8_t old_scale = lcd->opa_scale;
-
-        /* 子控件透明度级联：把本容器 opacity 乘进全局乘子（嵌套自动链乘） */
-        lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
-
-        we_pfb_clip_save(lcd, &sv);
-        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                           (int16_t)(obj->base.x + obj->base.w - 1),
-                           (int16_t)(obj->base.y + obj->base.h - 1)))
-        {
-            we_obj_t *child = obj->children_head;
-
-            while (child != NULL)
-            {
-                if (child->class_p && child->class_p->draw_cb &&
-                    (child->x + child->w > lcd->pfb_area.x0) && (child->x <= lcd->pfb_area.x1) &&
-                    (child->y + child->h > (int16_t)lcd->pfb_y_start) &&
-                    (child->y <= (int16_t)lcd->pfb_y_end))
-                {
-                    child->class_p->draw_cb(child);
-                }
-                child = child->next;
-            }
-        }
-
-        lcd->opa_scale = old_scale;
-        we_pfb_clip_restore(lcd, &sv);
-    }
-
-    /* 蒙版后处理：圆角裁剪 + 渐变（radius=0 且无渐变时内部直接返回） */
     _mask_group_apply_mask(obj);
 }
-
 
 /**
  * @brief 容器事件回调：按压时锁定子控件，后续触摸序列事件按序转发（同 group）。
@@ -684,9 +662,11 @@ void we_mask_group_obj_init(we_mask_group_obj_t *obj, we_lcd_t *lcd,
                             int16_t x, int16_t y, int16_t w, int16_t h)
 {
     static const we_class_t _mask_group_class = {
-        .draw_cb = _mask_group_draw_cb,
+        .draw_cb = NULL, /* 自身无背景：子控件由内核绘制，蒙版在 draw_post_cb 里合成 */
         .event_cb = _mask_group_event_cb,
         .set_pos_cb = _mask_group_set_pos_cb,
+        .content_cb = _mask_group_content_cb,
+        .draw_post_cb = _mask_group_draw_post_cb,
         /* 仅结构位：删除/改挂需要走 children_head；焦点暂不下钻蒙版容器
          * （子控件可能被蒙版裁掉，光标会画到看不见的地方）。 */
         .class_flags = WE_CLASS_FLAG_CHILD_OWNER

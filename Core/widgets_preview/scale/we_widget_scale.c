@@ -9,7 +9,7 @@
  */
 
 #include "we_widget_scale.h"
-#include "we_render.h" /* 公共微助手 */
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
@@ -425,9 +425,17 @@ void we_scale_obj_init(we_scale_obj_t *obj, we_lcd_t *lcd,
     obj->minor_div  = 4U;
 
     {
+        /* 默认调色盘：单色样式切全白（刻度线/数字/指针在黑底上同白，
+         * 二值化后仍可辨；指针盖在刻度上靠形状区分，无需异色） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t line = RGB888_CONST(255, 255, 255);
+        colour_t text = RGB888_CONST(255, 255, 255);
+        colour_t ptr  = RGB888_CONST(255, 255, 255);
+#else
         colour_t line = RGB888_CONST(150, 168, 196);
         colour_t text = RGB888_CONST(196, 205, 220);
         colour_t ptr  = RGB888_CONST(255, 106, 90);
+#endif
         obj->line_color    = line;
         obj->text_color    = text;
         obj->pointer_color = ptr;

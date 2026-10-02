@@ -1,5 +1,5 @@
 #include "we_widget_hold_btn.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * hold_btn —— 长按确认按钮（preview 孵化区）
@@ -23,7 +23,9 @@
 /* 已触发态核心圆向环亮色靠拢的混合量（常驻点亮） */
 #define _HB_LIT_BLEND 110U
 
-static const colour_t _hb_white = RGB888_CONST(255, 255, 255);
+#if (WE_CFG_MONO_STYLE == 0)
+static const colour_t _hb_white = RGB888_CONST(255, 255, 255); /* 单色档不用混色，裁掉防未引用告警 */
+#endif
 
 /**
  * @brief 触发充满：置锁定态、点燃闪亮反馈并回调一次。
@@ -210,15 +212,39 @@ static void _hb_draw_cb(void *ptr)
         int16_t yi = (int16_t)(cy + ((sa * ri) >> 15));
         int16_t xo = (int16_t)(cx + ((ca * ro) >> 15));
         int16_t yo = (int16_t)(cy + ((sa * ro) >> 15));
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：暗轨道段经二值化后消失，直接跳过（环随充能逐段出现） */
+        uint8_t seg_opa = obj->opacity;
+
+        if (seg >= lit_cnt)
+            continue;
+#else
         uint8_t seg_opa = (seg < lit_cnt)
                         ? obj->opacity
                         : we_opa_scale(WE_HOLD_BTN_TRACK_OPA, obj->opacity);
+#endif
 
         we_draw_line_round(lcd, xi, yi, xo, yo, (uint8_t)lw,
                            obj->ring_color, seg_opa);
     }
 
     /* 2. 核心实心圆：底色 -> 已触发常亮 -> 闪亮白光 -> 按压增亮 */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑芯盘白描边，触发/闪亮反白（标签挖空为黑）；
+     * 中间灰阶混色经二值化后失真，直接二值切换 */
+    core_color = (obj->triggered || obj->flash > 0U)
+                     ? obj->ring_color
+                     : obj->bg_color;
+    we_draw_round_rect_outline_fill(lcd, (int16_t)(cx - core_r), (int16_t)(cy - core_r),
+                                    (uint16_t)(core_r * 2), (uint16_t)(core_r * 2),
+                                    (uint16_t)core_r, obj->ring_color, core_color,
+                                    obj->opacity);
+
+    /* 3. 居中标签（PFB 收窄裁剪）：反白芯盘上挖空为底色 */
+    _hb_draw_label_clipped(obj, (obj->triggered || obj->flash > 0U)
+                                    ? obj->bg_color
+                                    : obj->text_color);
+#else
     core_color = obj->bg_color;
     if (obj->triggered)
         core_color = we_colour_blend(obj->ring_color, core_color, _HB_LIT_BLEND);
@@ -236,6 +262,7 @@ static void _hb_draw_cb(void *ptr)
 
     /* 3. 居中标签（PFB 收窄裁剪） */
     _hb_draw_label_clipped(obj, obj->text_color);
+#endif
 }
 
 /**
@@ -320,9 +347,16 @@ void we_hold_btn_obj_init(we_hold_btn_obj_t *obj, we_lcd_t *lcd,
     obj->progress = 0U;
     obj->flash = 0U;
 
+    /* 默认调色盘：单色样式切白边黑底盘（芯盘描边/触发反白在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->bg_color = RGB888TODEV(0, 0, 0);
+    obj->ring_color = RGB888TODEV(255, 255, 255);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bg_color = RGB888TODEV(44, 58, 82);      /* 深蓝底 */
     obj->ring_color = RGB888TODEV(86, 205, 255);  /* 亮青环 */
     obj->text_color = RGB888TODEV(238, 243, 250); /* 近白文字 */
+#endif
 
     obj->triggered_cb = NULL;
 

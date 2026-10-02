@@ -13,7 +13,7 @@
 ## 关键 API
 - `we_imgbtn_obj_init(obj, lcd, x, y, img_normal, img_pressed, clicked_cb)` ——
   点击回调直接在末参传入（btn 同款范式）；`img_pressed` 传 NULL 时按压视觉 =
-  常态图叠半透明黑变暗；宽高自动取自资源头
+  常态图叠半透明黑变暗；宽高自动取两张图资源头里的较大者
 - `we_imgbtn_set_imgs(obj, img_normal, img_pressed)` —— 运行时换图（播放/暂停
   这类切图按钮）：校验通过才整体生效，同步刷新宽高并标脏新旧区域
 - `we_imgbtn_set_color(obj, color)` —— A1/A2/A4/A8 透明位图的前景色（默认白，
@@ -26,7 +26,7 @@
 
 ## 支持的图片格式
 与 `img` 控件完全一致——两者共用渲染层的同一份分发表
-（`we_img_render_auto` / `we_img_format_supported`，见 `Core/we_render.c`）：
+（`we_img_render_auto` / `we_img_format_supported`，见 `Core/we_image.c`）：
 
 | 格式 | 说明 |
 | --- | --- |
@@ -72,12 +72,16 @@ DEMO_ID 32 单独编译：**ROM 35.8 KB / RAM 5.93 KB**（口径同 README 逐 d
   却能点"的隐形按钮；之后用 `set_imgs` 换成合法资源即恢复可用
 - 换图只能走 `we_imgbtn_set_imgs`；**不要对已挂链的对象重复调用 `obj_init`**
   （会把对象再次挂链，形成自环导致遍历死循环）
-- 两张图建议同尺寸：命中与重绘均按 `img_normal` 的包围盒进行
+- 两张图建议同尺寸：尺寸不同时包围盒取两者的较大者，两张图都从左上角对齐绘制，较小的图周围留空也算按钮范围
 - 不透明图的按压叠黑遮罩是整块矩形，不跟随图片内的圆角轮廓
 
-## 毕业前需优化
-- 双图尺寸不一致时按各自尺寸标脏（当前统一按常态图包围盒）
-- 可选增补：disabled 态（灰化）、长按重复触发（复用 STAY，参考 stepper）
+## 已完成的毕业优化
+- 包围盒取两张图资源头里的较大者（原先只按常态图，按压态图更大时被内核按包围盒裁掉）
+- 容器透明度级联后 <= 5 时直接返回（图与叠黑都画不出，连解码也省掉）
+- 颜色比较用 `we_colour_eq`（GRAY8 下也能去重）；头文件里的格式说明补全索引QOI_MASK 与 ARGB8565 索引 QOI
+
+## 后续可选
+- disabled 态（灰化）、长按重复触发（复用 STAY，参考 stepper）
 - 不透明图的按压叠黑仍是整块矩形，圆角/异形图标边缘会露出方角
 
 ## 对应 demo

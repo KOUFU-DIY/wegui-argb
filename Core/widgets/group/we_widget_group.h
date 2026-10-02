@@ -1,7 +1,7 @@
 #ifndef WE_WIDGET_GROUP_H
 #define WE_WIDGET_GROUP_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -32,11 +32,11 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
                        colour_t bg_color, uint8_t opacity);
 
 /**
- * @brief 释放控件运行时状态并从任务系统注销。
+ * @brief 删除组容器：子控件由 we_obj_delete 的 CHILD_OWNER 后序递归一并删除。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
-void we_group_obj_delete(we_group_obj_t *obj);
+static inline void we_group_obj_delete(we_group_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 /**
  * @brief 将子控件加入组容器并建立父子关系。
@@ -47,10 +47,11 @@ void we_group_obj_delete(we_group_obj_t *obj);
 void we_group_add_child(we_group_obj_t *obj, we_obj_t *child);
 
 /**
- * @brief 将子控件从组容器中移除。
+ * @brief 将子控件从组容器中移除（擦掉屏上像素并摘链，绝对坐标不变）。
  * @param obj 目标控件对象指针。
  * @param child 需要从分组中移除的子控件对象。
  * @return 无。
+ * @note 摘下的控件不再绘制，要继续显示需由调用方重新挂回。
  */
 void we_group_remove_child(we_group_obj_t *obj, we_obj_t *child);
 
@@ -81,6 +82,33 @@ void we_group_shift_children(we_group_obj_t *obj, int16_t dx, int16_t dy, uint8_
  * @return 无。
  */
 void we_group_set_opacity(we_group_obj_t *obj, uint8_t opacity);
+
+/* 以下三个类回调供内嵌 we_group_obj_t 作首成员的容器控件（如 slideshow）
+ * 直接填进自己的类描述符：纯色直角背景、子控件区 = 包围盒、移动时带子控件平移。 */
+
+/**
+ * @brief 组容器绘制回调：画纯色直角背景。
+ * @param ptr 控件对象指针（前缀为 we_group_obj_t）。
+ * @return 无。
+ */
+void we_group_draw_cb(void *ptr);
+
+/**
+ * @brief 组容器子控件区回调：整个包围盒，返回本容器透明度作级联。
+ * @param ptr 控件对象指针（前缀为 we_group_obj_t）。
+ * @param area 子控件区（不改）。
+ * @return 子控件级联透明度（0 = 子树不画不命中）。
+ */
+uint8_t we_group_content_cb(void *ptr, we_rect_t *area);
+
+/**
+ * @brief 组容器移动回调：外框与全部子控件一起平移，只标曝光条带。
+ * @param ptr 控件对象指针（前缀为 we_group_obj_t）。
+ * @param new_x 新的左上角 X 坐标。
+ * @param new_y 新的左上角 Y 坐标。
+ * @return 无。
+ */
+void we_group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y);
 
 #ifdef __cplusplus
 }

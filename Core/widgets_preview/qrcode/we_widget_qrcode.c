@@ -1,5 +1,5 @@
 #include "we_widget_qrcode.h"
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------------
@@ -185,8 +185,14 @@ void we_qrcode_obj_init(we_qrcode_obj_t *obj, we_lcd_t *lcd,
     obj->text[0] = '\0';
     memset(obj->bits, 0, sizeof(obj->bits));
 
+    /* 默认调色盘：单色样式切纯黑码/纯白底（不依赖端口阈值即为标准黑白码） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->dark_color = RGB888TODEV(0, 0, 0);
+    obj->light_color = RGB888TODEV(255, 255, 255);
+#else
     obj->dark_color = RGB888TODEV(18, 20, 26);    /* 近黑码色 */
     obj->light_color = RGB888TODEV(240, 243, 248); /* 近白底色 */
+#endif
 
     /* 初始按版本 1 占位尺寸；set_text 成功后自动改为实际版本尺寸 */
     obj->base.w = _qrcode_px_size(obj, 21U);

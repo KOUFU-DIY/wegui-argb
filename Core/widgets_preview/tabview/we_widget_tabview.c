@@ -1,5 +1,5 @@
 #include "we_widget_tabview.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部辅助
@@ -160,15 +160,27 @@ static void _tabview_draw_cb(void *ptr)
     int16_t hl_h;
     colour_t dim_text;
     int16_t i;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _tv_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t _tv_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj->opacity == 0U || obj->base.w <= 0 || obj->base.h <= 0)
         return;
 
     /* 1. 整条圆角底（radius = h/2，胶囊形分段控制器底条） */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底胶囊补 1px 白描边（否则与黑背景不可辨） */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    (uint16_t)(obj->base.h / 2),
+                                    _tv_mono_fg, obj->bar_color, obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      (uint16_t)(obj->base.h / 2),
                                      obj->bar_color, obj->opacity);
+#endif
 
     if (seg_w <= 0 || obj->labels == NULL)
         return;
@@ -186,8 +198,13 @@ static void _tabview_draw_cb(void *ptr)
     }
 
     /* 3. 各段文字居中：active 用全亮文字色，其余向底条色压暗 */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：压暗混出的中灰经二值化后消失，非 active 段直接用文字色 */
+    dim_text = obj->text_color;
+#else
     dim_text = we_colour_blend(obj->text_color, obj->bar_color,
                                (uint8_t)WE_TABVIEW_DIM_TEXT_A);
+#endif
     for (i = 0; i < (int16_t)obj->count; i++)
     {
         const char *label = obj->labels[i];
@@ -207,9 +224,16 @@ static void _tabview_draw_cb(void *ptr)
         txt_x = (int16_t)(seg_cx - (int16_t)(txt_w / 2U));
         txt_y = (int16_t)(obj->base.y + obj->base.h / 2 - (y_top + y_bot) / 2);
 
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 反白高亮块上的 active 段挖空字 */
+        we_draw_string(lcd, txt_x, txt_y, obj->font, label,
+                       (i == (int16_t)obj->active) ? _tv_mono_bg : dim_text,
+                       obj->opacity);
+#else
         we_draw_string(lcd, txt_x, txt_y, obj->font, label,
                        (i == (int16_t)obj->active) ? obj->text_color : dim_text,
                        obj->opacity);
+#endif
     }
 }
 
@@ -299,9 +323,16 @@ void we_tabview_obj_init(we_tabview_obj_t *obj, we_lcd_t *lcd,
     obj->count = count;
     obj->active = 0U;
 
+    /* 默认调色盘：单色样式切白边黑底盘（active 高亮块反白、挖空字在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->bar_color = RGB888TODEV(0, 0, 0);
+    obj->hl_color = RGB888TODEV(255, 255, 255);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bar_color = RGB888TODEV(44, 52, 66);
     obj->hl_color = RGB888TODEV(64, 152, 231);
     obj->text_color = RGB888TODEV(239, 243, 250);
+#endif
     if (font == NULL)
         return; /* 字体必传 */
     obj->font = font;

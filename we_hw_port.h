@@ -13,6 +13,8 @@
 #include "ad15n_hw_config.h"
 #elif defined(WE_PLATFORM_AD14N)
 #include "ad14n_hw_config.h"
+#elif defined(WE_PLATFORM_GD32E230)
+#include "gd32e230_hw_config.h"
 #else
 #include "stm32f103_hw_config.h"
 #endif

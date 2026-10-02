@@ -18,7 +18,7 @@
 
 #if (LCD_PORT == _DMA_4SPI)
 #include "stm32f103_lcd_dma_4spi_port.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* DMA 忙碌标志，lcd_is_busy() 对外暴露，中断中清零 */
 static volatile uint8_t s_busy;
@@ -395,6 +395,7 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
     LCD_DC_Set();
     LCD_CS_Clr();
 
+    pix_size *= 3U; /* 内核按像素数传入，RGB888 每像素 3 字节 */
     while (pix_size--)
     {
         wait_lcd_spi_txtemp_free();

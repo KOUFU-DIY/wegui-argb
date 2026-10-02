@@ -2,7 +2,7 @@
 #define WE_INPUT_PORT_TEMPLATE_H
 
 #include <stdint.h>
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * WeGui 输入端口移植模板
@@ -13,13 +13,13 @@
  * 3. 适合触摸屏、按键、编码器等输入链路做第一版骨架
  *
  * 触摸链路（轮询式）使用步骤：
- * 1. 在 we_input_port_read 中读取硬件，填充 we_indev_data_t
- *    （x/y 坐标 + state = PRESSED/STAY/RELEASED/NONE）
- * 2. 注册进内核：WE_CFG_ENABLE_INPUT_PORT_BIND=1 时把它作为
- *    input_cb 传给 we_gui_init(...)；=0 时内核直接按
- *    we_input_port_read 函数名链接，无需注册
- * 3. we_gui_task_handler() 每周期自动轮询并分发；只有自行管理
- *    输入状态机时才需要手动调 we_gui_indev_handler
+ * 1. 在 we_touch_port_read 中读取硬件，填充 we_touch_data_t：
+ *    按下时填 x/y 坐标并置 pressed = 1，未按下置 pressed = 0
+ *    （可不填坐标）；按下/按住/松开的边沿由内核判定
+ * 2. 把它填进端口描述 we_port_t 的 touch_read（无触摸填 NULL）
+ * 3. we_gui_run() 每次调用自动采样并分发（采样间隔见
+ *    WE_CFG_INDEV_PERIOD_MS）；只有自行管理触摸边沿（脚本回放等）
+ *    时才需要直接调 we_gui_indev_handler
  *
  * 按键链路（注入式，内核不轮询按键）：
  * 1. 端口自行消抖，把物理按键翻译成语义键
@@ -39,10 +39,10 @@
 void input_hw_init(void);
 
 /**
- * @brief 读取当前输入状态并写入输入数据结构。
- * @param data 输入状态输出结构体指针。
+ * @brief 采样当前触摸状态。
+ * @param data 传出：是否按下与坐标（内核调用前已预填上一次的坐标）。
  * @return 无。
  */
-void we_input_port_read(we_indev_data_t *data);
+void we_touch_port_read(we_touch_data_t *data);
 
 #endif

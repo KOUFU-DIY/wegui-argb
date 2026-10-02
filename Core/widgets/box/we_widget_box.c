@@ -11,6 +11,8 @@
  *      - 切角：45° 覆盖率精确整数解析（alpha 仅 0/128/255），每行只算两个
  *        断点后按段整块写入，无逐像素函数调用。
  *
+ * 带边框的角落先画边框、再按内轮廓覆盖画填充：外沿以内的像素不会透出背后内容。
+ *
  * 所有 set 接口在目标值与当前值相同时直接返回，不触发重绘。
  * 可选动画（WE_BOX_USE_ANIM，默认关闭）：开启后填充颜色 / 透明度各占一个独立
  * 中央动画节点，可同时进行，两通道共用一个缓动；关闭时 we_box_anim_* 退化为
@@ -18,7 +20,7 @@
  */
 
 #include "we_widget_box.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* 单色样式：绘制路径的取色统一改道（白边黑底、边宽至少 1px，四角样式保留）；
  * 非单色档保持原字段直读。 */
@@ -39,12 +41,20 @@ static const colour_t _box_mono_bg = RGB888_CONST(0, 0, 0);
  * -------------------------------------------------------------------------- */
 static void    _box_draw_cb(void *ptr);
 static uint8_t _box_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
-static void    _box_set_pos_cb(void *ptr, int16_t x, int16_t y);
 
+/* 没有用户回调时用 event_cb 为 NULL 的类：命中测试跳过它，触摸落到背后的控件；
+ * 几何全部由 base 推导，移动走内核默认逻辑 */
 static const we_class_t _box_class = {
     .draw_cb    = _box_draw_cb,
+    .event_cb   = NULL,
+    .set_pos_cb = NULL
+};
+
+/* 设了用户回调后换成这个类，全部事件交给用户回调 */
+static const we_class_t _box_class_cb = {
+    .draw_cb    = _box_draw_cb,
     .event_cb   = _box_event_cb,
-    .set_pos_cb = _box_set_pos_cb
+    .set_pos_cb = NULL
 };
 
 /* 切角边框的内轮廓收缩系数：
@@ -72,20 +82,42 @@ typedef struct
 } _box_geo_t;
 
 /**
- * @brief 圆角角落：对一个 K×K 方块执行“填充 + 边框环”合成。
+ * @brief 把 K×K 角落方块裁到当前窗口，并给出首行首列的显存指针。
+ * @param lcd GUI 运行时 LCD 上下文指针。
+ * @param bx/by 角落方块左上角（屏幕绝对坐标）。
+ * @param k 方块边长。
+ * @param c 传出：裁剪后的列行范围 {x0, y0, x1, y1}。
+ * @return 首行首列像素指针；方块与窗口不相交时返回 NULL。
+ */
+static colour_t *_box_corner_clip(we_lcd_t *lcd, int16_t bx, int16_t by, uint16_t k, int16_t c[4])
+{
+    c[0] = (bx < (int16_t)lcd->clip.x0) ? (int16_t)lcd->clip.x0 : bx;
+    c[1] = (by < (int16_t)lcd->clip.y0) ? (int16_t)lcd->clip.y0 : by;
+    c[2] = (int16_t)(bx + (int16_t)k - 1);
+    c[3] = (int16_t)(by + (int16_t)k - 1);
+    if (c[2] > (int16_t)lcd->clip.x1) c[2] = (int16_t)lcd->clip.x1;
+    if (c[3] > (int16_t)lcd->clip.y1) c[3] = (int16_t)lcd->clip.y1;
+    if (c[0] > c[2] || c[1] > c[3])
+        return NULL;
+    return lcd->pfb_gram
+         + (uint32_t)(c[1] - (int16_t)lcd->clip.y0) * lcd->pfb_width
+         + (uint32_t)(c[0] - (int16_t)lcd->clip.x0);
+}
+
+/**
+ * @brief 圆角角落：对一个 K×K 方块执行“边框环 + 填充”合成。
  * @param bx/by 角落方块左上角（屏幕绝对坐标）。
  * @param k 方块边长。
  * @param q 角落象限（WE_MASK_QUADRANT_xx）。
  * @note 方块内平直区零 mask 开销；圆角 AA 区带边框时内外覆盖共享一遍子采样。
+ *       合成顺序：先以外轮廓覆盖画边框，再以内轮廓覆盖画填充——外沿满覆盖的
+ *       像素结果为 填充·内覆盖 + 边框·(1-内覆盖)，背后的内容不会从内沿透出。
  */
 static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
                                    const _box_geo_t *g, int16_t bx, int16_t by,
                                    uint16_t k, uint8_t q)
 {
-    int16_t cx0 = bx;
-    int16_t cy0 = by;
-    int16_t cx1 = (int16_t)(bx + (int16_t)k - 1);
-    int16_t cy1 = (int16_t)(by + (int16_t)k - 1);
+    int16_t c[4];
     int16_t x1  = (int16_t)(g->x + g->w - 1);
     int16_t y1  = (int16_t)(g->y + g->h - 1);
     uint16_t r  = g->r_out[q];
@@ -95,8 +127,10 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
     uint8_t has_in;
     int16_t px;
     int16_t py;
-    uint16_t stride;
-    colour_t *row;
+    colour_t *row = _box_corner_clip(lcd, bx, by, k, c);
+
+    if (row == NULL)
+        return;
 
     /* 外圆角 r×r 外接方块左上角 */
     sx = (q == WE_MASK_QUADRANT_LT || q == WE_MASK_QUADRANT_LB)
@@ -105,26 +139,13 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
            ? g->y : (int16_t)(y1 - (int16_t)r + 1);
     has_in = (uint8_t)((g->bw > 0U) && (g->wi > 0) && (g->hi > 0));
 
-    /* 裁剪到当前 PFB 切片，避免越界写入 */
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
-    if (cx0 > cx1 || cy0 > cy1)
-        return;
-
-    stride = lcd->pfb_width;
-    row = lcd->pfb_gram
-        + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
-
-    for (py = cy0; py <= cy1; py++, row += stride)
+    for (py = c[1]; py <= c[3]; py++, row += lcd->pfb_width)
     {
         int16_t v = (q == WE_MASK_QUADRANT_LT || q == WE_MASK_QUADRANT_RT)
                       ? (int16_t)(py - g->y) : (int16_t)(y1 - py);
         colour_t *p = row;
 
-        for (px = cx0; px <= cx1; px++, p++)
+        for (px = c[0]; px <= c[2]; px++, p++)
         {
             int16_t u = (q == WE_MASK_QUADRANT_LT || q == WE_MASK_QUADRANT_LB)
                           ? (int16_t)(px - g->x) : (int16_t)(x1 - px);
@@ -135,21 +156,10 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
             {
                 /* 圆角方块外的平直区：按内矩形边界直接分边框/填充，零 mask 开销。
                  * （内圆角方块必在外圆角方块之内，此处不会落入内 AA 区。） */
-                if (g->bw == 0U ||
-                    (has_in && u >= (int16_t)g->bw && v >= (int16_t)g->bw))
-                {
-                    if (g->eff_op >= 250U)
-                        we_store_color(p, _BOX_BG_COLOR(o));
-                    else
-                        we_store_blended_color(p, _BOX_BG_COLOR(o), g->eff_op);
-                }
-                else
-                {
-                    if (g->eff_op >= 250U)
-                        we_store_color(p, _BOX_BORDER_COLOR(o));
-                    else
-                        we_store_blended_color(p, _BOX_BORDER_COLOR(o), g->eff_op);
-                }
+                uint8_t is_fill = (uint8_t)(g->bw == 0U ||
+                                            (has_in && u >= (int16_t)g->bw && v >= (int16_t)g->bw));
+
+                we_store_blended_color(p, is_fill ? _BOX_BG_COLOR(o) : _BOX_BORDER_COLOR(o), g->eff_op);
                 continue;
             }
 
@@ -166,22 +176,23 @@ static void _box_draw_corner_round(const we_box_obj_t *o, we_lcd_t *lcd,
 
             if (a_out == 0U)
                 continue;
+            if (a_out > a_in)
+            {
+                /* 边框按外轮廓覆盖先画 */
+                if (a_out >= 250U && g->eff_op >= 250U)
+                    we_store_color(p, _BOX_BORDER_COLOR(o));
+                else
+                    we_store_blended_color(p, _BOX_BORDER_COLOR(o),
+                                           we_div255((uint32_t)g->eff_op * a_out));
+            }
             if (a_in != 0U)
             {
+                /* 填充按内轮廓覆盖压在边框之上 */
                 if (a_in >= 250U && g->eff_op >= 250U)
                     we_store_color(p, _BOX_BG_COLOR(o));
                 else
                     we_store_blended_color(p, _BOX_BG_COLOR(o),
                                            we_div255((uint32_t)g->eff_op * a_in));
-            }
-            if (a_out > a_in)
-            {
-                uint8_t a_bd = (uint8_t)(a_out - a_in);
-                if (a_bd >= 250U && g->eff_op >= 250U)
-                    we_store_color(p, _BOX_BORDER_COLOR(o));
-                else
-                    we_store_blended_color(p, _BOX_BORDER_COLOR(o),
-                                           we_div255((uint32_t)g->eff_op * a_bd));
             }
         }
     }
@@ -259,37 +270,26 @@ static void _box_chamfer_span(colour_t *row_cx0, int16_t cx0, int16_t cx1,
  *       外 AA 像素 u0 = r-1-v，内 AA 像素 u = bw + (r_in-1-(v-bw))，
  *       其余像素按 空/边框/填充 三段整块写。内外切线间距 ≥ 2 像素
  *       （2bw - 0.586bw > 1，bw>=1），两个 AA 像素不会重叠。
+ *       内 AA 像素先按边框实心写入、再叠半透填充，背后的内容不会透出。
  */
 static void _box_draw_corner_chamfer(const we_box_obj_t *o, we_lcd_t *lcd,
                                      const _box_geo_t *g, int16_t bx, int16_t by,
                                      uint16_t k, uint8_t q)
 {
-    int16_t cx0 = bx;
-    int16_t cy0 = by;
-    int16_t cx1 = (int16_t)(bx + (int16_t)k - 1);
-    int16_t cy1 = (int16_t)(by + (int16_t)k - 1);
+    int16_t c[4];
     int16_t y1  = (int16_t)(g->y + g->h - 1);
     uint8_t left = (uint8_t)(q == WE_MASK_QUADRANT_LT || q == WE_MASK_QUADRANT_LB);
     uint8_t top  = (uint8_t)(q == WE_MASK_QUADRANT_LT || q == WE_MASK_QUADRANT_RT);
     uint8_t has_in = (uint8_t)((g->bw > 0U) && (g->wi > 0) && (g->hi > 0));
     int16_t py;
-    uint16_t stride;
-    colour_t *row;
+    colour_t *row = _box_corner_clip(lcd, bx, by, k, c);
+    int16_t cx0 = c[0];
+    int16_t cx1 = c[2];
 
-    /* 裁剪到当前 PFB 切片 */
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
-    if (cx0 > cx1 || cy0 > cy1)
+    if (row == NULL)
         return;
 
-    stride = lcd->pfb_width;
-    row = lcd->pfb_gram
-        + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
-
-    for (py = cy0; py <= cy1; py++, row += stride)
+    for (py = c[1]; py <= c[3]; py++, row += lcd->pfb_width)
     {
         int16_t v  = top ? (int16_t)(py - g->y) : (int16_t)(y1 - py);
         int16_t u0 = (int16_t)((int16_t)g->r_out[q] - 1 - v); /* 外切线 AA 像素 */
@@ -328,18 +328,14 @@ static void _box_draw_corner_chamfer(const we_box_obj_t *o, we_lcd_t *lcd,
         /* 外切线 AA 像素：纯边框半透（内轮廓在此必为 0） */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, u0, u0,
                           _BOX_BORDER_COLOR(o), 128U, g->eff_op);
-        /* 边框实心段 */
+        /* 边框实心段（含内切线 AA 像素） */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, (int16_t)(u0 + 1),
-                          (int16_t)((in_aa >= 0 ? in_aa : fill_from) - 1),
+                          (int16_t)((in_aa >= 0) ? in_aa : (int16_t)(fill_from - 1)),
                           _BOX_BORDER_COLOR(o), 255U, g->eff_op);
-        /* 内切线 AA 像素：半透填充 + 半透边框叠加 */
+        /* 内切线 AA 像素：在实心边框上叠半透填充 */
         if (in_aa >= 0)
-        {
             _box_chamfer_span(row, cx0, cx1, bx, k, left, in_aa, in_aa,
                               _BOX_BG_COLOR(o), 128U, g->eff_op);
-            _box_chamfer_span(row, cx0, cx1, bx, k, left, in_aa, in_aa,
-                              _BOX_BORDER_COLOR(o), 127U, g->eff_op);
-        }
         /* 填充实心段 */
         _box_chamfer_span(row, cx0, cx1, bx, k, left, fill_from, (int16_t)(k - 1U),
                           _BOX_BG_COLOR(o), 255U, g->eff_op);
@@ -348,11 +344,12 @@ static void _box_draw_corner_chamfer(const we_box_obj_t *o, we_lcd_t *lcd,
 
 /**
  * @brief 控件绘制回调：快速整块填充 + 四角合成。
+ * @note 当前窗口整个落在上下两条角落横带之间时，只画中段（左右边框柱 + 中央填充）。
  */
 static void _box_draw_cb(void *ptr)
 {
     we_box_obj_t *o = (we_box_obj_t *)ptr;
-    we_lcd_t *lcd;
+    we_lcd_t *lcd = o->base.lcd;
     _box_geo_t g;
     int16_t x, y, x1, y1;
     int16_t w, h;
@@ -360,18 +357,13 @@ static void _box_draw_cb(void *ptr)
     uint16_t half;
     uint8_t i;
 
-    if (o == NULL || o->opacity == 0U)
-        return;
-    lcd = o->base.lcd;
-    if (lcd == NULL)
+    if (o->opacity == 0U)
         return;
 
     x = o->base.x;
     y = o->base.y;
     w = o->base.w;
     h = o->base.h;
-    if (w <= 0 || h <= 0)
-        return;
     x1 = (int16_t)(x + w - 1);
     y1 = (int16_t)(y + h - 1);
 
@@ -434,6 +426,21 @@ static void _box_draw_cb(void *ptr)
      * 四角分块互不重叠；此处再钳一次仅作防御 */
     if (k > half)
         k = half;
+
+    /* 窗口整个落在两条角落横带之间：只有中段可见 */
+    if (lcd->clip.y0 >= (int16_t)(y + (int16_t)k) && lcd->clip.y1 <= (int16_t)(y1 - (int16_t)k))
+    {
+        if (g.bw > 0U)
+        {
+            we_fill_rect(lcd, x, lcd->clip.y0, g.bw, (uint16_t)(lcd->clip.y1 - lcd->clip.y0 + 1),
+                         _BOX_BORDER_COLOR(o), o->opacity);
+            we_fill_rect(lcd, (int16_t)(x1 - (int16_t)g.bw + 1), lcd->clip.y0, g.bw,
+                         (uint16_t)(lcd->clip.y1 - lcd->clip.y0 + 1), _BOX_BORDER_COLOR(o), o->opacity);
+        }
+        we_fill_rect(lcd, (int16_t)(x + (int16_t)g.bw), lcd->clip.y0, (uint16_t)(w - 2 * (int16_t)g.bw),
+                     (uint16_t)(lcd->clip.y1 - lcd->clip.y0 + 1), _BOX_BG_COLOR(o), o->opacity);
+        return;
+    }
 
     /* --- 1. 上下两条 K 高横带的中段（去掉左右角落方块）：边框条 + 填充条 --- */
     if ((int16_t)(w - 2 * (int16_t)k) > 0)
@@ -499,28 +506,13 @@ static void _box_draw_cb(void *ptr)
 }
 
 /**
- * @brief 控件事件回调：有自定义回调则接管，否则装饰性穿透。
+ * @brief 控件事件回调（仅 _box_class_cb 使用）：全部事件交给用户回调。
  */
 static uint8_t _box_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_box_obj_t *o = (we_box_obj_t *)ptr;
 
-    if (o == NULL)
-        return 0U;
-    if (o->user_event_cb != NULL)
-        return o->user_event_cb(ptr, event, data);
-
-    (void)event;
-    (void)data;
-    return 0U; /* 默认装饰性，不消费事件，让其穿透给背后控件 */
-}
-
-/**
- * @brief 容器/框架重定位回调。
- */
-static void _box_set_pos_cb(void *ptr, int16_t x, int16_t y)
-{
-    we_box_set_pos((we_box_obj_t *)ptr, x, y);
+    return (o->user_event_cb != NULL) ? o->user_event_cb(ptr, event, data) : 0U;
 }
 
 /* --------------------------------------------------------------------------
@@ -529,88 +521,57 @@ static void _box_set_pos_cb(void *ptr, int16_t x, int16_t y)
 #if WE_BOX_USE_ANIM
 
 /**
- * @brief 推进一个 Q8 进度并经缓动输出（两通道共用此样板）。
- * @return 1=需要更新（*eased 有效）；0=已就位（已 we_anim_stop 摘链）。
+ * @brief 推进一个 Q8 进度并经缓动输出（两通道共用）。
+ * @return 缓动后的进度（0..256）。
  */
-static uint8_t _box_advance(we_box_obj_t *o, we_anim_t *node, uint16_t *t,
-                            uint16_t ms, uint16_t elapsed_ms, uint16_t *eased)
+static uint16_t _box_advance(const we_box_obj_t *o, uint16_t *t, uint16_t ms, uint16_t elapsed_ms)
 {
-    uint32_t delta;
     uint16_t e;
 
-    if (*t >= 256U)
-    {
-        we_anim_stop(o->base.lcd, node); /* 已就位：摘链停表 */
-        return 0U;
-    }
-
-    if (ms == 0U)
-    {
-        *t = 256U;
-    }
-    else
-    {
-        delta = (uint32_t)elapsed_ms * 256U / (uint32_t)ms;
-        if (delta == 0U)
-            delta = 1U;
-        *t = ((uint32_t)*t + delta >= 256U) ? 256U : (uint16_t)(*t + delta);
-    }
-
+    *t = we_motion_advance(*t, ms, elapsed_ms);
     e = o->ease ? o->ease(*t) : *t;
-    if (e > 256U)
-        e = 256U;
-    *eased = e;
-    return 1U;
+    return (e > 256U) ? 256U : e;
 }
 
 /**
- * @brief 推进一步填充颜色动画（bg_color from→to）。
+ * @brief 填充颜色动画步进回调（bg_color from→to，到位摘链）。
  */
-static void _box_anim_col_step(we_box_obj_t *o, uint16_t elapsed_ms)
+static void _box_anim_col_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    uint16_t e;
-    uint8_t  a;
+    we_box_obj_t *o = (we_box_obj_t *)owner;
+    colour_t c;
 
-    if (o == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
-    if (!_box_advance(o, &o->anim_col, &o->col_t, o->col_ms, elapsed_ms, &e))
-        return;
-
-    a = (uint8_t)((uint32_t)e * 255U / 256U); /* 0=起点色，255=终点色 */
-    o->bg_color = we_colour_blend(o->c_to, o->c_from, a);
-    we_obj_invalidate((we_obj_t *)o);
-
+    c = we_colour_blend(o->c_to, o->c_from,
+                        (uint8_t)((uint32_t)_box_advance(o, &o->col_t, o->col_ms, elapsed_ms) * 255U / 256U));
+    if (!we_colour_eq(c, o->bg_color))
+    {
+        o->bg_color = c;
+        we_obj_invalidate((we_obj_t *)o);
+    }
     if (o->col_t >= 256U)
         we_anim_stop(o->base.lcd, &o->anim_col);
 }
 
-static void _box_anim_col_step_cb(void *owner, uint16_t elapsed_ms)
-{
-    _box_anim_col_step((we_box_obj_t *)owner, elapsed_ms);
-}
-
 /**
- * @brief 推进一步透明度动画（opacity from→to）。
+ * @brief 透明度动画步进回调（opacity from→to，到位摘链）。
  */
-static void _box_anim_opa_step(we_box_obj_t *o, uint16_t elapsed_ms)
-{
-    uint16_t e;
-
-    if (o == NULL || elapsed_ms == 0U)
-        return;
-    if (!_box_advance(o, &o->anim_opa, &o->opa_t, o->opa_ms, elapsed_ms, &e))
-        return;
-
-    o->opacity = (uint8_t)we_lerp(o->opa_from, o->opa_to, e);
-    we_obj_invalidate((we_obj_t *)o);
-
-    if (o->opa_t >= 256U)
-        we_anim_stop(o->base.lcd, &o->anim_opa);
-}
-
 static void _box_anim_opa_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    _box_anim_opa_step((we_box_obj_t *)owner, elapsed_ms);
+    we_box_obj_t *o = (we_box_obj_t *)owner;
+    uint8_t a;
+
+    if (elapsed_ms == 0U)
+        return;
+    a = (uint8_t)we_lerp(o->opa_from, o->opa_to, _box_advance(o, &o->opa_t, o->opa_ms, elapsed_ms));
+    if (a != o->opacity)
+    {
+        o->opacity = a;
+        we_obj_invalidate((we_obj_t *)o);
+    }
+    if (o->opa_t >= 256U)
+        we_anim_stop(o->base.lcd, &o->anim_opa);
 }
 
 #endif /* WE_BOX_USE_ANIM */
@@ -739,33 +700,19 @@ void we_box_set_opacity(we_box_obj_t *obj, uint8_t opacity)
     we_obj_invalidate((we_obj_t *)obj);
 }
 
-void we_box_set_pos(we_box_obj_t *obj, int16_t x, int16_t y)
-{
-    if (obj == NULL || (obj->base.x == x && obj->base.y == y))
-        return;
-    we_obj_invalidate((we_obj_t *)obj); /* 旧位置 */
-    obj->base.x = x;
-    obj->base.y = y;
-    we_obj_invalidate((we_obj_t *)obj); /* 新位置 */
-}
-
 void we_box_set_size(we_box_obj_t *obj, int16_t w, int16_t h)
 {
     if (obj == NULL || w <= 0 || h <= 0)
         return;
-    if (obj->base.w == w && obj->base.h == h)
-        return;
-    we_obj_invalidate((we_obj_t *)obj); /* 旧尺寸 */
-    obj->base.w = w;
-    obj->base.h = h;
-    we_obj_invalidate((we_obj_t *)obj); /* 新尺寸 */
+    we_obj_set_size((we_obj_t *)obj, w, h);
 }
 
 void we_box_set_event_cb(we_box_obj_t *obj, we_box_event_cb_t cb)
 {
-    if (obj == NULL)
+    if (obj == NULL || obj->base.class_p == NULL)
         return;
     obj->user_event_cb = cb;
+    obj->base.class_p = (cb != NULL) ? &_box_class_cb : &_box_class;
 }
 
 #if WE_BOX_USE_ANIM
@@ -815,14 +762,3 @@ void we_box_anim_opacity(we_box_obj_t *obj, uint8_t target, uint16_t dur_ms,
 }
 
 #endif /* WE_BOX_USE_ANIM */
-
-void we_box_obj_delete(we_box_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-#if WE_BOX_USE_ANIM
-    we_anim_stop(obj->base.lcd, &obj->anim_col);
-    we_anim_stop(obj->base.lcd, &obj->anim_opa);
-#endif
-    we_obj_delete((we_obj_t *)obj);
-}

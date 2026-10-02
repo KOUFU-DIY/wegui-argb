@@ -16,34 +16,36 @@
 #include "widgets_preview/tabview/we_widget_tabview.h"
 #include <string.h>
 
+/* 页签条/页容器/基础内容为大小屏共享；卡片/页标题/FPS 仅大屏版有 */
+static we_tabview_obj_t tv_bar;
+static we_group_obj_t   tv_page[3];
+
+/* Home 页文字、Data 页三柱、About 页两行（两版共用） */
+static we_label_obj_t tv_home_head;
+static we_label_obj_t tv_home_text;
+static we_box_obj_t   tv_data_bar[3];
+static we_label_obj_t tv_about_line1;
+static we_label_obj_t tv_about_line2;
+
+#if !WE_DEMO_SMALL_SCREEN
 /* 页容器几何（280x240 布局） */
 #define TV_PAGE_X 14
 #define TV_PAGE_Y 80
 #define TV_PAGE_W 252
 #define TV_PAGE_H 148
 
-static we_label_obj_t   tv_title;
-static we_label_obj_t   tv_fps_label;
-static we_tabview_obj_t tv_bar;
-static we_group_obj_t   tv_page[3];
+static we_label_obj_t tv_title;
+static we_label_obj_t tv_fps_label;
 
-/* Home 页：一块圆角卡片 + 两行文字 */
+/* 大屏独有装饰：Home 卡片 + Data/About 页标题 */
 static we_box_obj_t   tv_home_card;
-static we_label_obj_t tv_home_head;
-static we_label_obj_t tv_home_text;
-
-/* Data 页：三根彩色柱 + 标题 */
 static we_label_obj_t tv_data_head;
-static we_box_obj_t   tv_data_bar[3];
-
-/* About 页：三行说明文字 */
 static we_label_obj_t tv_about_head;
-static we_label_obj_t tv_about_line1;
-static we_label_obj_t tv_about_line2;
 
 static uint32_t tv_fps_timer;
 static uint32_t tv_last_frames;
 static char     tv_fps_buf[16];
+#endif
 
 /* 页签名数组：demo 静态持有，控件只存指针 */
 static const char *const tv_tabs[3] = { "Home", "Data", "About" };
@@ -62,6 +64,8 @@ static void _tv_tab_changed(void *tv, uint8_t idx)
     for (i = 0U; i < 3U; i++)
         we_group_set_opacity(&tv_page[i], (uint8_t)((i == idx) ? 255U : 0U));
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 tabview preview demo
@@ -170,3 +174,80 @@ void we_tabview_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &tv_fps_label, &tv_fps_timer,
                        &tv_last_frames, tv_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 tabview preview demo（128x64 布局：顶部 14px 页签条 +
+ *        128x46 页容器，每页一组精简内容）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_tabview_preview_demo_init(we_lcd_t *lcd)
+{
+    colour_t page_bg = RGB888TODEV(24, 31, 43);
+    uint8_t i;
+
+    /* 顶部页签条：3 段等分，点击切换，高亮块平滑滑动 */
+    we_tabview_obj_init(&tv_bar, lcd, 0, 0, 128, 14, tv_tabs, 3U, we_font_consolas_18);
+    we_tabview_set_changed_cb(&tv_bar, _tv_tab_changed);
+
+    /* 3 个页容器：初始只有第 0 页可见（透明 group 不拦输入） */
+    for (i = 0U; i < 3U; i++)
+        we_group_obj_init(&tv_page[i], lcd, 0, 18, 128, 46, page_bg,
+                          (uint8_t)((i == 0U) ? 255U : 0U));
+
+    /* ---- Home 页：两行文字 ---- */
+    we_label_obj_init(&tv_home_head, lcd, 0, 0,
+                      "HOME", we_font_consolas_18,
+                      RGB888TODEV(255, 154, 102), 255);
+    we_label_obj_init(&tv_home_text, lcd, 0, 0,
+                      "tap tabs above", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+    we_group_add_child(&tv_page[0], (we_obj_t *)&tv_home_head);
+    we_group_add_child(&tv_page[0], (we_obj_t *)&tv_home_text);
+    we_group_set_child_pos(&tv_page[0], (we_obj_t *)&tv_home_head, 8, 4);
+    we_group_set_child_pos(&tv_page[0], (we_obj_t *)&tv_home_text, 8, 24);
+
+    /* ---- Data 页：三根不同高度的柱（底边对齐局部 y=42） ---- */
+    we_box_obj_init(&tv_data_bar[0], lcd, 0, 0, 16, 14);
+    we_box_set_color(&tv_data_bar[0], RGB888TODEV(46, 140, 90));
+    we_box_obj_init(&tv_data_bar[1], lcd, 0, 0, 16, 24);
+    we_box_set_color(&tv_data_bar[1], RGB888TODEV(170, 104, 40));
+    we_box_obj_init(&tv_data_bar[2], lcd, 0, 0, 16, 36);
+    we_box_set_color(&tv_data_bar[2], RGB888TODEV(156, 62, 110));
+    for (i = 0U; i < 3U; i++)
+    {
+        we_box_set_radius(&tv_data_bar[i], 3U);
+        we_group_add_child(&tv_page[1], (we_obj_t *)&tv_data_bar[i]);
+    }
+    we_group_set_child_pos(&tv_page[1], (we_obj_t *)&tv_data_bar[0], 16, 28);
+    we_group_set_child_pos(&tv_page[1], (we_obj_t *)&tv_data_bar[1], 56, 18);
+    we_group_set_child_pos(&tv_page[1], (we_obj_t *)&tv_data_bar[2], 96, 6);
+
+    /* ---- About 页：两行说明文字 ---- */
+    we_label_obj_init(&tv_about_line1, lcd, 0, 0,
+                      "WeGui-ARGB", we_font_consolas_18,
+                      RGB888TODEV(220, 228, 238), 255);
+    we_label_obj_init(&tv_about_line2, lcd, 0, 0,
+                      "tabview pages", we_font_consolas_18,
+                      RGB888TODEV(138, 152, 170), 255);
+    we_group_add_child(&tv_page[2], (we_obj_t *)&tv_about_line1);
+    we_group_add_child(&tv_page[2], (we_obj_t *)&tv_about_line2);
+    we_group_set_child_pos(&tv_page[2], (we_obj_t *)&tv_about_line1, 8, 4);
+    we_group_set_child_pos(&tv_page[2], (we_obj_t *)&tv_about_line2, 8, 24);
+}
+
+/**
+ * @brief tabview preview demo 周期更新（交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_tabview_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

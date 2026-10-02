@@ -4,7 +4,7 @@
     // Ctrl+Shift+B 直接编 SimLite）。装上推荐扩展 actboy168.tasks 后，
     // 底部状态栏出现 "SimLite 编译" / "编译+运行" 两个按钮（其余任务默认隐藏）。
     // 切换 demo：改 SimLite/main_lite.c 顶部的 DEMO_ID 宏后重编（与硬件目标同
-    // 一套用法）。开发调试工具在 SimLite/debug/，用 build_lite.ps1 -Dev 单独构建。
+    // 一套用法）。
     "folders": [
         {
             "name": "WeGui (SimLite)",

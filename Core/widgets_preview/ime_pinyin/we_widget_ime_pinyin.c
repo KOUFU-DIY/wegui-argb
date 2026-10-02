@@ -17,12 +17,27 @@
 
 #include "we_widget_ime_pinyin.h"
 #include "../textarea/we_widget_textarea.h" /* 弹层模式绑定目标输入框直接注入 */
-#include "we_render.h"
+#include "wegui.h"
 #include <stddef.h>
 #include <string.h>
 
 /* 候选栏提示文案（字库须含这些字形，否则退化为空白） */
 static const char *const _ime_hint_no_cand = "无候选";
+
+/* 默认调色盘宏组：单色样式（WE_CFG_MONO_STYLE=1）切白边黑底高对比盘——
+ * 面板/拼音条全黑（绘制处补 1px 白分隔线区隔横带）、文字白、按压槽
+ * 反白（候选字挖空为黑）；彩色档保持原深蓝盘。 */
+#if (WE_CFG_MONO_STYLE == 1)
+#define _IME_DEF_BG    RGB888TODEV(0, 0, 0)
+#define _IME_DEF_BUF   RGB888TODEV(0, 0, 0)
+#define _IME_DEF_TEXT  RGB888TODEV(255, 255, 255)
+#define _IME_DEF_PRESS RGB888TODEV(255, 255, 255)
+#else
+#define _IME_DEF_BG    RGB888TODEV(26, 32, 44)
+#define _IME_DEF_BUF   RGB888TODEV(36, 44, 58)
+#define _IME_DEF_TEXT  RGB888TODEV(236, 241, 248)
+#define _IME_DEF_PRESS RGB888TODEV(64, 152, 231)
+#endif
 
 /* --------------------------------------------------------------------------
  * 内部辅助
@@ -32,10 +47,16 @@ static const char *const _ime_hint_no_cand = "无候选";
  * @brief 重新派生提示灰字色（文字色向面板底色混合，弱化 5/8）。
  * @param obj 传入：控件对象指针。
  * @return 无。
+ * @note 单色样式下混出的中灰经阈值二值化后消失，直接沿用文字色
+ *       （1bpp 无灰阶，提示字与正文字同为白）。
  */
 static void _ime_update_hint_color(we_ime_pinyin_obj_t *obj)
 {
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->hint_color = obj->text_color;
+#else
     obj->hint_color = we_colour_blend(obj->text_color, obj->bg_color, 96U);
+#endif
 }
 
 /**
@@ -508,7 +529,7 @@ static void _ime_handle_key(we_ime_pinyin_obj_t *obj, const char *key)
 static void _ime_kb_key_cb(void *kb, const char *key)
 {
     we_ime_pinyin_obj_t *obj =
-        (we_ime_pinyin_obj_t *)((char *)kb - offsetof(we_ime_pinyin_obj_t, kb));
+        (we_ime_pinyin_obj_t *)(void *)((char *)kb - offsetof(we_ime_pinyin_obj_t, kb));
 
     _ime_handle_key(obj, key);
 }
@@ -558,6 +579,10 @@ static void _ime_pinyin_draw_cb(void *ptr)
     int16_t bars_y = _ime_bars_y(obj);
     int16_t bar_y = (int16_t)(bars_y + WE_IME_PINYIN_BUF_H);
     int8_t slot;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _ime_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t _ime_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj->opacity == 0U)
         return;
@@ -572,6 +597,13 @@ static void _ime_pinyin_draw_cb(void *ptr)
 
         we_fill_rect(lcd, obj->base.x, obj->base.y, (uint16_t)obj->base.w,
                      (uint16_t)WE_KEYBOARD_ECHO_H, obj->bg_color, obj->opacity);
+
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：回显条底部 1px 白分隔线（黑底上区隔拼音条） */
+        we_fill_rect(lcd, obj->base.x,
+                     (int16_t)(obj->base.y + WE_KEYBOARD_ECHO_H - 1),
+                     (uint16_t)obj->base.w, 1U, _ime_mono_fg, obj->opacity);
+#endif
 
         if (_ime_target(obj) != NULL && obj->font != NULL && avail_w > 0)
         {
@@ -614,6 +646,15 @@ static void _ime_pinyin_draw_cb(void *ptr)
     we_fill_rect(lcd, obj->base.x, bar_y,
                  (uint16_t)obj->base.w, (uint16_t)WE_IME_PINYIN_CAND_H,
                  obj->bg_color, obj->opacity);
+
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：拼音条/候选栏底部各补 1px 白分隔线（全黑横带区隔结构） */
+    we_fill_rect(lcd, obj->base.x, (int16_t)(bar_y - 1),
+                 (uint16_t)obj->base.w, 1U, _ime_mono_fg, obj->opacity);
+    we_fill_rect(lcd, obj->base.x,
+                 (int16_t)(bar_y + WE_IME_PINYIN_CAND_H - 1),
+                 (uint16_t)obj->base.w, 1U, _ime_mono_fg, obj->opacity);
+#endif
 
     if (obj->font == NULL)
         return;
@@ -681,6 +722,9 @@ static void _ime_pinyin_draw_cb(void *ptr)
             we_draw_round_rect_analytic_fill(lcd, (int16_t)(sx + 1), (int16_t)(sy + 2),
                                              (uint16_t)(sw - 2), (uint16_t)(sh - 4),
                                              r, obj->press_color, obj->opacity);
+#if (WE_CFG_MONO_STYLE == 1)
+            color = _ime_mono_bg; /* 反白槽挖空字 */
+#endif
         }
         if (!enabled)
             color = obj->hint_color;
@@ -1180,10 +1224,10 @@ void we_ime_pinyin_obj_init(we_ime_pinyin_obj_t *obj, we_lcd_t *lcd,
     obj->cand_kb_idx = -1;
     obj->commit_utf8[0] = '\0';
 
-    obj->bg_color = RGB888TODEV(26, 32, 44);   /* 与内嵌键盘面板同色，视觉连成一体 */
-    obj->buf_color = RGB888TODEV(36, 44, 58);
-    obj->text_color = RGB888TODEV(236, 241, 248);
-    obj->press_color = RGB888TODEV(64, 152, 231);
+    obj->bg_color = _IME_DEF_BG; /* 与内嵌键盘面板同色，视觉连成一体 */
+    obj->buf_color = _IME_DEF_BUF;
+    obj->text_color = _IME_DEF_TEXT;
+    obj->press_color = _IME_DEF_PRESS;
     _ime_update_hint_color(obj);
     obj->opacity = 255U;
 

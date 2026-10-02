@@ -15,15 +15,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 水平尺、目标轮换状态与顶部回显为大小屏共享；垂直尺/标题/FPS 仅大屏版有 */
 static we_scale_obj_t scd_h_scale;      /* 水平尺 0~100 */
-static we_scale_obj_t scd_v_scale;      /* 垂直尺 -20~60 */
-static we_label_obj_t scd_title;
-static we_label_obj_t scd_fps_label;
 static we_label_obj_t scd_target_label; /* 顶部当前目标值显示 */
 
-static uint32_t scd_fps_timer;
-static uint32_t scd_last_frames;
-static char     scd_fps_buf[16];
 static char     scd_target_buf[28];
 static uint32_t scd_acc_ms;             /* 目标切换计时器 */
 static uint8_t  scd_idx;                /* 当前目标表下标 */
@@ -32,10 +27,20 @@ static uint8_t  scd_idx;                /* 当前目标表下标 */
 #define SCD_PERIOD  2000U
 #define SCD_ANIM_MS 1200U
 
-/* 两根尺各自的目标循环表（长度一致，同步换目标） */
+/* 水平尺目标循环表（大屏两根尺长度一致，同步换目标） */
 static const int32_t scd_h_targets[] = { 0, 100, 35, 80, 15 };
-static const int32_t scd_v_targets[] = { -20, 60, 0, 45, -5 };
 #define SCD_TARGET_CNT (sizeof(scd_h_targets) / sizeof(scd_h_targets[0]))
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_scale_obj_t scd_v_scale;      /* 垂直尺 -20~60 */
+static we_label_obj_t scd_title;
+static we_label_obj_t scd_fps_label;
+
+static uint32_t scd_fps_timer;
+static uint32_t scd_last_frames;
+static char     scd_fps_buf[16];
+
+static const int32_t scd_v_targets[] = { -20, 60, 0, 45, -5 };
 
 /* 布局（280x240 基准）：
  * 水平尺 240px 通栏（厚 36 = 4+2+10+2+18），垂直尺 132px 水平居中（宽 52） */
@@ -45,6 +50,9 @@ static const int32_t scd_v_targets[] = { -20, 60, 0, 45, -5 };
 #define SCD_V_X   ((280 - WE_SCALE_V_THICKNESS) / 2)
 #define SCD_V_Y   100
 #define SCD_V_LEN 132U
+#endif
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 刷新顶部目标值 label 文本。
@@ -133,3 +141,54 @@ void we_scale_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &scd_fps_label, &scd_fps_timer,
                        &scd_last_frames, scd_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 scale preview demo（128x64 布局：单水平尺 + 顶部目标回显）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_scale_preview_demo_init(we_lcd_t *lcd)
+{
+    scd_acc_ms = 0U;
+    scd_idx    = 0U;
+    memset(scd_target_buf, 0, sizeof(scd_target_buf));
+
+    /* 顶部目标回显（垂直尺放不下，仅水平尺目标） */
+    sprintf(scd_target_buf, "H:%ld", (long)scd_h_targets[0]);
+    we_label_obj_init(&scd_target_label, lcd, 2, 0,
+                      scd_target_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+
+    /* 水平尺通栏（厚 36 由固定宏推导，12px 字体下数字区有富余） */
+    we_scale_obj_init(&scd_h_scale, lcd, 2, 16, 124U, WE_SCALE_H, we_font_consolas_18);
+    we_scale_set_range(&scd_h_scale, 0, 100);
+    we_scale_set_ticks(&scd_h_scale, 20U, 4U);
+
+    we_scale_anim_value(&scd_h_scale, scd_h_targets[scd_idx], SCD_ANIM_MS);
+}
+
+/**
+ * @brief scale preview demo 周期更新（128x64：单尺目标轮换）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_scale_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    scd_acc_ms += ms_tick;
+    if (scd_acc_ms >= SCD_PERIOD)
+    {
+        scd_acc_ms = 0U;
+        scd_idx = (uint8_t)((scd_idx + 1U) % SCD_TARGET_CNT);
+        we_scale_anim_value(&scd_h_scale, scd_h_targets[scd_idx], SCD_ANIM_MS);
+        sprintf(scd_target_buf, "H:%ld", (long)scd_h_targets[scd_idx]);
+        we_label_set_text(&scd_target_label, scd_target_buf);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

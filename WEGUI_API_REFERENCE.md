@@ -15,7 +15,7 @@
 │            Widget Layer (Core/widgets/...)            │
 │   label │ btn │ img │ img_ex │ arc │ group │ ...      │
 ├──────────────────────────────────────────────────────┤
-│          GUI Kernel (Core/we_gui_driver.h)            │
+│              GUI Kernel (Core/wegui.h)                │
 │   tick │ timer │ anim │ dirty-rect │ PFB render       │
 ├──────────────────────────────────────────────────────┤
 │         Platform Port Config (per-target header)      │
@@ -32,7 +32,7 @@
 | `STM32F103/` | Hardware MCU entry, Keil project, LCD SPI + external flash ports |
 | `STM32F030/` | Hardware MCU entry, Keil project, LCD SPI ports |
 | `AD14N/` | JieLi AD142A4 entry, CodeBlocks/pi32 project, SPI1+DMA LCD port |
-| `SimLite/` | PC simulator entry (fenster backend, no SDL), port, config, autotest harness |
+| `SimLite/` | PC simulator entry (fenster backend, no SDL), port, config, build scripts |
 
 ### Key Concepts
 
@@ -46,56 +46,57 @@
 
 ## 2. Initialization & Main Loop
 
-### 2.1 All-in-one Init
+### 2.1 Init: port descriptor + PFB
 
 ```c
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 we_lcd_t mylcd;
 colour_t user_gram[USER_GRAM_NUM];
 
-// Single call initializes LCD + input + storage ports
-we_gui_init(&mylcd,
-    RGB888TODEV(10, 14, 20),      // background color
-    user_gram, USER_GRAM_NUM,      // PFB buffer and size
-    lcd_set_windows,               // set-window callback
-    lcd_rgb565_port,               // flush callback (unified port naming)
-    we_input_port_read,            // input read callback (NULL if unused)
-    we_storage_port_read);         // storage read callback (NULL if unused)
+/* Port descriptor: keep it static const (flash); the kernel stores the pointer */
+static const we_port_t s_port = {
+    .set_addr = lcd_set_windows,          // required: set flush window (inclusive coords)
+    .flush = lcd_rgb565_port,             // required: push pixels; pix_size is always a PIXEL count
+    .touch_read = touch_read,             // optional: level report (pressed + x/y), NULL = no touch
+    .storage_read = we_storage_port_read, // optional: external flash read (addr, buf, len), NULL = none
+    .flush_async = 0,                     // 1 = flush returns before the DMA transfer ends
+};
+
+we_gui_init(&mylcd, &s_port, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM);
 ```
 
-Or use individual init functions:
+`flush_async = 1` requires `GRAM_DMA_BUFF_EN = 1` and a PFB of at least two rows: the kernel
+splits it into two halves and never writes the half being sent; the port's `flush` and
+`set_addr` must wait for the previous transfer before starting. A synchronous port keeps the
+whole PFB for drawing.
 
-```c
-we_lcd_init_with_port(&mylcd, bg, gram, gram_size, set_addr_cb, flush_cb);
-we_input_init_with_port(&mylcd, input_cb);    // requires WE_CFG_ENABLE_INPUT_PORT_BIND == 1
-we_storage_init_with_port(&mylcd, storage_cb); // requires WE_CFG_ENABLE_STORAGE_PORT_BIND == 1
-```
+Touch: `touch_read(we_touch_data_t *d)` only reports the level — set `d->pressed = 1` and the
+coordinates while touched, `0` otherwise (coordinates may be left untouched; the kernel pre-fills
+the last ones). PRESSED / STAY / RELEASED edges, swipes and clicks are derived by the kernel.
 
 ### 2.2 Main Loop Pattern
 
 ```c
-// STM32:
+// Hardware: free-running 32-bit millisecond counter incremented by SysTick
+uint32_t t0 = g_sys_ms;               // time base starts at 0 when the loop starts
 while (1) {
-    if (sys1ms_stick >= 1U) {
-        uint16_t ms = sys1ms_stick;
-        sys1ms_stick = 0;
-        we_gui_tick_inc(&mylcd, ms);   // feed elapsed time
-    }
-    we_gui_task_handler(&mylcd);       // input + timers + render + flush
+    (void)we_gui_run(&mylcd, g_sys_ms - t0);   // touch + keys + timers + animations + render
 }
 
 // SimLite simulator (additional present call):
 while (lite_handle_events(&mylcd)) {
-    uint32_t delta = lite_ticks_ms() - last_tick;
-    if (delta > 0U) {
-        we_gui_tick_inc(&mylcd, (uint16_t)delta);
-        last_tick += delta;
-    }
-    we_gui_task_handler(&mylcd);
-    lite_present();                    // push framebuffer to the window
+    (void)we_gui_run(&mylcd, lite_ticks_ms() - t0);
+    lite_present();                   // push framebuffer to the window
 }
 ```
+
+`uint32_t we_gui_run(we_lcd_t *lcd, uint32_t now_ms)` measures the elapsed time itself
+(wrap-safe, clamped to 65535 ms per call; the first call's elapsed is `now_ms`) and returns the
+number of milliseconds until it needs to run again: `0` = as soon as possible (animation running,
+dirty area or keys pending), `WE_GUI_RUN_IDLE` = nothing pending. Optional pacing:
+`WE_CFG_REFR_PERIOD_MS` (minimum interval between renders) and `WE_CFG_INDEV_PERIOD_MS`
+(touch sampling interval), both default 0.
 
 ### 2.3 Color Macro
 
@@ -136,7 +137,7 @@ we_gui_timer_create(&mylcd, &hide_timer, hide_cb, 2000U, 0U);
 ### 3.1 中央动画引擎 (we_anim_t)
 
 控件动画统一由中央动画引擎驱动，**不占用任何槽位**、数量无上限、不会注册失败。
-动画节点内嵌在控件结构体中（零堆分配），`we_gui_task_handler()` 每个调度周期遍历链表并调用 step 回调：
+动画节点内嵌在控件结构体中（零堆分配），`we_gui_run()` 每一帧遍历链表并调用 step 回调：
 
 ```c
 // 节点（通常内嵌在控件结构体里）
@@ -390,7 +391,7 @@ we_ease_out_back(t);      // Overshoots then returns (>256 briefly)
 int32_t x = we_lerp(start_x, end_x, we_ease_out_quad(t));
 ```
 
-**`we_lerp`** (in `we_gui_driver.h`):
+**`we_lerp`** (in `we_types.h`):
 ```c
 static inline int32_t we_lerp(int32_t from, int32_t to, uint16_t t);
 // from + (to - from) * t / 256
@@ -509,7 +510,7 @@ WE_MAX(a, b)
 
 ## 10. Input System
 
-Input events are dispatched by `we_gui_task_handler` automatically.
+Touch is sampled inside `we_gui_run` through `port->touch_read` (level report, see §2.1); the kernel derives the edges below and dispatches them. `we_gui_indev_handler(lcd, &data)` injects edges directly (script replay).
 
 ```c
 typedef struct {
@@ -551,14 +552,14 @@ Each platform must define these macros before including `we_gui_config.h`:
 | `LCD_DEEP` | Color depth | `DEEP_RGB565` or `DEEP_RGB888` |
 | `SCREEN_WIDTH` | Screen width in pixels | `280` |
 | `SCREEN_HEIGHT` | Screen height in pixels | `240` |
-| `GRAM_DMA_BUFF_EN` | DMA double-buffer enable | `0` or `1` |
+| `GRAM_DMA_BUFF_EN` | DMA double buffering (takes effect when the port declares `flush_async = 1`) | `0` or `1` |
 | `USER_GRAM_NUM` | PFB buffer size in pixels | `SCREEN_WIDTH * 2` |
 | `WE_CFG_DIRTY_STRATEGY` | Dirty rect strategy | `0`, `1`, or `2` |
 | `WE_CFG_DIRTY_MAX_NUM` | Max dirty rects (strategy 2) | `8` |
 | `WE_CFG_DEBUG_DIRTY_RECT` | Show dirty rects in red | `0` or `1` |
 | `WE_CFG_ENABLE_INDEXED_QOI` | Enable indexed QOI decode | `0` or `1` |
-| `WE_CFG_ENABLE_INPUT_PORT_BIND` | Enable input port binding | `0` or `1` |
-| `WE_CFG_ENABLE_STORAGE_PORT_BIND` | Enable storage port binding | `0` or `1` |
+| `WE_CFG_REFR_PERIOD_MS` | Minimum interval between two renders (ms, 0 = every `we_gui_run`) | `0` |
+| `WE_CFG_INDEV_PERIOD_MS` | Touch sampling interval (ms, 0 = every `we_gui_run`) | `0` |
 
 Optional macros (defaulted by `we_gui_config.h` when the platform omits them):
 
@@ -695,7 +696,7 @@ Preview demos occupy `101..126`; the ID table and entry declarations live in `De
 ### SimLite simulator (TCC-first, no SDL / no CMake)
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Run
-powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Dev   # wegui_lite_dev: runtime demo select / --autotest
+powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Demo 25 -Run   # override DEMO_ID without editing source
 ```
 
 ### STM32 (Keil MDK-ARM AC5)
@@ -708,7 +709,7 @@ UV4.exe -r "STM32F103\MDK-ARM\Project.uvprojx" -t "WeGui_ARGB"
 ## 15. Quick Start: Minimal Application
 
 ```c
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "we_widget_label.h"
 #include "we_widget_btn.h"
 
@@ -716,6 +717,14 @@ static we_lcd_t mylcd;
 static colour_t user_gram[USER_GRAM_NUM];
 static we_label_obj_t hello;
 static we_btn_obj_t my_btn;
+
+static const we_port_t s_port = {
+    .set_addr = lcd_set_windows,
+    .flush = lcd_rgb565_port,
+    .touch_read = NULL,
+    .storage_read = NULL,
+    .flush_async = 0,
+};
 
 static void anim_tick(we_lcd_t *lcd, uint16_t ms) {
     // your animation logic here
@@ -726,9 +735,7 @@ int main(void) {
     lcd_hw_init();
 
     // 2. GUI init
-    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20),
-                user_gram, USER_GRAM_NUM,
-                lcd_set_windows, lcd_rgb565_port, NULL, NULL);
+    we_gui_init(&mylcd, &s_port, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM);
 
     // 3. Create widgets
     we_label_obj_init(&hello, &mylcd, 10, 10, "Hello WeGui!",
@@ -743,21 +750,16 @@ int main(void) {
     we_gui_timer_create(&mylcd, &anim_timer, anim_tick, 16U, 1U);
 
     // 5. Main loop
+    uint32_t t0 = g_sys_ms;
     while (1) {
-        if (sys1ms_stick >= 1U) {
-            uint16_t ms = sys1ms_stick;
-            sys1ms_stick = 0;
-            we_gui_tick_inc(&mylcd, ms);
-        }
-        we_gui_task_handler(&mylcd);
+        (void)we_gui_run(&mylcd, g_sys_ms - t0);
     }
 }
 ```
-
 ## 16. Focus & Key Navigation (V0.2.2+)
 
 按键导航子系统完整说明见 `CLAUDE.md` 的 "Focus and Key Navigation" 章节与
-`Core/we_gui_driver.h` 注释；此处为 API 速查。总开关 `WE_CFG_ENABLE_KEY_INPUT`
+`Core/we_focus.h` 注释；此处为 API 速查。总开关 `WE_CFG_ENABLE_KEY_INPUT`
 （共享配置=1；内核默认 0，纯触摸工程零成本剔除）。
 
 ### 端口注入（唯一入口，禁止轮询）
@@ -781,8 +783,8 @@ uint8_t ok = we_focus_candidate(obj);      // 结构性候选判定（容器空�
 we_focus_edit_enter/exit/active(&mylcd);   // 编辑态（WE_CFG_FOCUS_EDIT=0 时为空 stub）
 ```
 
-可聚焦性 = 类描述符 `class_flags` 带 `WE_CLASS_FLAG_FOCUSABLE`（2C 起 key_cb
-已并入统一 `event_cb`：0x10/0x20 两段事件码只发给 FOCUSABLE 类）。裁剪宏：
+可聚焦性 = 类描述符 `class_flags` 带 `WE_CLASS_FLAG_FOCUSABLE`（0x10/0x20 两段
+事件码经统一 `event_cb` 只发给 FOCUSABLE 类）。裁剪宏：
 `WE_CFG_FOCUS_EDIT` / `WE_CFG_FOCUS_NESTED` / 各控件 `WE_<NAME>_USE_KEY`。
 光标外观：`WE_CFG_FOCUS_CURSOR_THICKNESS/GAP/R/G/B`。
 光标显隐随输入来源：按键活动或 `we_focus_set`/`we_focus_edit_enter` 亮出，
@@ -799,6 +801,12 @@ void we_obj_delete(we_obj_t *obj);                    /* 唯一删除入口：de
                                                          内核回收按压/焦点/弹层/动画引用 */
 void we_obj_attach_to_top(we_lcd_t *lcd, we_obj_t *o);/* 顶层链：保证置顶（toast/msgbox），
                                                          不打乱普通层 Z 序 */
+void we_modal_open(we_lcd_t *lcd, we_obj_t *o);       /* 声明模态（dropdown 列表/msgbox/软键盘）：
+                                                         背后控件收不到触摸与按键，
+                                                         新模态会先让旧模态收起 */
+void we_modal_close(we_lcd_t *lcd, we_obj_t *o);      /* 解除模态（o 须为当前模态） */
+/* 控件另挂在顶层链上的伴生对象（如 dropdown 的 overlay）必须在自己的
+ * delete_cb 里收起：内核回收只认被删对象本身 */
 
 /* 几何（新旧区域 + 焦点光标环的标脏都由内核负责，控件不必自己算环） */
 void we_obj_set_pos(we_obj_t *obj, int16_t x, int16_t y);
@@ -809,6 +817,23 @@ void we_indev_grab(we_lcd_t *lcd, we_obj_t *obj);     /* 祖先容器接管手�
                                                          收 RELEASED 回弹，不触发点击） */
 /* 容器只需应答 WE_EVENT_HIT_TEST（0=连子树跳过）与 WE_EVENT_DRAG_BEGIN
  * （拖拽接管询问，越 WE_CFG_DRAG_THRESHOLD=8 时沿祖先链询问一轮） */
+
+/* 绘制（内核统一递归）：draw_cb 调用前窗口已收窄到对象包围盒，控件画不出包围盒；
+ * 容器类描述符的两个可选钩子：
+ *   uint8_t (*content_cb)(void *obj, we_rect_t *area);  子控件区（只能在包围盒内收窄）
+ *                                                        + 子控件级联透明度（0=子树不画不命中）
+ *   void (*draw_post_cb)(void *obj);                     子控件画完后的补画（滚动条/蒙版）
+ * 容器 draw_cb 只画自己的背景，子控件由内核画。 */
+void    we_pfb_clip_save(const we_lcd_t *lcd, we_pfb_clip_t *sv);   /* 窗口现场（lcd->clip + pfb_gram） */
+uint8_t we_pfb_clip_to(we_lcd_t *lcd, const we_pfb_clip_t *sv,
+                       int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* 收窄到更小的子区 */
+void    we_pfb_clip_restore(we_lcd_t *lcd, const we_pfb_clip_t *sv);
+
+/* 文字与位图原语 */
+uint8_t we_utf8_next(const char **pp, uint16_t *code);  /* 1=读到码点，0=结束/截断 */
+void    we_draw_alpha_mask(we_lcd_t *lcd, int16_t x, int16_t y, uint16_t w, uint16_t h,
+                           const uint8_t *src, uint32_t row_stride, uint8_t bpp,
+                           colour_t fg, uint8_t opacity); /* 行字节对齐、高位在前的 1/2/4/8bpp 位图 */
 
 /* 滚动物理组件（Core/components/we_scroll.h，list 已迁移为样板） */
 void    we_scroll_press(we_scroll_t *sc, int16_t c);

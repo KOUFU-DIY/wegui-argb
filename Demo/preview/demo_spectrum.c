@@ -20,6 +20,15 @@
 /* 假音频帧周期（毫秒） */
 #define SP_FRAME_MS 50U
 
+/* 假音频合成器与频谱对象为大小屏共享；标题/FPS/说明仅大屏版有 */
+static we_spectrum_obj_t sp_spectrum;
+
+static uint32_t sp_acc_ms;             /* 帧节拍累积器 */
+static uint32_t sp_lcg = 0x12345678UL; /* LCG 伪随机状态 */
+static uint16_t sp_phase;              /* 包络扫描相位（512 步制） */
+static uint8_t sp_levels[SP_BARS];     /* 本帧合成电平 */
+
+#if !WE_DEMO_SMALL_SCREEN
 /* 布局（280x240 基准） */
 #define SP_PANEL_X 20
 #define SP_PANEL_Y 48
@@ -29,16 +38,11 @@
 static we_label_obj_t sp_title;
 static we_label_obj_t sp_fps_label;
 static we_label_obj_t sp_hint_label;   /* 底部 toggle 风格说明 */
-static we_spectrum_obj_t sp_spectrum;
 
 static uint32_t sp_fps_timer;
 static uint32_t sp_last_frames;
 static char sp_fps_buf[16];
-
-static uint32_t sp_acc_ms;             /* 帧节拍累积器 */
-static uint32_t sp_lcg = 0x12345678UL; /* LCG 伪随机状态 */
-static uint16_t sp_phase;              /* 包络扫描相位（512 步制） */
-static uint8_t sp_levels[SP_BARS];     /* 本帧合成电平 */
+#endif
 
 /**
  * @brief 合成一帧假音频包络：慢波 + 快波 + LCG 噪声，含削顶。
@@ -70,6 +74,8 @@ static void sp_make_frame(uint8_t *out)
         out[i] = (uint8_t)v;
     }
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 spectrum demo
@@ -125,3 +131,43 @@ void we_spectrum_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &sp_fps_label, &sp_fps_timer,
                        &sp_last_frames, sp_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 spectrum demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_spectrum_preview_demo_init(we_lcd_t *lcd)
+{
+    sp_acc_ms = 0U;
+    sp_phase = 0U;
+    memset(sp_levels, 0, sizeof(sp_levels));
+
+    /* 24 柱频谱占满全屏（峰值帽默认开启） */
+    we_spectrum_obj_init(&sp_spectrum, lcd, 0, 0, 128, 64, SP_BARS);
+    we_spectrum_set_peak_hold(&sp_spectrum, 1U);
+}
+
+/**
+ * @brief spectrum demo 周期更新：每 50ms 合成并 push 一帧假音频包络
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_spectrum_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    sp_acc_ms += ms_tick;
+    while (sp_acc_ms >= SP_FRAME_MS)
+    {
+        sp_acc_ms -= SP_FRAME_MS;
+        sp_make_frame(sp_levels);
+        we_spectrum_push(&sp_spectrum, sp_levels);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

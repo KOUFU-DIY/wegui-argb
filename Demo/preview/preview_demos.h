@@ -1,7 +1,16 @@
 #ifndef PREVIEW_DEMOS_H
 #define PREVIEW_DEMOS_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
+
+/* 小屏 demo 判定：与 simple_widget_demos.h 同款定义（替换列表完全一致，
+ * 两头文件同时包含也不触发重定义告警）；preview demo 与稳定区同规矩——
+ * 每个 demo_xxx.c 内 #if !WE_DEMO_SMALL_SCREEN 大屏 / #else 128x64 小屏。 */
+#if (SCREEN_WIDTH <= 128)
+#define WE_DEMO_SMALL_SCREEN 1
+#else
+#define WE_DEMO_SMALL_SCREEN 0
+#endif
 
 /* demo 层统一字体：与 simple_widget_demos.h 同款定义（资源头只在
  * demo 层包含，Core 零资源感知，控件字体一律经 init 显式传入；

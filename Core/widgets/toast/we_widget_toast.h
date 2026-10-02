@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_TOAST_H
 #define __WE_WIDGET_TOAST_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 轻提示横幅控件（toast）
@@ -11,14 +11,14 @@
  *   → 停留 duration_ms → 滑出（回屏外并淡出）→ 隐藏。
  *
  * 实现要点：
- *   - 单个中央动画节点（we_anim_t，不占 GUI timer 槽）驱动
+ *   - 单个中央动画节点（we_anim_t）驱动
  *     ENTER/STAY/EXIT 三阶段状态机：Q8 进度 + we_ease_out_quad，
  *     每步同时更新 base.y 与 opacity；滑动步进的旧/新包围盒合并成
  *     一个 union 矩形单次标脏（省脏矩形合并器槽位）；
  *   - 非模态：class 的 event_cb 为 NULL，核心输入分发完全跳过本控件，
- *     横幅覆盖区域的触摸仍落到背后控件（非模态——
- *     那是单槽资源，归 dropdown 等真弹层使用）；
- *   - we_toast_show 时 we_obj_bring_to_front 置顶 Z 序；
+ *     横幅覆盖区域的触摸仍落到背后控件（不声明模态——模态是单槽资源，
+ *     归 dropdown / msgbox 等真弹层使用）；
+ *   - we_toast_show 时挂 LCD 顶层链（we_obj_attach_to_top），保证压住普通层；
  *     显示中再次 show：重置文本与停留计时，从当前位置/透明度平滑重入，
  *     动画进行中重复 show 不跳变；
  *   - 隐藏态 draw_cb 直接 return，包围盒停在屏外，零渲染开销。
@@ -28,7 +28,8 @@
  * 新字体行高重算）；停靠位与左右边距可 we_toast_set_margin 调整。
  * 宽度 = 屏宽 - 2*边距，高度 = 字体行高 + 2*WE_TOAST_PAD_Y，
  * 停靠顶部水平居中。超宽文本尾部自动截断并追加 "..."（零拷贝实现：
- * 前缀经 PFB 右界收窄绘制，省略号单独补画）。
+ * 前缀经窗口右界收窄绘制，省略号单独补画）。文字排版在 show / 换字体 /
+ * 改边距时算一次缓存，绘制不再测量文字。
  * -------------------------------------------------------------------------- */
 
 /* 横幅左右边距默认值（像素），宽度 = 屏宽 - 2*边距；运行期可 set_margin */
@@ -86,9 +87,13 @@ typedef struct we_toast_obj_t
     uint16_t duration_ms;      /* 停留时长（毫秒） */
     uint16_t phase_acc;        /* 当前阶段已累计毫秒 */
     int16_t  from_y;           /* 本段位移动画起点 Y（重入时=当前 Y，不跳变） */
+    int16_t  txt_ox;           /* 文字起点相对横幅左缘的偏移 */
+    int16_t  txt_oy;           /* 文字行顶相对横幅顶边的偏移（按墨迹竖直居中） */
+    int16_t  prefix_w;         /* 省略号截断时前缀可见宽（像素） */
     uint8_t  from_opa;         /* 本段透明度动画起点 */
+    uint8_t  fit_mode;         /* 排版方式（内部枚举：居中 / 省略号截断 / 硬裁剪） */
 
-    we_anim_t anim;            /* 中央动画节点（归控件所有，删除前必须摘链） */
+    we_anim_t anim;            /* 中央动画节点（删除时由内核回收） */
 } we_toast_obj_t;
 
 /* --------------------------------------------------------------------------
@@ -149,7 +154,7 @@ void we_toast_set_font(we_toast_obj_t *obj, const unsigned char *font);
 void we_toast_set_margin(we_toast_obj_t *obj, int16_t top, int16_t side);
 
 /**
- * @brief 删除控件：先摘除动画节点（we_anim_stop）再从对象链表移除。
+ * @brief 删除控件（动画节点由内核随对象一并回收）。
  * @param obj 控件对象指针。
  * @return 无。
  */

@@ -24,12 +24,12 @@
 void storage_hw_init(void);
 
 /**
- * @brief 从外部存储按地址读取数据。
- * @param buf 读取结果缓冲区。
+ * @brief 从外部存储按地址读取数据（填进端口描述 we_port_t 的 storage_read）。
  * @param addr 外部存储起始地址。
+ * @param buf 读取结果缓冲区。
  * @param len 读取字节长度。
- * @return 读取结果，1 表示成功，0 表示失败。
+ * @return 无。
  */
-uint8_t we_storage_port_read(uint8_t *buf, uint32_t addr, uint32_t len);
+void we_storage_port_read(uint32_t addr, uint8_t buf[], uint32_t len);
 
 #endif

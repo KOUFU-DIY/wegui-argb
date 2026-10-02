@@ -19,21 +19,25 @@
 #include <stdio.h>
 #include <string.h>
 
-static we_label_obj_t mn_title;
-static we_label_obj_t mn_fps_label;
+/* 菜单树与动作回显为大小屏共享；标题/FPS 仅大屏版有 */
 static we_label_obj_t mn_sel_label; /* 顶部动作回显 */
 static we_menu_obj_t mn_menu;
+static char mn_sel_buf[32];
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t mn_title;
+static we_label_obj_t mn_fps_label;
 
 static uint32_t mn_fps_timer;
 static uint32_t mn_last_frames;
 static char mn_fps_buf[16];
-static char mn_sel_buf[32];
 
 /* 布局（280x240 基准） */
 #define MN_PANEL_X 30
 #define MN_PANEL_Y 60
 #define MN_PANEL_W 220
 #define MN_PANEL_H 170
+#endif
 
 /* ------------------------- 菜单树（调用方持有） -------------------------
  * 三层结构，自底向上定义：孙页 → 子页 → 根页。
@@ -148,6 +152,8 @@ static void mn_on_action(void *menu, uint16_t action_id, const we_menu_item_t *i
     we_label_set_text(&mn_sel_label, mn_sel_buf);
 }
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /**
  * @brief 初始化 menu demo
  * @param lcd 传入：GUI 屏幕上下文指针
@@ -193,3 +199,40 @@ void we_menu_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &mn_fps_label, &mn_fps_timer,
                        &mn_last_frames, mn_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 menu demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_menu_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(mn_sel_buf, 0, sizeof(mn_sel_buf));
+
+    /* 顶部动作回显（叶子行点击后覆盖提示文案） */
+    sprintf(mn_sel_buf, "> tap leaf");
+    we_label_obj_init(&mn_sel_label, lcd, 2, 0,
+                      mn_sel_buf, we_font_consolas_18,
+                      RGB888TODEV(112, 184, 255), 255);
+
+    /* 菜单面板占主体：同一棵三层树，标题栏 + 可滚动行区 */
+    we_menu_obj_init(&mn_menu, lcd, 0, 13, 128, 51,
+                     &mn_page_root, we_font_consolas_18);
+    we_menu_set_action_cb(&mn_menu, mn_on_action);
+}
+
+/**
+ * @brief menu demo 周期更新（菜单交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_menu_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

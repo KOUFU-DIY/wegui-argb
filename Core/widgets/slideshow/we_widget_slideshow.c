@@ -1,12 +1,5 @@
 #include "we_widget_slideshow.h"
-#include "we_render.h"
-
-/**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
- * @param ptr 回调透传对象指针。
- * @return 无。
- */
-static void _slideshow_draw_cb(void *ptr);
+#include "wegui.h"
 
 /**
  * @brief 控件事件回调，处理按压/滑动/点击输入。
@@ -25,10 +18,13 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
  */
 static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
+/* 背景、子控件区、整体移动都与 group 相同（纯色直角底 + 子控件随外框平移），
+ * 直接复用 group 的类回调；翻页滚动走自己的事件回调 */
 static const we_class_t _slideshow_class = {
-    .draw_cb = _slideshow_draw_cb,
+    .draw_cb = we_group_draw_cb,
     .event_cb = _slideshow_event_cb,
-    .set_pos_cb = NULL,
+    .set_pos_cb = we_group_set_pos_cb,
+    .content_cb = we_group_content_cb,
     /* 仅结构位：内嵌 we_group_obj_t，删除/改挂需要走 children_head。
      * 暂不给行为位——分页作用域尚未实现，焦点下钻会停到非当前页的
      * 子控件上（光标画到屏幕外）。做出分页作用域后再补 FOCUS_ENTER。 */
@@ -210,8 +206,6 @@ static int16_t _slideshow_anim_step_complex_axis(int16_t diff, int16_t *velocity
 }
 #endif
 
-
-
 /**
  * @brief 由对齐后的 scroll_x 反查所属页索引。
  * @param obj 目标控件对象指针。
@@ -359,53 +353,7 @@ static void _slideshow_anim_step(we_slideshow_obj_t *obj, uint16_t elapsed_ms)
  */
 static void _slideshow_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
-    we_slideshow_obj_t *obj = (we_slideshow_obj_t *)owner;
-    if (obj == NULL)
-        return;
-    _slideshow_anim_step(obj, elapsed_ms);
-}
-
-/**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
- * @param ptr 回调透传对象指针。
- * @return 无。
- */
-static void _slideshow_draw_cb(void *ptr)
-{
-    we_slideshow_obj_t *obj = (we_slideshow_obj_t *)ptr;
-    we_lcd_t *lcd = obj->group.base.lcd;
-
-    if (obj->group.opacity == 0)
-        return;
-
-    we_draw_round_rect_analytic_fill(lcd, obj->group.base.x, obj->group.base.y,
-                                     (uint16_t)obj->group.base.w, (uint16_t)obj->group.base.h,
-                                     0U, obj->group.bg_color, obj->group.opacity);
-
-    {
-        we_pfb_clip_t sv;
-        uint8_t old_scale = lcd->opa_scale;
-
-        /* 子控件透明度级联（嵌套自动链乘） */
-        lcd->opa_scale = we_opa_apply(lcd, obj->group.opacity);
-        we_pfb_clip_save(lcd, &sv);
-        if (we_pfb_clip_to(lcd, &sv, obj->group.base.x, obj->group.base.y,
-                           (int16_t)(obj->group.base.x + obj->group.base.w - 1),
-                           (int16_t)(obj->group.base.y + obj->group.base.h - 1)))
-        {
-            we_obj_t *child = obj->group.children_head;
-
-            while (child != NULL)
-            {
-                if (child->class_p && child->class_p->draw_cb)
-                    child->class_p->draw_cb(child);
-                child = child->next;
-            }
-        }
-
-        lcd->opa_scale = old_scale;
-        we_pfb_clip_restore(lcd, &sv);
-    }
+    _slideshow_anim_step((we_slideshow_obj_t *)owner, elapsed_ms);
 }
 
 /**
@@ -439,7 +387,6 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
         _slideshow_clear_snap_state(obj);
         obj->is_dragging = 1U;
         obj->last_touch_x = data->x;
-        obj->last_touch_y = data->y;
         return 1U;
     }
 
@@ -449,7 +396,6 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
         _slideshow_clear_snap_state(obj);
         obj->is_dragging = 1U;
         obj->last_touch_x = data->x;
-        obj->last_touch_y = data->y;
         return 1U;
     }
 
@@ -463,7 +409,6 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
             {
                 _slideshow_set_scroll(obj, dx);
                 obj->last_touch_x = data->x;
-                obj->last_touch_y = data->y;
             }
         }
         return 1U;
@@ -502,7 +447,6 @@ static uint8_t _slideshow_event_cb(void *ptr, we_event_t event, we_indev_data_t 
 void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, int16_t w, int16_t h,
                            colour_t bg_color, uint8_t opacity)
 {
-
     if (obj == NULL || lcd == NULL)
         return;
 
@@ -510,7 +454,6 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
     obj->group.base.class_p = &_slideshow_class;
     obj->scroll_x = 0;
     obj->last_touch_x = 0;
-    obj->last_touch_y = 0;
     obj->snap_target_x = 0;
 #if (WE_SLIDESHOW_SNAP_ANIM_MODE == WE_SLIDESHOW_SNAP_ANIM_COMPLEX)
     obj->snap_vx = 0;
@@ -521,26 +464,9 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
     obj->is_dragging = 0U;
     obj->snap_animating = 0U;
 
-
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;
     obj->anim.owner = NULL;
-}
-
-/**
- * @brief 释放控件运行时状态，并把动画节点从中央动画链摘除。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-void we_slideshow_obj_delete(we_slideshow_obj_t *obj)
-{
-    if (obj == NULL || obj->group.base.lcd == NULL)
-        return;
-
-    /* 节点归控件所有，删除前必须摘链 */
-    we_anim_stop(obj->group.base.lcd, &obj->anim);
-
-    we_group_obj_delete(&obj->group);
 }
 
 /**

@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_ANIMIMG_H
 #define __WE_WIDGET_ANIMIMG_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 帧动画控件（animimg）—— preview 孵化区实验控件

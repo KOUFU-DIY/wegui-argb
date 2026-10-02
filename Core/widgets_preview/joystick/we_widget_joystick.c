@@ -11,7 +11,7 @@
  */
 
 #include "we_widget_joystick.h"
-#include "we_render.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
@@ -236,9 +236,17 @@ static void _js_draw_cb(void *ptr)
     base_r = (int16_t)(obj->base.w / 2);
 
     /* 1. 底盘大圆（暗色托盘） */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底盘补 1px 白描边（否则与黑背景不可辨） */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    (uint16_t)base_r, _js_white, obj->base_color,
+                                    obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      (uint16_t)base_r, obj->base_color, obj->opacity);
+#endif
 
     /* 2. 中心十字准线：过中心的水平/垂直两条 1px 细线（留边缘内缩） */
     cross_len = (int16_t)(base_r - _JS_CROSS_INSET);
@@ -362,9 +370,16 @@ void we_joystick_obj_init(we_joystick_obj_t *obj, we_lcd_t *lcd,
     obj->vec_y = 0;
 
     {
+        /* 默认调色盘：单色样式切白边黑底盘（底盘描边在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t base_c  = RGB888_CONST(0, 0, 0);       /* 黑底盘 */
+        colour_t knob_c  = RGB888_CONST(255, 255, 255); /* 白摇杆头 */
+        colour_t cross_c = RGB888_CONST(255, 255, 255); /* 白准线 */
+#else
         colour_t base_c  = RGB888_CONST(40, 48, 64);    /* 暗蓝灰底盘 */
         colour_t knob_c  = RGB888_CONST(86, 170, 255);  /* 亮青蓝摇杆头 */
         colour_t cross_c = RGB888_CONST(88, 100, 122);  /* 灰蓝准线 */
+#endif
         obj->base_color  = base_c;
         obj->knob_color  = knob_c;
         obj->cross_color = cross_c;

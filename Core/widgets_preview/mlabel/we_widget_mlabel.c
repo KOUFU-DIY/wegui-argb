@@ -15,7 +15,7 @@
  */
 
 #include "we_widget_mlabel.h"
-#include "we_render.h" /* PFB 裁剪三件套 */
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -32,60 +32,6 @@ static const we_class_t _mlabel_class = {
 /* --------------------------------------------------------------------------
  * 内部工具
  * -------------------------------------------------------------------------- */
-
-/* UTF-8 解码状态（与 we_font_text.c 的 _utf8_decode_next_u16 同口径） */
-#define _MLABEL_U8_END       0U /* 字符串结束 */
-#define _MLABEL_U8_OK        1U /* 成功读取 1 个码点（非法单字节 code 置 0） */
-#define _MLABEL_U8_TRUNCATED 2U /* 截断的多字节序列 */
-
-/**
- * @brief 读取 UTF-8 字符串的下一个码点并推进指针（局部实现，只读不依赖核心私有函数）。
- * @param pp 传入传出：当前解析位置；成功后移动到下一个字符起始处。
- * @param out_code 传出：解析得到的码点，非法单字节时返回 0。
- * @return _MLABEL_U8_END / _MLABEL_U8_OK / _MLABEL_U8_TRUNCATED。
- * @note 支持 1/2/3 字节编码；4 字节及以上按非法单字节处理（code 置 0，
- *       后续 continuation 字节同样各自按非法单字节消费），与核心行为一致。
- */
-static uint8_t _mlabel_utf8_next(const char **pp, uint16_t *out_code)
-{
-    const unsigned char *p = (const unsigned char *)*pp;
-    uint8_t c0;
-
-    if (p == NULL || *p == 0U)
-        return _MLABEL_U8_END;
-
-    c0 = *p++;
-    *out_code = 0U;
-
-    if (c0 < 0x80U)
-    {
-        *out_code = c0;
-    }
-    else if ((c0 & 0xE0U) == 0xC0U)
-    {
-        if (*p == 0U)
-        {
-            *pp = (const char *)p;
-            return _MLABEL_U8_TRUNCATED;
-        }
-        *out_code = (uint16_t)(((c0 & 0x1FU) << 6) | ((uint8_t)*p++ & 0x3FU));
-    }
-    else if ((c0 & 0xF0U) == 0xE0U)
-    {
-        if (p[0] == 0U || p[1] == 0U)
-        {
-            *pp = (const char *)p;
-            return _MLABEL_U8_TRUNCATED;
-        }
-        *out_code = (uint16_t)(((c0 & 0x0FU) << 12) |
-                               (((uint8_t)p[0] & 0x3FU) << 6) |
-                               ((uint8_t)p[1] & 0x3FU));
-        p += 2;
-    }
-    /* 4 字节及以上编码：按非法单字节处理，code 保持 0 */
-    *pp = (const char *)p;
-    return _MLABEL_U8_OK;
-}
 
 /**
  * @brief 查询单个码点的步进宽（找不到字形返回 0，调用方按跳过处理）。
@@ -139,10 +85,9 @@ static void _mlabel_scan_line(const we_mlabel_obj_t *obj, const char *start,
     {
         const char *prev = p;
         uint16_t code = 0U;
-        uint8_t st = _mlabel_utf8_next(&p, &code);
         uint16_t adv;
 
-        if (st != _MLABEL_U8_OK)
+        if (we_utf8_next(&p, &code) == 0U)
             break; /* 文本结束或截断序列：本行到此为止，next 保持 NULL */
 
         if (code == (uint16_t)'\n')
@@ -212,10 +157,9 @@ static uint32_t _mlabel_prefix_fit(const we_mlabel_obj_t *obj, const char *start
     {
         const char *prev = p;
         uint16_t code = 0U;
-        uint8_t st = _mlabel_utf8_next(&p, &code);
         uint16_t adv;
 
-        if (st != _MLABEL_U8_OK)
+        if (we_utf8_next(&p, &code) == 0U)
             break;
 
         adv = _mlabel_adv_w(obj->font, code);
@@ -369,7 +313,12 @@ void we_mlabel_obj_init(we_mlabel_obj_t *obj, we_lcd_t *lcd,
         return; /* 字体必传 */
     obj->font = font;
     {
+        /* 默认调色盘：单色样式切纯白文字（黑底高对比） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t c = RGB888_CONST(255, 255, 255);
+#else
         colour_t c = RGB888_CONST(220, 226, 235);
+#endif
         obj->color = c;
     }
     obj->opacity  = 255U;

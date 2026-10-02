@@ -1,7 +1,7 @@
 #ifndef WE_WIDGET_SLIDESHOW_H
 #define WE_WIDGET_SLIDESHOW_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "widgets/group/we_widget_group.h"
 
 #ifdef __cplusplus
@@ -46,14 +46,12 @@ extern "C"
 #define WE_SLIDESHOW_PAGE_MAX 8
 #endif
 
-/* 幻灯片内最多挂载的子控件数量（所有页面合计）。 */
 typedef struct
 {
     we_group_obj_t group;
-    we_anim_t anim; /* 中央动画引擎节点（页吸附动画，不占 GUI task 槽） */
+    we_anim_t anim; /* 中央动画引擎节点（页吸附动画；删除控件时由内核摘链） */
     int16_t scroll_x;
     int16_t last_touch_x;
-    int16_t last_touch_y;
     int16_t snap_target_x;
 #if (WE_SLIDESHOW_SNAP_ANIM_MODE == WE_SLIDESHOW_SNAP_ANIM_COMPLEX)
     int16_t snap_vx;
@@ -81,11 +79,11 @@ void we_slideshow_obj_init(we_slideshow_obj_t *obj, we_lcd_t *lcd, int16_t x, in
                            colour_t bg_color, uint8_t opacity);
 
 /**
- * @brief 释放控件运行时状态，并把动画节点从中央动画链摘除。
+ * @brief 删除幻灯片：全部页面的子控件一并删除，动画节点由内核摘链。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
-void we_slideshow_obj_delete(we_slideshow_obj_t *obj);
+static inline void we_slideshow_obj_delete(we_slideshow_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 /**
  * @brief 新增一页并返回页索引。

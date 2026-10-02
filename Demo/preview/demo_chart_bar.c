@@ -14,13 +14,22 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
-/* 上面板（push 滚动）节拍与布局 */
+/* push 合成器与滚动实例为大小屏共享；下面板/标题/FPS 仅大屏版有 */
 #define CBD_PUSH_MS 250U
+#define CBD_TOP_BARS 24U
+
+static we_chart_bar_obj_t cbd_top;         /* push 滚动实例 */
+
+static uint32_t cbd_push_acc;              /* push 节拍累积器 */
+static uint32_t cbd_lcg = 0x2F6E2B1UL;     /* LCG 伪随机状态 */
+static uint16_t cbd_phase;                 /* 慢波相位（512 步制） */
+
+#if !WE_DEMO_SMALL_SCREEN
+/* 上面板（push 滚动）布局 */
 #define CBD_TOP_X 20
 #define CBD_TOP_Y 36
 #define CBD_TOP_W 240
 #define CBD_TOP_H 74
-#define CBD_TOP_BARS 24U
 
 /* 下面板（set_all 整帧）节拍与布局 */
 #define CBD_FRAME_MS 600U
@@ -34,18 +43,15 @@ static we_label_obj_t cbd_title;
 static we_label_obj_t cbd_fps_label;
 static we_label_obj_t cbd_top_hint;    /* 上面板说明 */
 static we_label_obj_t cbd_bot_hint;    /* 下面板说明 */
-static we_chart_bar_obj_t cbd_top;     /* push 滚动实例 */
 static we_chart_bar_obj_t cbd_bot;     /* set_all 整帧实例 */
 
 static uint32_t cbd_fps_timer;
 static uint32_t cbd_last_frames;
 static char cbd_fps_buf[16];
 
-static uint32_t cbd_push_acc;              /* push 节拍累积器 */
 static uint32_t cbd_frame_acc;             /* set_all 节拍累积器 */
-static uint32_t cbd_lcg = 0x2F6E2B1UL;     /* LCG 伪随机状态 */
-static uint16_t cbd_phase;                 /* 慢波相位（512 步制） */
 static uint8_t cbd_frame[CBD_BOT_BARS];    /* set_all 整帧缓冲 */
+#endif
 
 /**
  * @brief 合成一个 push 滚动值：we_sin 慢波 + LCG 噪声（像素高度）。
@@ -65,6 +71,8 @@ static uint8_t cbd_make_push_value(void)
 
     return (uint8_t)(6U + s48 + noise); /* 6~68 */
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 生成一帧随机分布（下面板 set_all 用）。
@@ -159,3 +167,44 @@ void we_chart_bar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &cbd_fps_label, &cbd_fps_timer,
                        &cbd_last_frames, cbd_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 chart_bar demo（128x64 布局：单 push 滚动面板全屏）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_chart_bar_preview_demo_init(we_lcd_t *lcd)
+{
+    cbd_push_acc = 0U;
+    cbd_phase = 0U;
+
+    /* 24 柱 push 滚动面板独占全屏（合成值 6~68 超量程部分由控件钳顶），
+     * 2 条横网格单色下为全不透明白线 */
+    we_chart_bar_obj_init(&cbd_top, lcd, 0, 0, 128, 64, CBD_TOP_BARS);
+    we_chart_bar_set_grid(&cbd_top, 2U);
+
+    we_chart_bar_push(&cbd_top, cbd_make_push_value()); /* 起始即有内容 */
+}
+
+/**
+ * @brief chart_bar demo 周期更新：每 250ms push 一个滚动值
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_chart_bar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    cbd_push_acc += ms_tick;
+    while (cbd_push_acc >= CBD_PUSH_MS)
+    {
+        cbd_push_acc -= CBD_PUSH_MS;
+        we_chart_bar_push(&cbd_top, cbd_make_push_value());
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

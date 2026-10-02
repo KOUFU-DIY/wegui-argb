@@ -1,5 +1,5 @@
 #include "we_widget_toggle.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /**
  * @brief 控件绘制回调，向当前 PFB 输出可视内容。
@@ -21,7 +21,7 @@ static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 /**
  * @brief 按键/焦点回调：OK = 翻转开关（镜像触摸 CLICKED 语义）。
  * @param ptr 回调透传对象指针。
- * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @param key_evt 语义键值或焦点通知（WE_KEY_xx / WE_KEY_EVT_xx）。
  * @return 非 0 表示已消费。
  * @note 与触摸路径一致：有用户回调时全部业务交用户回调（data 为 NULL），
  *       否则执行默认翻转并触发 changed_cb / 滑动动画。
@@ -51,7 +51,7 @@ static uint8_t _toggle_key_cb(void *ptr, uint8_t key_evt)
 static const we_class_t _toggle_class = {
     .draw_cb  = _toggle_draw_cb,
     .event_cb = _toggle_event_cb,
-        .set_pos_cb = NULL,
+    .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
     .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
@@ -87,7 +87,7 @@ static void _toggle_anim_advance_obj(we_toggle_obj_t *obj, uint16_t elapsed_ms)
     uint16_t acc_ms;
     uint16_t steps;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
 
     target = obj->checked ? (uint8_t)WE_TOGGLE_ANIM_STEPS : 0U;
@@ -154,7 +154,7 @@ static void _toggle_anim_step_cb(void *owner, uint16_t elapsed_ms)
  *          └──────────────────────────┘
  *
  * 轨道为全胶囊形（radius = h/2），滑块为圆形（radius = thumb_d/2）。
- * 动画推进由中央动画引擎（we_anim_t，链入 lcd->anim_head，不占 GUI task 槽）驱动，
+ * 动画推进由中央动画引擎（we_anim_t，链入 lcd->anim_head）驱动，
  * draw_cb 仅根据当前 anim_step 绘制，不修改任何状态、不标脏。
  * -------------------------------------------------------------------------- */
 
@@ -174,7 +174,7 @@ static void _toggle_draw_cb(void *ptr)
     int16_t   track_y;
     int16_t   track_h;
 
-    if (obj->opacity == 0 || w <= 0 || h <= 0)
+    if (obj->opacity == 0)
         return;
 
     /* ---- 1. 计算动画进度 ------------------------------------------ */
@@ -210,8 +210,9 @@ static void _toggle_draw_cb(void *ptr)
     int16_t thumb_d = h - 2 * pad;
     int16_t thumb_cy;
     if (thumb_d < 2) thumb_d = 2;
+    /* 滑块按 2×(thumb_d/2) 见方绘制：偶数直径先减 1，画出来比 h-2*pad 小 2px */
     if ((thumb_d & 1) == 0 && thumb_d > 3)
-        thumb_d -= 1; /* 奇数直径优先，圆心落在整数像素上更利落 */
+        thumb_d -= 1;
 
     /* 滑块中心直接对齐轨道左右端圆心，避免与内缩后的 track 几何脱节 */
     int16_t thumb_cx_off = (int16_t)(x + track_h / 2);
@@ -284,15 +285,12 @@ static void _toggle_draw_cb(void *ptr)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件事件回调，处理按压/滑动/点击输入。
+ * @brief 控件事件回调，处理按压/点击输入。
  * @param ptr 回调透传对象指针。
  * @param event 输入事件类型。
  * @param data 输入设备事件数据指针。
- * @return 返回状态标志（1 有效，0 无效）。
+ * @return 1 已消费；全透明时按压返回 0（交给外层）。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
-static uint8_t _toggle_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_TOGGLE_USE_KEY == 1)
@@ -302,6 +300,9 @@ static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 #endif
 
     we_toggle_obj_t *obj = (we_toggle_obj_t *)ptr;
+
+    if (event == WE_EVENT_PRESSED && obj->opacity == 0U)
+        return 0U; /* 看不见的开关不接触摸 */
 
     /* 用户自定义回调优先，接管全部事件 */
     if (obj->user_event_cb != NULL)
@@ -313,14 +314,14 @@ static uint8_t _toggle_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
     {
     case WE_EVENT_PRESSED:
         obj->pressed = 1U;
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
         break;
     case WE_EVENT_RELEASED:
         obj->pressed = 0U;
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
         break;
     case WE_EVENT_CLICKED:
-we_toggle_toggle(obj);
+        we_toggle_toggle(obj);
         break;
     default:
         break;
@@ -376,7 +377,7 @@ void we_toggle_obj_init(we_toggle_obj_t *obj, we_lcd_t *lcd,
     /* 加入显示链表（追加到链尾，保持 Z 轴顺序） */
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -405,7 +406,7 @@ void we_toggle_set_checked(we_toggle_obj_t *obj, uint8_t checked)
     we_anim_stop(obj->base.lcd, &obj->anim); /* 取消在途过渡 */
 #endif
 
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -421,11 +422,11 @@ void we_toggle_toggle(we_toggle_obj_t *obj)
     obj->checked = obj->checked ? 0U : 1U;
 #if WE_TOGGLE_USE_ANIM
     obj->anim_acc_ms = 0U;
-    /* 挂入中央动画链表（不占 task 槽、不会失败，无需快进兜底） */
+    /* 挂入中央动画链表（不会失败） */
     we_anim_start(obj->base.lcd, &obj->anim, _toggle_anim_step_cb, obj);
 #endif
     /* 不重置 anim_step，让动画从当前视觉位置自然过渡到新目标 */
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 
     if (obj->changed_cb != NULL)
         obj->changed_cb(obj, obj->checked);
@@ -442,22 +443,6 @@ void we_toggle_set_changed_cb(we_toggle_obj_t *obj, we_toggle_changed_cb_t cb)
     if (obj == NULL)
         return;
     obj->changed_cb = cb;
-}
-
-/**
- * @brief 删除开关控件并从动画链表/对象链表摘除。
- * @param obj 开关控件对象指针。
- * @return 无。
- */
-void we_toggle_obj_delete(we_toggle_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-#if WE_TOGGLE_USE_ANIM
-    /* 节点归控件所有，删除前必须摘链 */
-    we_anim_stop(obj->base.lcd, &obj->anim);
-#endif
-    we_obj_delete((we_obj_t *)obj);
 }
 
 /**
@@ -483,5 +468,5 @@ void we_toggle_set_opacity(we_toggle_obj_t *obj, uint8_t opacity)
     if (obj == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }

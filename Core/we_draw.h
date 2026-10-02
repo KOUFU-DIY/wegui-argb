@@ -1,17 +1,18 @@
-#ifndef WE_RENDER_H
-#define WE_RENDER_H
-
-#include "we_gui_driver.h"
-#include "image_res.h" /* 图片格式码枚举：格式分发接口的参数类型 */
+#ifndef WE_DRAW_H
+#define WE_DRAW_H
 
 /* --------------------------------------------------------------------------
- * WeGui 渲染内核内部接口
- *
- * 这份头文件只给控件层和底层渲染层之间做内部收口使用，不对外暴露成公共 API。
- *
- * 当前先集中图片渲染相关入口。后面如果继续把其它底层渲染能力从 we_gui_driver.c
- * 拆出来，也可以继续放到这里统一管理。
+ * 绘图原语：PFB 裁剪窗、混色与颜色写入、矩形/像素/线段、
+ * 四分之一圆与圆角矩形覆盖率蒙版、圆角矩形填充。
+ * 所有原语只写当前 PFB 切片窗口内的像素，入口处消费一次容器透明度级联。
  * -------------------------------------------------------------------------- */
+
+#include "we_types.h"
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
 /* --------------------------------------------------------------------------
  * PFB 裁剪窗三件套（save / clip_to / restore）
@@ -19,15 +20,14 @@
  * 控件把 PFB 窗口临时收窄到某个矩形（子控件区、单元格、滑入可见区……），
  * 画完恢复。clip_to 始终以 save 保存的"原始现场"为基准计算（非嵌套，
  * 同一现场可反复收窄），窗口无交集返回 0，本次不必绘制。
- * 窗口四字段与 pfb_gram 偏移一体维护——该算术写错即越界写 PFB，
- * 务必经由本组接口，不要在控件里手抄。
+ * lcd->clip 与 pfb_gram 的偏移一体维护——该算术写错即越界写 PFB，
+ * 务必经由本组接口，不要在控件里手抄。内核调用 draw_cb 前已把窗口
+ * 收窄到对象包围盒，控件只在需要更小的区域时才用它。
  * -------------------------------------------------------------------------- */
 typedef struct
 {
-    we_area_t area;   /* pfb_area 现场（x0/x1 有效） */
-    uint16_t y_start; /* pfb_y_start 现场 */
-    uint16_t y_end;   /* pfb_y_end 现场 */
-    colour_t *gram;   /* pfb_gram 现场 */
+    we_rect_t clip; /* 窗口现场 */
+    colour_t *gram; /* pfb_gram 现场 */
 } we_pfb_clip_t;
 
 /**
@@ -38,9 +38,7 @@ typedef struct
  */
 static __inline void we_pfb_clip_save(const we_lcd_t *lcd, we_pfb_clip_t *sv)
 {
-    sv->area = lcd->pfb_area;
-    sv->y_start = lcd->pfb_y_start;
-    sv->y_end = lcd->pfb_y_end;
+    sv->clip = lcd->clip;
     sv->gram = lcd->pfb_gram;
 }
 
@@ -54,25 +52,8 @@ static __inline void we_pfb_clip_save(const we_lcd_t *lcd, we_pfb_clip_t *sv)
  * @param y1 传入：目标矩形下缘（含端点）
  * @return 1 收窄后窗口非空；0 无交集（窗口未改动，本次不必绘制）
  */
-static __inline uint8_t we_pfb_clip_to(we_lcd_t *lcd, const we_pfb_clip_t *sv,
-                                       int16_t x0, int16_t y0, int16_t x1, int16_t y1)
-{
-    int16_t cx0 = WE_MAX((int16_t)sv->area.x0, x0);
-    int16_t cy0 = WE_MAX((int16_t)sv->y_start, y0);
-    int16_t cx1 = WE_MIN((int16_t)sv->area.x1, x1);
-    int16_t cy1 = WE_MIN((int16_t)sv->y_end, y1);
-
-    if (cx0 > cx1 || cy0 > cy1)
-        return 0U;
-
-    lcd->pfb_area.x0 = (uint16_t)cx0;
-    lcd->pfb_area.x1 = (uint16_t)cx1;
-    lcd->pfb_y_start = (uint16_t)cy0;
-    lcd->pfb_y_end = (uint16_t)cy1;
-    lcd->pfb_gram = sv->gram + (int32_t)(cy0 - (int16_t)sv->y_start) * lcd->pfb_width +
-                    (cx0 - (int16_t)sv->area.x0);
-    return 1U;
-}
+uint8_t we_pfb_clip_to(we_lcd_t *lcd, const we_pfb_clip_t *sv,
+                       int16_t x0, int16_t y0, int16_t x1, int16_t y1);
 
 /**
  * @brief 恢复 PFB 裁剪现场
@@ -82,9 +63,7 @@ static __inline uint8_t we_pfb_clip_to(we_lcd_t *lcd, const we_pfb_clip_t *sv,
  */
 static __inline void we_pfb_clip_restore(we_lcd_t *lcd, const we_pfb_clip_t *sv)
 {
-    lcd->pfb_area = sv->area;
-    lcd->pfb_y_start = sv->y_start;
-    lcd->pfb_y_end = sv->y_end;
+    lcd->clip = sv->clip;
     lcd->pfb_gram = sv->gram;
 }
 
@@ -92,7 +71,7 @@ static __inline void we_pfb_clip_restore(we_lcd_t *lcd, const we_pfb_clip_t *sv)
 /* --------------------------------------------------------------------------
  * RGB565 快速混色公共内联
  *
- * 这里专门给 we_gui_driver.c 和 we_widget_img_ex.c 共用，避免两边各维护一份
+ * 这里给内核混色与 we_widget_img_ex.c 共用，避免两边各维护一份
  * 完全相同的 RGB565 混色算法。后面如果继续调公式、改阈值、或做性能微调，
  * 只需要改这里一处。
  *
@@ -184,7 +163,7 @@ static __inline colour_t _we_colour_blend_core(colour_t fg, colour_t bg, uint8_t
 /* --------------------------------------------------------------------------
  * 通用双色混合，返回混合后的 colour_t，RGB565 和 RGB888 均适用。
  *
- * 与 we_store_blended_color (we_gui_driver.c) 的区别：
+ * 与 we_store_blended_color（本文件下方）的区别：
  * 1. 这里返回结果值，调用方自行决定如何写入目标
  * 2. 适合"先算出混色结果、再按需写入"的场景（如 img_ex 的逐像素内层循环）
  * 3. 内部把 0~255 alpha 扩展到 0~256 后用 >>8 替代 /255，
@@ -254,43 +233,10 @@ static __inline uint8_t we_opa_scale(uint8_t a, uint8_t opacity)
     return we_div255((uint32_t)a * (uint32_t)opacity);
 }
 
-/**
- * @brief 滚动条滑块几何：滑块高 = 轨道高 × 视口高/内容高，位置按滚动比例落轨
- * @param track_y0 传入：轨道顶部 Y（屏幕绝对坐标）
- * @param track_h 传入：轨道高度（像素）
- * @param view_h 传入：视口高度（像素）
- * @param content_h 传入：内容总高度（像素，调用方保证 > 0）
- * @param scroll 传入：当前滚动量（自动夹紧到 [0, max_scroll]）
- * @param max_scroll 传入：最大滚动量（调用方保证 > 0）
- * @param min_h 传入：滑块最小高度（像素）
- * @param thumb_y 传出：滑块顶部 Y
- * @param thumb_h 传出：滑块高度
- * @return 无
- */
-static __inline void we_scroll_bar_geom(int16_t track_y0, int16_t track_h,
-                                        int32_t view_h, int32_t content_h,
-                                        int32_t scroll, int32_t max_scroll,
-                                        int16_t min_h,
-                                        int16_t *thumb_y, int16_t *thumb_h)
-{
-    int16_t th = (int16_t)(((int32_t)track_h * view_h) / content_h);
-
-    if (th < min_h)
-        th = min_h;
-    if (th > track_h)
-        th = track_h;
-    if (scroll < 0)
-        scroll = 0;
-    if (scroll > max_scroll)
-        scroll = max_scroll;
-    *thumb_h = th;
-    *thumb_y = (int16_t)(track_y0 + (int32_t)(track_h - th) * scroll / max_scroll);
-}
-
 /* --------------------------------------------------------------------------
  * 颜色写入 / 混色辅助内联函数
  *
- * 定义在这里供多个 .c 文件共用（we_gui_driver.c / we_widget_img_flash.c），
+ * 定义在这里供内核绘图与各控件的 .c 文件共用，
  * 避免在各 .c 里重复定义相同的 static 版本。
  * -------------------------------------------------------------------------- */
 /**
@@ -422,6 +368,25 @@ void we_draw_round_rect_outline_fill(we_lcd_t *p_lcd, int16_t x, int16_t y,
                                      colour_t outline, colour_t fill, uint8_t opacity);
 
 /**
+ * @brief 绘制抗锯齿圆角矩形边框（只画环带，内部不动、露出下面的内容）
+ * @param p_lcd 传入：GUI 屏幕上下文指针
+ * @param x 传入：外接矩形左上角 X 坐标
+ * @param y 传入：外接矩形左上角 Y 坐标
+ * @param w 传入：外接矩形宽度
+ * @param h 传入：外接矩形高度
+ * @param radius 传入：外圆角半径（内轮廓取同心半径 radius-bw，不足 0 取直角）
+ * @param bw 传入：边框宽度；bw*2 >= min(w,h) 时整块实心填充
+ * @param color 传入：边框颜色
+ * @param opacity 传入：整体透明度（0~255）
+ * @return 无
+ * @note 空心框放在任意底色（容器背景、图片、渐变）上都正确：内部不填色。
+ *       与 outline_fill 的区别是后者用填充色盖住内部。
+ */
+void we_draw_round_rect_ring(we_lcd_t *p_lcd, int16_t x, int16_t y,
+                             uint16_t w, uint16_t h, uint16_t radius, uint16_t bw,
+                             colour_t color, uint8_t opacity);
+
+/**
  * @brief 将 RGB565 像素值转换为当前色深颜色类型
  * @param pixel 传入：RGB565 像素值
  * @return 转换后的 colour_t 颜色
@@ -448,110 +413,132 @@ static __inline colour_t we_color_from_rgb565(uint16_t pixel)
     return out;
 }
 
-/**
- * @brief 渲染 RGB565 原始图片到屏幕
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：图片数据指针（RGB565 格式）
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- */
-void we_img_render_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
+    /**
+     * @brief 绘制纯色矩形
+     * @param p_lcd 传入：GUI 屏幕上下文指针
+     * @param x 传入：左上角 X 坐标
+     * @param y 传入：左上角 Y 坐标
+     * @param w 传入：宽度
+     * @param h 传入：高度
+     * @param color 传入：填充颜色
+     * @param opacity 传入：透明度
+     * @return 无
+     */
+    void we_fill_rect(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h, colour_t color, uint8_t opacity);
+    /**
+     * @brief 在 PFB 缓冲区内写入单个像素
+     * @param p_lcd 传入：GUI 屏幕上下文指针
+     * @param px 传入：像素 X 坐标 (屏幕绝对坐标)
+     * @param py 传入：像素 Y 坐标
+     * @param color 传入：像素颜色
+     * @param opacity 传入：透明度 (0~255)
+     * @return 无
+     */
+    void we_draw_pixel(we_lcd_t *p_lcd, int16_t px, int16_t py, colour_t color, uint8_t opacity);
 
-/**
- * @brief 渲染 ARGB8565 原始图片到屏幕（逐像素 [alpha][RGB565 大端] 3 字节）
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：图片数据指针（ARGB8565 格式）
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- */
-void we_img_render_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
+    /**
+     * @brief 绘制粗线段 (Bresenham + 厚度扩展)
+     * @param p_lcd 传入：GUI 屏幕上下文指针
+     * @param x0 传入：起点 X
+     * @param y0 传入：起点 Y
+     * @param x1 传入：终点 X
+     * @param y1 传入：终点 Y
+     * @param thickness 传入：线宽 (像素)
+     * @param color 传入：线段颜色
+     * @param opacity 传入：透明度 (0~255)
+     * @return 无
+     */
+    void we_draw_line(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
+                      int16_t x1, int16_t y1, uint8_t thickness,
+                      colour_t color, uint8_t opacity);
 
-/**
- * @brief 渲染 A1/A2/A4/A8 透明位图到屏幕（仅 alpha 通道，以前景色混合）
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：透明位图数据指针（IMG_A1/A2/A4/A8 格式）
- * @param fg_color 传入：前景色（位图 alpha 以该颜色对背景混合）
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- * @note 取模数据每行按字节对齐（行末补零）、位序高位在前；
- *       连续位流布局的取模数据与此不兼容，不能混用
- */
-void we_img_render_alpha(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, colour_t fg_color, uint8_t opacity);
+    /**
+     * @brief 绘制圆头抗锯齿线段（单遍胶囊覆盖，半透明下圆头与线身不叠色）
+     * @param p_lcd 传入：GUI 屏幕上下文指针
+     * @param x0 传入：起点 X
+     * @param y0 传入：起点 Y
+     * @param x1 传入：终点 X
+     * @param y1 传入：终点 Y
+     * @param width 传入：线宽 (像素)
+     * @param color 传入：线段颜色
+     * @param opacity 传入：透明度 (0~255)
+     * @return 无
+     */
+    void we_draw_line_round(we_lcd_t *p_lcd, int16_t x0, int16_t y0,
+                            int16_t x1, int16_t y1, uint8_t width,
+                            colour_t color, uint8_t opacity);
 
-#if (WE_CFG_ENABLE_INDEXQOI_MASK == 1)
-/**
- * @brief 渲染索引QOI_MASK 压缩的 A8 透明蒙版（仅 alpha 通道，以前景色混合）
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：图片数据指针（IMG_A8_INDEXQOIMASK 格式）
- * @param fg_color 传入：前景色（蒙版 alpha 以该颜色对背景混合）
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- * @note 行独立编码 + 行字节偏移索引：PFB 切片只解码可见行，行内越过裁剪
- *       右缘立即停止；流式解码零额外 RAM。可选 8/7/6/5bit 量化在编码域完成，
- *       解码按高位复制还原。规格见 tool/0.tool/windows/img2bin_indexqoimask/README
- */
-void we_img_render_indexqoi_mask(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img,
-                                 colour_t fg_color, uint8_t opacity);
+    /**
+     * @brief 绘制按行字节对齐、高位在前的 alpha 位图（字形点阵 / A1~A8 图标）
+     * @param p_lcd 传入：GUI 屏幕上下文指针
+     * @param x 传入：位图左上角 X 坐标
+     * @param y 传入：位图左上角 Y 坐标
+     * @param w 传入：位图宽度（像素）
+     * @param h 传入：位图高度（行数）
+     * @param src_data 传入：第 0 行数据首地址
+     * @param row_stride 传入：每行字节数
+     * @param bpp 传入：位深（1/2/4/8）
+     * @param fg_color 传入：前景颜色
+     * @param opacity 传入：整体透明度（入口乘入容器透明度级联）
+     * @return 无
+     */
+    void we_draw_alpha_mask(we_lcd_t *p_lcd, int16_t x, int16_t y, uint16_t w, uint16_t h,
+                            const uint8_t *src_data, uint32_t row_stride, uint8_t bpp,
+                            colour_t fg_color, uint8_t opacity);
+
+    /**
+     * @brief 旋转缩放的逆映射步进：屏幕上走 1 像素，源坐标走多少（Q12，四舍五入）
+     * @param angle 传入：512 步制角度
+     * @param scale_256 传入：缩放（256 = 1.0x，须 > 0）
+     * @param st 传出：{屏幕 X+1 时源 X 增量, 屏幕 X+1 时源 Y 增量,
+     *                  屏幕 Y+1 时源 X 增量, 屏幕 Y+1 时源 Y 增量}
+     * @return 无
+     * @note 纯 32 位运算（不用 64 位乘法）；0°、1.0x 时恰为 4096，逐像素不漂移。
+     *       供 img_ex / label_ex 共用。
+     */
+    void we_xform_steps(int16_t angle, uint16_t scale_256, int32_t st[4]);
+
+    /**
+     * @brief 求某个屏幕像素的逆映射采样点（Q12）
+     * @param st 传入：we_xform_steps 求出的步进
+     * @param w 传入：源宽（像素）
+     * @param h 传入：源高（像素）
+     * @param ofs_x 传入：旋转轴心相对源几何中心的 X 偏移（像素）
+     * @param ofs_y 传入：旋转轴心相对源几何中心的 Y 偏移（像素）
+     * @param dx 传入：该像素 X 减去屏幕变换中心 X
+     * @param dy 传入：该像素 Y 减去屏幕变换中心 Y
+     * @param out 传出：{源 X, 源 Y}（Q12）
+     * @return 无
+     * @note 屏幕变换中心映射到源图轴心（几何中心 + 偏移）。偶数宽/高的轴心落在
+     *       两像素之间，采样取屏幕像素中心（补半个步进）；奇数时轴心本身在源像素
+     *       中心，像素左上角已对准。0°、1.0x 时源图逐像素原样画出；每个像素的采样
+     *       点只取决于它自己的屏幕坐标，与 PFB 切片、脏矩形的切法无关。
+     */
+    void we_xform_origin(const int32_t st[4], uint16_t w, uint16_t h, int16_t ofs_x, int16_t ofs_y,
+                         int32_t dx, int32_t dy, int32_t out[2]);
+
+    /**
+     * @brief 旋转缩放后源矩形在屏幕上的外接框（相对变换中心）
+     * @param w 传入：源宽（像素）
+     * @param h 传入：源高（像素）
+     * @param ofs_x 传入：旋转轴心相对源几何中心的 X 偏移（像素）
+     * @param ofs_y 传入：旋转轴心相对源几何中心的 Y 偏移（像素）
+     * @param angle 传入：512 步制角度
+     * @param scale_256 传入：缩放（256 = 1.0x，上限 64x）
+     * @param out_x 传出：外接框左上角相对变换中心的 X 偏移
+     * @param out_y 传出：外接框左上角相对变换中心的 Y 偏移
+     * @param out_w 传出：外接框宽
+     * @param out_h 传出：外接框高
+     * @return 无
+     * @note 四角按半像素精度变换，下界向下取整、上界向上取整，再各留 1px 余量：
+     *       任何缩放倍率下采样到的像素都落在框内。
+     */
+    void we_xform_bbox(int16_t w, int16_t h, int16_t ofs_x, int16_t ofs_y,
+                       int16_t angle, uint16_t scale_256,
+                       int16_t *out_x, int16_t *out_y, int16_t *out_w, int16_t *out_h);
+
+#ifdef __cplusplus
+}
 #endif
 
-/* --------------------------------------------------------------------------
- * 图片格式分发（img / imgbtn 等所有内置图片控件共用一份）
- *
- * 分发表放在解码器身边而不是各控件内部：控件只管"画哪张图、用什么透明度"，
- * 支持哪些格式由渲染层统一回答，新增格式只改这一处。
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 判断图片格式是否为当前编译配置支持（供控件在 init 阶段拦截）
- * @param fmt 传入：资源信息头里的格式码
- * @return 1 表示可渲染，0 表示不支持
- */
-uint8_t we_img_format_supported(imgarry_type_t fmt);
-
-/**
- * @brief 按资源格式自动选择渲染内核绘制图片
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：图片数据指针（image_res.h 信息头格式）
- * @param fg_color 传入：前景色，仅 A1/A2/A4/A8 透明位图使用，其余格式忽略
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- * @note 不支持的格式静默跳过；控件应在 init 阶段用 we_img_format_supported 拦截。
- */
-void we_img_render_auto(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img,
-                        colour_t fg_color, uint8_t opacity);
-
-#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-/**
- * @brief 渲染 indexed QOI（RGB565 调色板）图片到屏幕
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：indexed QOI 图片数据指针
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- */
-void we_img_render_indexed_qoi_rgb565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
-
-/**
- * @brief 渲染 indexed QOI（ARGB8565 调色板）图片到屏幕
- * @param p_lcd 传入：GUI 屏幕上下文指针
- * @param x0 传入：目标左上角 X 坐标
- * @param y0 传入：目标左上角 Y 坐标
- * @param img 传入：indexed QOI 图片数据指针
- * @param opacity 传入：整体透明度（0~255）
- * @return 无
- */
-void we_img_render_indexed_qoi_argb8565(we_lcd_t *p_lcd, int16_t x0, int16_t y0, const uint8_t *img, uint8_t opacity);
-#endif
-
-#endif
+#endif /* WE_DRAW_H */

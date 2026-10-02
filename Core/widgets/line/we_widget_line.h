@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_LINE_H
 #define __WE_WIDGET_LINE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
@@ -10,19 +10,21 @@
  * 一根可配置 起点/终点、线宽、线帽、颜色 的线段，支持：
  *   - 端点动画（起止点 from→to 平滑过渡）
  *   - 整体平移 / 平移动画
- *   - 颜色 / 颜色动画
- * 几何动画与颜色动画各用一个独立的中央动画引擎节点，可同时进行、互不干扰。
+ *   - 颜色 / 颜色动画、透明度 / 透明度动画
+ * 几何、颜色、透明度动画各用一个独立的中央动画引擎节点，可同时进行、互不干扰。
  *
  * 复用框架既有能力（不新增渲染图元）：
- *   - we_draw_line(...)：Xiaolin Wu 整数 Q8 抗锯齿，已支持任意线宽与容器透明度级联；
- *   - 圆头 cap 由 we_draw_round_rect_analytic_fill 退化为抗锯齿圆，画在端点处；
- *   - we_anim_t（链入 lcd->anim_head，不占 GUI task 槽）+ we_lerp + we_ease_*。
+ *   - 平头线 we_draw_line(...)：Xiaolin Wu 整数 Q8 抗锯齿，支持任意线宽与容器透明度级联；
+ *     每步画 width 个实心像素加两侧各 1 个 AA 像素，视觉线宽约 width+1；
+ *   - 圆头线 we_draw_line_round(...)：线身与半圆端帽按到线段的距离一次画成（胶囊）；
+ *   - we_anim_t（链入 lcd->anim_head）+ we_lerp + we_ease_*。
  *
- * 默认装饰性（不消费输入），需要交互时设 user_event_cb。命中测试按包围盒粒度。
+ * 默认装饰性：event_cb 为 NULL，命中测试跳过它，触摸落到背后的控件；
+ * 设了 user_event_cb 才接收输入。命中测试按包围盒粒度。
  * -------------------------------------------------------------------------- */
 
 /* 动画总开关（编译期）：置 0 可彻底去掉动画代码与占用——
- * 结构体省去两个 we_anim_t 节点与快照字段（省 RAM），动画推进/回调不编译（省 ROM），
+ * 结构体省去三个 we_anim_t 节点与快照字段（省 RAM），动画推进/回调不编译（省 ROM），
  * 同时 we_line_anim_* 退化为“立即生效”的兼容桩，调用方代码无需改动。 */
 #ifndef WE_LINE_USE_ANIM
 #define WE_LINE_USE_ANIM 1
@@ -53,7 +55,7 @@
 typedef enum
 {
     WE_LINE_CAP_BUTT = 0, /* 平头：端点处直接截断 */
-    WE_LINE_CAP_ROUND     /* 圆头：端点叠加一枚抗锯齿圆（半径=线宽/2） */
+    WE_LINE_CAP_ROUND     /* 圆头：两端为半径 = 线宽/2 的半圆（与线身一次画成） */
 } we_line_cap_t;
 
 /* --------------------------------------------------------------------------
@@ -91,7 +93,7 @@ typedef struct we_line_obj_t
     uint8_t      opa_to;        /* 透明度终点 */
 #endif
 
-    we_line_event_cb_t user_event_cb; /* 非 NULL 时接管全部事件 */
+    we_line_event_cb_t user_event_cb; /* 非 NULL 时接收全部输入事件（经 we_line_set_event_cb 设置） */
 } we_line_obj_t;
 
 /* --------------------------------------------------------------------------
@@ -139,6 +141,7 @@ void we_line_set_opacity(we_line_obj_t *obj, uint8_t opacity);
 
 /**
  * @brief 立即整体平移（两端同偏移，无动画）。
+ * @note 端点动画进行中时，动画的起止点也一起平移。
  */
 void we_line_move(we_line_obj_t *obj, int16_t dx, int16_t dy);
 
@@ -174,14 +177,13 @@ void we_line_anim_opacity(we_line_obj_t *obj, uint8_t target, uint16_t dur_ms,
                           we_ease_fn_t ease);
 
 /**
- * @brief 设置自定义事件回调（非 NULL 时接管全部输入事件）。
+ * @brief 设置自定义事件回调（非 NULL 时接收全部输入事件，NULL 恢复装饰性穿透）。
  */
 void we_line_set_event_cb(we_line_obj_t *obj, we_line_event_cb_t cb);
 
 /**
- * @brief 删除线段控件并从对象链表/动画系统移除。
- * @note 内部先 we_anim_stop（两个动画节点）再 we_obj_delete。
+ * @brief 删除线段控件并从对象链表移除（三个动画节点由内核一并摘链）。
  */
-void we_line_obj_delete(we_line_obj_t *obj);
+static inline void we_line_obj_delete(we_line_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif /* __WE_WIDGET_LINE_H */

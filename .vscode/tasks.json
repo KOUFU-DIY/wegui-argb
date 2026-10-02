@@ -95,9 +95,9 @@
             "problemMatcher": []
         },
         {
-            "label": "lite: build dev (gcc, debug)",
+            "label": "lite: build (gcc, debug)",
             "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/build_lite.ps1\" -Dev -Compiler gcc",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/build_lite.ps1\" -Compiler gcc",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "statusbar": {
@@ -111,22 +111,6 @@
             "problemMatcher": [
                 "$gcc"
             ]
-        },
-        {
-            "label": "lite: autotest",
-            "type": "shell",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/SimLite/autotest.ps1\"",
-            "options": {
-                "cwd": "${workspaceFolder}",
-                "statusbar": {
-                    "hide": true
-                }
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            },
-            "problemMatcher": []
         },
         {
             "label": "stm32: build (AC5)",

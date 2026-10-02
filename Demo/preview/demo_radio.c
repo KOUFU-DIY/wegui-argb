@@ -14,18 +14,22 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 单选组与选项表为大小屏共享；标题/FPS/回显仅大屏版有 */
+static we_radio_obj_t rd_group;
+
+/* 选项名数组：demo 静态持有，控件只存指针 */
+static const char *const rd_options[3] = { "Low", "Mid", "High" };
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t rd_title;
 static we_label_obj_t rd_fps_label;
 static we_label_obj_t rd_status;
-static we_radio_obj_t rd_group;
 
 static uint32_t rd_fps_timer;
 static uint32_t rd_last_frames;
 static char     rd_fps_buf[16];
 static char     rd_status_buf[24];
-
-/* 选项名数组：demo 静态持有，控件只存指针 */
-static const char *const rd_options[3] = { "Low", "Mid", "High" };
 
 /**
  * @brief 选中改变回调：把当前选中项名写到顶部状态 label
@@ -88,3 +92,31 @@ void we_radio_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &rd_fps_label, &rd_fps_timer,
                        &rd_last_frames, rd_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 radio preview demo（128x64 布局：三行单选独占全屏，
+ *        选中态由指示器自身呈现，无回显 label）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_radio_preview_demo_init(we_lcd_t *lcd)
+{
+    /* 三行单选组：小屏行高 = max(字体行高 14, 指示器 12) + 2x3 = 20，共 60 */
+    we_radio_obj_init(&rd_group, lcd, 4, 2, 120, rd_options, 3U, we_font_consolas_18);
+}
+
+/**
+ * @brief radio preview demo 周期更新（交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_radio_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

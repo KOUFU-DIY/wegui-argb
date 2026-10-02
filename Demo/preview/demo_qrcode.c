@@ -17,6 +17,13 @@
 /* 内容切换周期（毫秒） */
 #define QD_SWITCH_MS 5000U
 
+/* 二维码对象、内容表与切换状态为大小屏共享；标题/FPS/说明仅大屏版有 */
+static we_qrcode_obj_t qd_qr;
+
+static uint32_t qd_acc_ms; /* 切换节拍累积器 */
+static uint8_t qd_phase;   /* 0=URL 串，1=WiFi 配网串 */
+
+#if !WE_DEMO_SMALL_SCREEN
 /* 布局（280x240 基准）：v3 含静区 (29+8)*4 = 148px，水平居中 */
 #define QD_QR_X 66
 #define QD_QR_Y 58
@@ -25,24 +32,25 @@
 static we_label_obj_t qd_title;
 static we_label_obj_t qd_fps_label;
 static we_label_obj_t qd_hint_label; /* 顶部说明：当前编码的内容类型 */
-static we_qrcode_obj_t qd_qr;
 
 static uint32_t qd_fps_timer;
 static uint32_t qd_last_frames;
 static char qd_fps_buf[16];
-
-static uint32_t qd_acc_ms; /* 切换节拍累积器 */
-static uint8_t qd_phase;   /* 0=URL 串，1=WiFi 配网串 */
+#endif
 
 /* 两个演示内容（29/30 字节，均落在 v3-M 容量 42 字节内） */
 static const char *const qd_text[2] = {
     "https://github.com/wegui-argb",
     "WIFI:T:WPA;S:demo;P:12345678;;",
 };
+#if !WE_DEMO_SMALL_SCREEN
 static const char *const qd_hint[2] = {
     "1/2 URL: github repo",
     "2/2 WIFI: WPA config",
 };
+#endif
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 qrcode demo
@@ -97,3 +105,42 @@ void we_qrcode_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &qd_fps_label, &qd_fps_timer,
                        &qd_last_frames, qd_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 qrcode demo（128x64 布局：1px/模块，v3 含静区 37x37 居中）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_qrcode_preview_demo_init(we_lcd_t *lcd)
+{
+    qd_acc_ms = 0U;
+    qd_phase = 0U;
+
+    /* 居中二维码：1px/模块（37x37），近黑码色 + 近白底色二值化后即黑白码 */
+    we_qrcode_obj_init(&qd_qr, lcd, 45, 13, 1U);
+    (void)we_qrcode_set_text(&qd_qr, qd_text[0]);
+}
+
+/**
+ * @brief qrcode demo 周期更新：每 5 秒切换编码内容
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_qrcode_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    qd_acc_ms += ms_tick;
+    if (qd_acc_ms >= QD_SWITCH_MS)
+    {
+        qd_acc_ms -= QD_SWITCH_MS;
+        qd_phase ^= 1U;
+        (void)we_qrcode_set_text(&qd_qr, qd_text[qd_phase]);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

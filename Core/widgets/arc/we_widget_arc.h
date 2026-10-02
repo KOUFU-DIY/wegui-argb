@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_ARC_H
 #define __WE_WIDGET_ARC_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 圆弧控件建议脏矩形开关

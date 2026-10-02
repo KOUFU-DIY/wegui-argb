@@ -5,13 +5,14 @@
  * 单个中央动画节点驱动三阶段状态机（ENTER/STAY/EXIT）：
  * Q8 进度 + we_ease_out_quad，每步同时更新 base.y 与 opacity，
  * 滑动步进把旧/新包围盒合并成一个 union 矩形单次标脏。
- * 非模态：class 的 event_cb 为 NULL，输入完全穿透；
- * 非模态：不占用模态弹层语义（modal_obj）。
- * 超宽文本尾部截断加 "..."（零拷贝：前缀经 PFB 右界收窄绘制）。
+ * 非模态：class 的 event_cb 为 NULL，输入完全穿透；不声明模态。
+ * 超宽文本尾部截断加 "..."（零拷贝：前缀经窗口右界收窄绘制）。
+ * 文字排版（居中偏移 / 截断前缀宽）在 show、换字体、改边距时算一次，
+ * 绘制回调不再测量文字。
  */
 
 #include "we_widget_toast.h"
-#include "we_render.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* 阶段状态机取值（存入 obj->state） */
@@ -22,11 +23,6 @@ enum
     WE_TOAST_ST_STAY,       /* 停留：静止计时 duration_ms */
     WE_TOAST_ST_EXIT        /* 滑出：当前位 → 屏外/全透 */
 };
-
-/* UTF-8 解码状态（与 we_font_text.c 的 _utf8_decode_next_u16 同口径） */
-#define _TOAST_U8_END       0U /* 字符串结束 */
-#define _TOAST_U8_OK        1U /* 成功读取 1 个码点（非法单字节 code 置 0） */
-#define _TOAST_U8_TRUNCATED 2U /* 截断的多字节序列 */
 
 /* --------------------------------------------------------------------------
  * 内部工具
@@ -42,54 +38,13 @@ static __inline int16_t _toast_hidden_y(const we_toast_obj_t *obj)
     return (int16_t)(-(obj->base.h + 4));
 }
 
-/**
- * @brief 读取 UTF-8 字符串的下一个码点并推进指针（局部实现，参考 mlabel）。
- * @param pp 传入传出：当前解析位置；成功后移动到下一个字符起始处。
- * @param out_code 传出：解析得到的码点，非法单字节时返回 0。
- * @return _TOAST_U8_END / _TOAST_U8_OK / _TOAST_U8_TRUNCATED。
- * @note 支持 1/2/3 字节编码；4 字节及以上按非法单字节处理（code 置 0），
- *       与核心 we_font_text.c 行为一致。
- */
-static uint8_t _toast_utf8_next(const char **pp, uint16_t *out_code)
+/* 文字排版方式（存入 obj->fit_mode） */
+enum
 {
-    const unsigned char *p = (const unsigned char *)*pp;
-    uint8_t c0;
-
-    if (p == NULL || *p == 0U)
-        return _TOAST_U8_END;
-
-    c0 = *p++;
-    *out_code = 0U;
-
-    if (c0 < 0x80U)
-    {
-        *out_code = c0;
-    }
-    else if ((c0 & 0xE0U) == 0xC0U)
-    {
-        if (*p == 0U)
-        {
-            *pp = (const char *)p;
-            return _TOAST_U8_TRUNCATED;
-        }
-        *out_code = (uint16_t)(((c0 & 0x1FU) << 6) | ((uint8_t)*p++ & 0x3FU));
-    }
-    else if ((c0 & 0xF0U) == 0xE0U)
-    {
-        if (p[0] == 0U || p[1] == 0U)
-        {
-            *pp = (const char *)p;
-            return _TOAST_U8_TRUNCATED;
-        }
-        *out_code = (uint16_t)(((c0 & 0x0FU) << 12) |
-                               (((uint8_t)p[0] & 0x3FU) << 6) |
-                               ((uint8_t)p[1] & 0x3FU));
-        p += 2;
-    }
-    /* 4 字节及以上编码：按非法单字节处理，code 保持 0 */
-    *pp = (const char *)p;
-    return _TOAST_U8_OK;
-}
+    _TOAST_FIT_CENTER = 0, /* 放得下：水平居中 */
+    _TOAST_FIT_ELLIPSIS,   /* 超宽：前缀 + "..." */
+    _TOAST_FIT_CLIP        /* 窄到放不下 "..."：左对齐硬裁剪 */
+};
 
 /**
  * @brief 求文本在给定像素宽内能容纳的最大前缀宽度（省略号截断用，
@@ -112,9 +67,8 @@ static int32_t _toast_prefix_fit_w(const unsigned char *font, const char *text,
     {
         uint16_t code = 0U;
         uint16_t adv;
-        uint8_t st = _toast_utf8_next(&p, &code);
 
-        if (st != _TOAST_U8_OK)
+        if (we_utf8_next(&p, &code) == 0U)
             break;
         if (code == (uint16_t)'\n')
             break;
@@ -125,6 +79,51 @@ static int32_t _toast_prefix_fit_w(const unsigned char *font, const char *text,
         width += (int32_t)adv;
     }
     return width;
+}
+
+/**
+ * @brief 计算文字排版并缓存：竖直居中偏移、水平起点、截断方式与前缀宽。
+ * @param obj 控件对象指针。
+ * @return 无。
+ * @note 依赖文本、字体、横幅宽高，三者变化时（show / set_font / set_margin）调用。
+ */
+static void _toast_layout(we_toast_obj_t *obj)
+{
+    uint16_t txt_w;
+    int32_t avail_w;
+    int8_t y_top;
+    int8_t y_bottom;
+
+    if (obj->text == NULL)
+        return;
+
+    txt_w = we_get_text_width(obj->font, obj->text);
+    we_get_text_bbox(obj->font, obj->text, &y_top, &y_bottom);
+    obj->txt_oy = (int16_t)(obj->base.h / 2 - (y_top + y_bottom) / 2); /* 按墨迹竖直居中 */
+    avail_w = (int32_t)obj->base.w - 2 * WE_TOAST_TEXT_PAD;
+
+    if ((int32_t)txt_w <= avail_w)
+    {
+        obj->fit_mode = _TOAST_FIT_CENTER;
+        obj->txt_ox = (int16_t)((obj->base.w - (int16_t)txt_w) / 2);
+        return;
+    }
+
+    obj->txt_ox = WE_TOAST_TEXT_PAD;
+    {
+        int32_t ell_w = (int32_t)we_get_text_width(obj->font, "...");
+
+        if (avail_w > ell_w)
+        {
+            /* 尾部省略号截断：前缀最多占 (可用宽 - "..."宽) */
+            obj->fit_mode = _TOAST_FIT_ELLIPSIS;
+            obj->prefix_w = (int16_t)_toast_prefix_fit_w(obj->font, obj->text, avail_w - ell_w);
+        }
+        else
+        {
+            obj->fit_mode = _TOAST_FIT_CLIP;
+        }
+    }
 }
 
 /**
@@ -261,99 +260,55 @@ static void _toast_anim_step_cb(void *owner, uint16_t elapsed_ms)
  * @brief 控件绘制回调：圆角面板 + 水平/垂直居中文字；隐藏态直接返回。
  * @param ptr 回调透传对象指针。
  * @return 无。
- * @note 放得下时水平居中；超宽时左对齐起绘，尾部截断并追加 "..."：
- *       前缀零拷贝绘制（临时把 PFB 右界收到前缀末端，整串绘制右侧
- *       被窗口裁掉），省略号在前缀末端单独补画。
+ * @note 内核已把窗口收窄到横幅矩形，文字像素画不出横幅之外。
+ *       超宽时左对齐起绘，尾部截断并追加 "..."：前缀零拷贝绘制（临时把
+ *       窗口右界收到前缀末端画整串，其后字形被裁掉），省略号在前缀末端补画。
  */
 static void _toast_draw_cb(void *ptr)
 {
     we_toast_obj_t *obj = (we_toast_obj_t *)ptr;
     we_lcd_t *lcd = obj->base.lcd;
+    int16_t txt_x;
+    int16_t txt_y;
 
     if (obj->state == WE_TOAST_ST_HIDDEN || obj->opacity == 0U || obj->text == NULL)
         return;
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底横幅 + 1px 白描边 */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    WE_TOAST_RADIUS, RGB888TODEV(255, 255, 255),
+                                    RGB888TODEV(0, 0, 0), obj->opacity);
+#else
+    we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
+                                     (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                     WE_TOAST_RADIUS, obj->bg_color, obj->opacity);
+#endif
+
+    txt_x = (int16_t)(obj->base.x + obj->txt_ox);
+    txt_y = (int16_t)(obj->base.y + obj->txt_oy);
+    if (obj->fit_mode != _TOAST_FIT_ELLIPSIS)
     {
-        /* PFB 窗口收窄到面板矩形：任何文字像素都不会画出横幅之外 */
+        we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text, obj->text_color, obj->opacity);
+        return;
+    }
+
+    if (obj->prefix_w > 0)
+    {
         we_pfb_clip_t sv;
 
         we_pfb_clip_save(lcd, &sv);
-        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                           (int16_t)(obj->base.x + obj->base.w - 1),
-                           (int16_t)(obj->base.y + obj->base.h - 1)))
+        if (we_pfb_clip_to(lcd, &sv, sv.clip.x0, sv.clip.y0,
+                           (int16_t)(txt_x + obj->prefix_w - 1), sv.clip.y1))
         {
-            uint16_t txt_w;
-            int32_t avail_w;
-            int8_t y_top;
-            int8_t y_bottom;
-            int16_t txt_x;
-            int16_t txt_y;
-
-#if (WE_CFG_MONO_STYLE == 1)
-            /* 单色样式：黑底横幅 + 1px 白描边 */
-            we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
-                                            (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                                            WE_TOAST_RADIUS, RGB888TODEV(255, 255, 255),
-                                            RGB888TODEV(0, 0, 0), obj->opacity);
-#else
-            we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
-                                             (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                                             WE_TOAST_RADIUS, obj->bg_color, obj->opacity);
-#endif
-
-            /* 按可见 bbox 垂直居中 */
-            txt_w = we_get_text_width(obj->font, obj->text);
-            we_get_text_bbox(obj->font, obj->text, &y_top, &y_bottom);
-            txt_y = (int16_t)(obj->base.y + obj->base.h / 2 - (y_top + y_bottom) / 2);
-            avail_w = (int32_t)obj->base.w - 2 * WE_TOAST_TEXT_PAD;
-
-            if ((int32_t)txt_w <= avail_w)
-            {
-                /* 放得下：水平居中 */
-                txt_x = (int16_t)(obj->base.x + (obj->base.w - (int16_t)txt_w) / 2);
-                we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text,
-                               obj->text_color, obj->opacity);
-            }
-            else
-            {
-                int32_t ell_w = (int32_t)we_get_text_width(obj->font, "...");
-
-                txt_x = (int16_t)(obj->base.x + WE_TOAST_TEXT_PAD);
-                if (avail_w > ell_w)
-                {
-                    /* 尾部省略号截断：前缀最多占 (可用宽 - "..."宽) */
-                    int32_t prefix_w = _toast_prefix_fit_w(obj->font, obj->text,
-                                                           avail_w - ell_w);
-
-                    if (prefix_w > 0)
-                    {
-                        /* 前缀零拷贝绘制：只收窄 x1（x0/gram 不动），
-                         * 画整串，前缀末端之后的字形被窗口裁掉 */
-                        uint16_t saved_x1 = lcd->pfb_area.x1;
-                        int16_t clip_x1 = (int16_t)(txt_x + prefix_w - 1);
-
-                        if (clip_x1 < (int16_t)lcd->pfb_area.x1)
-                            lcd->pfb_area.x1 = (uint16_t)clip_x1;
-                        we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text,
-                                       obj->text_color, obj->opacity);
-                        lcd->pfb_area.x1 = saved_x1;
-                    }
-                    we_draw_string(lcd, (int16_t)(txt_x + prefix_w), txt_y,
-                                   obj->font, "...", obj->text_color, obj->opacity);
-                }
-                else
-                {
-                    /* 面板窄到连 "..." 都放不下：退化为左对齐 + 窗口硬裁剪 */
-                    we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text,
-                                   obj->text_color, obj->opacity);
-                }
-            }
+            we_draw_string(lcd, txt_x, txt_y, obj->font, obj->text, obj->text_color, obj->opacity);
+            we_pfb_clip_restore(lcd, &sv);
         }
-
-        we_pfb_clip_restore(lcd, &sv);
     }
+    we_draw_string(lcd, (int16_t)(txt_x + obj->prefix_w), txt_y,
+                   obj->font, "...", obj->text_color, obj->opacity);
 }
-
 /* 非模态：event_cb 置 NULL，核心输入分发完全跳过本控件（横幅不挡输入） */
 static const we_class_t _toast_class = {
     .draw_cb    = _toast_draw_cb,
@@ -394,6 +349,10 @@ void we_toast_obj_init(we_toast_obj_t *obj, we_lcd_t *lcd, const unsigned char *
     obj->base.y = _toast_hidden_y(obj); /* 初始停在屏外 */
 
     obj->text = NULL;
+    obj->txt_ox = 0;
+    obj->txt_oy = 0;
+    obj->prefix_w = 0;
+    obj->fit_mode = _TOAST_FIT_CENTER;
     obj->bg_color = RGB888TODEV(46, 52, 64);
     obj->text_color = RGB888TODEV(236, 241, 248);
     obj->opacity = 0U;
@@ -428,6 +387,7 @@ void we_toast_show(we_toast_obj_t *obj, const char *text, uint16_t duration_ms)
 
     obj->text = text;
     obj->duration_ms = (duration_ms == 0U) ? WE_TOAST_DEF_DURATION : duration_ms;
+    _toast_layout(obj);
 
     /* 从当前位置/透明度重入：隐藏态即屏外/全透，动画中重复 show 不跳变 */
     obj->from_y = obj->base.y;
@@ -480,6 +440,7 @@ void we_toast_set_font(we_toast_obj_t *obj, const unsigned char *font)
     if (line_h == 0U)
         line_h = 16U; /* 字库异常兜底 */
     obj->base.h = (int16_t)(line_h + 2 * WE_TOAST_PAD_Y);
+    _toast_layout(obj);
 
     if (obj->state == WE_TOAST_ST_HIDDEN)
         obj->base.y = _toast_hidden_y(obj); /* 屏外停放位随高度重算，零标脏 */
@@ -508,6 +469,7 @@ void we_toast_set_margin(we_toast_obj_t *obj, int16_t top, int16_t side)
     obj->margin_side = side;
     obj->base.x = side;
     obj->base.w = (int16_t)((int16_t)obj->base.lcd->width - 2 * side);
+    _toast_layout(obj);
 
     if (obj->state == WE_TOAST_ST_HIDDEN)
         return; /* 隐藏态：几何已就位（高度未变，屏外停放位不动），下次 show 生效 */
@@ -528,7 +490,7 @@ void we_toast_set_margin(we_toast_obj_t *obj, int16_t top, int16_t side)
 }
 
 /**
- * @brief 删除控件：先摘除动画节点再从对象链表移除。
+ * @brief 删除控件（动画节点由内核随对象一并回收）。
  * @param obj 控件对象指针。
  * @return 无。
  */
@@ -536,7 +498,5 @@ void we_toast_obj_delete(we_toast_obj_t *obj)
 {
     if (obj == NULL || obj->base.lcd == NULL)
         return;
-
-    we_anim_stop(obj->base.lcd, &obj->anim); /* 动画节点归控件所有，删除前必须摘链 */
     we_obj_delete((we_obj_t *)obj);
 }

@@ -1,10 +1,10 @@
 #ifndef __WE_WIDGET_BTN_H
 #define __WE_WIDGET_BTN_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
- * 置 0 单独裁剪按钮的按键回调与可聚焦性（类描述符 key_cb 为 NULL，
+ * 置 0 单独裁剪按钮的按键处理与可聚焦性（类描述符不带 FOCUSABLE 标志，
  * 焦点遍历自动跳过本类控件），其余控件不受影响。 */
 #ifndef WE_BTN_USE_KEY
 #define WE_BTN_USE_KEY 1
@@ -52,8 +52,10 @@ typedef struct
     we_btn_style_t styles[WE_BTN_STATE_MAX];
 #endif
     uint16_t radius;
-    uint8_t state; /* 当前按钮状态，按 we_btn_state_t 枚举值存储 */
+    uint16_t txt_w; /* 文字宽度（init / set_text 时测量缓存） */
+    uint8_t state;  /* 当前按钮状态，按 we_btn_state_t 枚举值存储 */
     uint8_t opacity;
+    int8_t txt_ymid; /* 文字墨迹竖直中线（相对基线，随文字缓存） */
 } we_btn_obj_t;
 
 /**

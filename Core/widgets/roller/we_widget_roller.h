@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_ROLLER_H
 #define __WE_WIDGET_ROLLER_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -45,21 +45,20 @@ extern "C"
  *   - 吸附完成且选中项发生变化时回调 changed_cb。
  *
  * 渲染与标脏：
- *   - 行文字经 PFB 窗口收窄裁剪在控件矩形内（scroll_panel 同款
- *     save/restore 套路），半露行不会渗出控件边界；
+ *   - 行文字由内核按控件包围盒裁剪，半露行不会渗出控件边界；
+ *     每个切片只画与之相交的行；
  *   - 滚动位移只标脏"文本列带"（可见窗内最大行宽 + 左右安全余量、
  *     水平居中、全控件高的竖条）：面板背景与中心高亮条在滚动中不变，
  *     文本又逐行水平居中，列带即内容裁剪矩形，面板圆角外的四角区域
  *     自然被排除；列带宽逼近控件宽时退回整件标脏（此时文本确实会
  *     进入圆角区）；
- *   - 吸附完成 commit 只标脏中心行条带；
+ *   - 吸附到位提交选中项时画面不变，不再额外标脏；
  *   - 行宽经直接映射缓存（槽位 = 选项索引 & (WE_ROLLER_WCACHE_SIZE-1)，
  *     零除法零 malloc），滚动中每行至多重测一次/进窗；y 方向 bbox 对
  *     同一字体视作常量，缓存在结构体中（set_options / set_font 时刷新），
  *     绘制内环不再调用 we_get_text_width / we_get_text_bbox。
  *
- * 零 malloc、渲染内环零浮点。删除前必须 we_roller_obj_delete
- * （内部先 we_anim_stop 再 we_obj_delete）。
+ * 零 malloc、渲染内环零浮点。删除时吸附动画节点由内核一并摘链。
  * -------------------------------------------------------------------------- */
 
 /* 默认可见行数（奇数；init 传 0 时使用） */
@@ -171,7 +170,7 @@ typedef struct we_roller_obj_t
     we_roller_changed_cb_t changed_cb; /* 吸附完成回调（可为 NULL） */
     int32_t scroll_px;          /* 像素级滚动偏移（选中第 i 项时 = i*row_h） */
     int32_t press_scroll;       /* 按下时 scroll_px */
-    we_anim_t anim;             /* 吸附动画节点（归控件所有，删除前必须摘链） */
+    we_anim_t anim;             /* 吸附动画节点（删除控件时由内核摘链） */
     int32_t snap_v;             /* 拉力 + 阻尼速度累计（甩动时以松手速度作种） */
     int32_t snap_target;        /* 吸附目标 scroll_px */
 
@@ -194,8 +193,6 @@ typedef struct we_roller_obj_t
     /* 1 字节成员与状态位域 */
     uint8_t visible_rows;       /* 可见行数（奇数） */
     uint8_t opacity;            /* 整体不透明度（0~255，默认 255） */
-    int8_t text_y_top;          /* 字体 y bbox 常量缓存：有效像素区顶部偏移 */
-    int8_t text_y_bot;          /* 字体 y bbox 常量缓存：有效像素区底部偏移 */
     uint8_t tracking : 1;       /* 本次触摸序列是否有效（PRESSED 起点） */
     uint8_t dragging : 1;       /* 是否已进入跟手拖拽 */
     uint8_t tap_armed : 1;      /* 本按压序列未进入拖拽（CLICKED 判定点击直达用） */
@@ -273,11 +270,11 @@ void we_roller_set_changed_cb(we_roller_obj_t *obj, we_roller_changed_cb_t cb);
 void we_roller_set_font(we_roller_obj_t *obj, const unsigned char *font);
 
 /**
- * @brief 删除滚轮控件：先摘除吸附动画节点（we_anim_stop）再摘链。
+ * @brief 删除滚轮控件并从对象链表移除（吸附动画节点由内核一并摘链）。
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_roller_obj_delete(we_roller_obj_t *obj);
+static inline void we_roller_obj_delete(we_roller_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_BOX_H
 #define __WE_WIDGET_BOX_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
@@ -17,11 +17,13 @@
  *   - 中央与四条直边全部走 we_fill_rect 快速整块填充；
  *   - 仅四个 K×K 角落方块（K = max(各角半径, 边框厚, 边框厚+内半径)）做合成：
  *     圆角带边框时用 we_mask_quarter_ring_alpha 单次 4x4 子采样同时求
- *     外/内覆盖（外减内即边框环）；切角 45° 覆盖率为精确整数解析
- *     （alpha 仅 0/128/255），按行分段整块写入，无逐像素函数调用。
+ *     外/内覆盖，先按外覆盖画边框、再按内覆盖压填充；切角 45° 覆盖率为精确
+ *     整数解析（alpha 仅 0/128/255），按行分段整块写入，无逐像素函数调用；
+ *   - 窗口整个落在上下两条角落横带之间时只画中段。
  *
  * 所有 set 接口在目标值与当前值相同时直接返回，不触发重绘。
- * 默认装饰性（不消费输入，事件穿透给背后控件），需要交互时设 user_event_cb。
+ * 默认装饰性：event_cb 为 NULL，命中测试跳过它，触摸落到背后的控件；
+ * 设了用户回调（we_box_set_event_cb）才接收输入。
  * -------------------------------------------------------------------------- */
 
 /* 动画总开关（编译期）：默认 0（关闭）——
@@ -101,7 +103,7 @@ typedef struct we_box_obj_t
     uint8_t      opa_to;        /* 透明度终点 */
 #endif
 
-    we_box_event_cb_t user_event_cb; /* 非 NULL 时接管全部事件 */
+    we_box_event_cb_t user_event_cb; /* 非 NULL 时接收全部输入事件（经 we_box_set_event_cb 设置） */
 } we_box_obj_t;
 
 /* --------------------------------------------------------------------------
@@ -153,10 +155,13 @@ void we_box_set_opacity(we_box_obj_t *obj, uint8_t opacity);
 /**
  * @brief 移动到新位置（左上角对齐到 x,y）。
  */
-void we_box_set_pos(we_box_obj_t *obj, int16_t x, int16_t y);
+static inline void we_box_set_pos(we_box_obj_t *obj, int16_t x, int16_t y)
+{
+    we_obj_set_pos((we_obj_t *)obj, x, y);
+}
 
 /**
- * @brief 修改宽高（左上角不动）。
+ * @brief 修改宽高（左上角不动；w/h 须 > 0）。
  */
 void we_box_set_size(we_box_obj_t *obj, int16_t w, int16_t h);
 
@@ -177,14 +182,13 @@ void we_box_anim_opacity(we_box_obj_t *obj, uint8_t target, uint16_t dur_ms,
                          we_ease_fn_t ease);
 
 /**
- * @brief 设置自定义事件回调（非 NULL 时接管全部输入事件）。
+ * @brief 设置自定义事件回调（非 NULL 时接收全部输入事件，NULL 恢复装饰性穿透）。
  */
 void we_box_set_event_cb(we_box_obj_t *obj, we_box_event_cb_t cb);
 
 /**
- * @brief 删除控件并从对象链表移除。
- * @note WE_BOX_USE_ANIM=1 时内部先 we_anim_stop（两个动画节点）再 we_obj_delete。
+ * @brief 删除控件并从对象链表移除（动画节点由内核一并摘链）。
  */
-void we_box_obj_delete(we_box_obj_t *obj);
+static inline void we_box_obj_delete(we_box_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif /* __WE_WIDGET_BOX_H */

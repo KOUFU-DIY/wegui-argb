@@ -86,8 +86,7 @@ struct we_menu_page_s
 - 栈满时点击 submenu 行被忽略；所有事件返回 1（消费，不穿透）
 
 ## 渲染说明
-- 行区内容经 PFB 窗口收窄（save/restore `pfb_area`/`pfb_y_start`/
-  `pfb_y_end`/`pfb_gram`）裁剪在标题栏之下的行区矩形内
+- 行区内容经 PFB 窗口收窄（`we_pfb_clip_save/_to/_restore`）裁剪在标题栏之下的行区矩形内
 - 过渡期间先画滑出的旧页（偏移 = 新页偏移 ∓ 控件宽）再画滑入的新页；
   过渡由独立 `we_anim_t` 节点推进，惯性用另一个节点，两者互不干扰
 - 标题栏 = 圆角矩形 + 底部补方角（顶角随面板圆角、底边取直）

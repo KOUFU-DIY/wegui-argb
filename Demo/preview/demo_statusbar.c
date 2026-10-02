@@ -24,15 +24,19 @@
 #define SB_WIFI_MS   1200U /* WiFi 变格周期 */
 #define SB_SIG_MS    900U  /* 信号变格周期 */
 
+/* 状态栏/回显标签/四路驱动状态为大小屏共享；标题/FPS 仅大屏版有 */
 static we_statusbar_obj_t sb_bar;
-static we_label_obj_t     sb_title;
 static we_label_obj_t     sb_info1;     /* 电池/充电回显 */
 static we_label_obj_t     sb_info2;     /* WiFi/信号/时间回显 */
-static we_label_obj_t     sb_fps_label;
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t sb_title;
+static we_label_obj_t sb_fps_label;
 
 static uint32_t sb_fps_timer;
 static uint32_t sb_last_frames;
 static char     sb_fps_buf[16];
+#endif
 
 static char sb_time_buf[8];   /* "HH:MM"（调用方持有，控件只存指针） */
 static char sb_info1_buf[28];
@@ -89,6 +93,8 @@ static void _sb_demo_refresh_info(void)
     sprintf(sb_info2_buf, "wifi %s  sig %s", wifi_txt, sig_txt);
     we_label_set_text(&sb_info2, sb_info2_buf);
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 statusbar preview demo。
@@ -219,3 +225,122 @@ void we_statusbar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &sb_fps_label, &sb_fps_timer,
                        &sb_last_frames, sb_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 statusbar preview demo（128x64 布局：全宽栏 + 两行回显）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_statusbar_preview_demo_init(we_lcd_t *lcd)
+{
+    sb_t_minute = 0U;
+    sb_t_bat    = 0U;
+    sb_t_wifi   = 0U;
+    sb_t_sig    = 0U;
+    sb_hour     = 12U;
+    sb_minute   = 0U;
+    sb_bat_pct  = 100U;
+    sb_charging = 0U;
+    sb_wifi_idx = 0U;
+    sb_sig_idx  = 0U;
+
+    /* 状态栏置顶（128 全宽），初值：12:00 / 100% / 不充电 / WiFi 3 / 信号 4 */
+    we_statusbar_obj_init(&sb_bar, lcd, 0, 0, (uint16_t)lcd->width, we_font_consolas_18);
+    _sb_demo_apply_time();
+    we_statusbar_set_battery(&sb_bar, sb_bat_pct);
+    we_statusbar_set_wifi(&sb_bar, sb_wifi_seq[0]);
+    we_statusbar_set_signal(&sb_bar, sb_sig_seq[0]);
+
+    /* 下方两行回显 label */
+    sprintf(sb_info1_buf, "bat 100%%");
+    we_label_obj_init(&sb_info1, lcd, 2, 28,
+                      sb_info1_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+    sprintf(sb_info2_buf, "wifi 3  sig 4");
+    we_label_obj_init(&sb_info2, lcd, 2, 46,
+                      sb_info2_buf, we_font_consolas_18,
+                      RGB888TODEV(140, 200, 255), 255);
+}
+
+/**
+ * @brief statusbar preview demo 周期更新（128x64：四路驱动，无 FPS）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_statusbar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t info_dirty = 0U;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    /* 1. 加速时钟：每 SB_MINUTE_MS 走一分钟 */
+    sb_t_minute += ms_tick;
+    if (sb_t_minute >= SB_MINUTE_MS)
+    {
+        sb_t_minute -= SB_MINUTE_MS;
+        sb_minute++;
+        if (sb_minute >= 60U)
+        {
+            sb_minute = 0U;
+            sb_hour = (uint8_t)((sb_hour + 1U) % 24U);
+        }
+        _sb_demo_apply_time();
+        info_dirty = 1U;
+    }
+
+    /* 2. 电池：递减到 5% 切充电快速回满，满后恢复递减 */
+    sb_t_bat += ms_tick;
+    if (!sb_charging && sb_t_bat >= SB_DECAY_MS)
+    {
+        sb_t_bat = 0U;
+        sb_bat_pct = (uint8_t)((sb_bat_pct > 10U) ? (sb_bat_pct - 5U) : 5U);
+        we_statusbar_set_battery(&sb_bar, sb_bat_pct);
+        if (sb_bat_pct <= 5U)
+        {
+            sb_charging = 1U;
+            we_statusbar_set_charging(&sb_bar, 1U);
+        }
+        info_dirty = 1U;
+    }
+    else if (sb_charging && sb_t_bat >= SB_CHARGE_MS)
+    {
+        sb_t_bat = 0U;
+        sb_bat_pct = (uint8_t)((sb_bat_pct < 95U) ? (sb_bat_pct + 5U) : 100U);
+        we_statusbar_set_battery(&sb_bar, sb_bat_pct);
+        if (sb_bat_pct >= 100U)
+        {
+            sb_charging = 0U;
+            we_statusbar_set_charging(&sb_bar, 0U);
+        }
+        info_dirty = 1U;
+    }
+
+    /* 3. WiFi 变格（含 -1 隐藏档） */
+    sb_t_wifi += ms_tick;
+    if (sb_t_wifi >= SB_WIFI_MS)
+    {
+        sb_t_wifi -= SB_WIFI_MS;
+        sb_wifi_idx = (uint8_t)((sb_wifi_idx + 1U) % 8U);
+        we_statusbar_set_wifi(&sb_bar, sb_wifi_seq[sb_wifi_idx]);
+        info_dirty = 1U;
+    }
+
+    /* 4. 信号变格（与 WiFi 错周期） */
+    sb_t_sig += ms_tick;
+    if (sb_t_sig >= SB_SIG_MS)
+    {
+        sb_t_sig -= SB_SIG_MS;
+        sb_sig_idx = (uint8_t)((sb_sig_idx + 1U) % 8U);
+        we_statusbar_set_signal(&sb_bar, sb_sig_seq[sb_sig_idx]);
+        info_dirty = 1U;
+    }
+
+    if (info_dirty)
+        _sb_demo_refresh_info();
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

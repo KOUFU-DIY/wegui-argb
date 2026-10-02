@@ -36,6 +36,7 @@ static uint32_t btn_last_frames;
 static char     btn_fps_buf[16];
 static uint16_t btn_click_cnt;
 static char     btn_evt_buf[16];
+static uint8_t  btn_phase;          /* DYN 按钮当前阶段（0xFF = 尚未设置） */
 
 /**
  * @brief EVENT 按钮的自定义事件回调，把收到的事件实时显示到状态栏
@@ -95,6 +96,7 @@ void we_btn_simple_demo_init(we_lcd_t *lcd)
     btn_fps_timer   = 0U;
     btn_last_frames = 0U;
     btn_click_cnt   = 0U;
+    btn_phase       = 0xFFU;
     memset(btn_fps_buf, 0, sizeof(btn_fps_buf));
     memset(btn_evt_buf, 0, sizeof(btn_evt_buf));
 
@@ -145,23 +147,28 @@ void we_btn_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     btn_ticks_ms += ms_tick;
     phase = (uint8_t)((btn_ticks_ms / 900U) & 0x03U);
 
-    we_btn_set_state(&btn_dynamic, (we_btn_state_t)phase);
-    we_btn_set_radius(&btn_dynamic, (uint16_t)(6U + phase * 4U));
-
-    switch (phase)
+    /* 只在阶段切换时改状态/圆角/文字（set_text 每次调用都会重新测量并重绘） */
+    if (phase != btn_phase)
     {
-    case 0:
-        we_btn_set_text(&btn_dynamic, "NORMAL");
-        break;
-    case 1:
-        we_btn_set_text(&btn_dynamic, "SELECT");
-        break;
-    case 2:
-        we_btn_set_text(&btn_dynamic, "PRESS");
-        break;
-    default:
-        we_btn_set_text(&btn_dynamic, "DISABLE");
-        break;
+        btn_phase = phase;
+        we_btn_set_state(&btn_dynamic, (we_btn_state_t)phase);
+        we_btn_set_radius(&btn_dynamic, (uint16_t)(6U + phase * 4U));
+
+        switch (phase)
+        {
+        case 0:
+            we_btn_set_text(&btn_dynamic, "NORMAL");
+            break;
+        case 1:
+            we_btn_set_text(&btn_dynamic, "SELECT");
+            break;
+        case 2:
+            we_btn_set_text(&btn_dynamic, "PRESS");
+            break;
+        default:
+            we_btn_set_text(&btn_dynamic, "DISABLE");
+            break;
+        }
     }
 
     we_demo_update_fps(lcd, &btn_fps, &btn_fps_timer,
@@ -182,6 +189,7 @@ static uint32_t btn_last_frames;
 static char     btn_fps_buf[16];
 static uint16_t btn_click_cnt;
 static char     btn_evt_buf[16];
+static uint8_t  btn_phase;          /* DYN 按钮当前阶段（0xFF = 尚未设置） */
 
 /**
  * @brief EVENT 按钮的自定义事件回调，把收到的事件实时显示到状态栏
@@ -229,6 +237,7 @@ void we_btn_simple_demo_init(we_lcd_t *lcd)
     btn_fps_timer   = 0U;
     btn_last_frames = 0U;
     btn_click_cnt   = 0U;
+    btn_phase       = 0xFFU;
     memset(btn_fps_buf, 0, sizeof(btn_fps_buf));
     memset(btn_evt_buf, 0, sizeof(btn_evt_buf));
 
@@ -266,23 +275,28 @@ void we_btn_simple_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     btn_ticks_ms += ms_tick;
     phase = (uint8_t)((btn_ticks_ms / 900U) & 0x03U);
 
-    we_btn_set_state(&btn_dynamic, (we_btn_state_t)phase);
-    we_btn_set_radius(&btn_dynamic, (uint16_t)(3U + phase * 2U));
-
-    switch (phase)
+    /* 只在阶段切换时改状态/圆角/文字（set_text 每次调用都会重新测量并重绘） */
+    if (phase != btn_phase)
     {
-    case 0:
-        we_btn_set_text(&btn_dynamic, "NORM");
-        break;
-    case 1:
-        we_btn_set_text(&btn_dynamic, "SEL");
-        break;
-    case 2:
-        we_btn_set_text(&btn_dynamic, "PRESS");
-        break;
-    default:
-        we_btn_set_text(&btn_dynamic, "DIS");
-        break;
+        btn_phase = phase;
+        we_btn_set_state(&btn_dynamic, (we_btn_state_t)phase);
+        we_btn_set_radius(&btn_dynamic, (uint16_t)(3U + phase * 2U));
+
+        switch (phase)
+        {
+        case 0:
+            we_btn_set_text(&btn_dynamic, "NORM");
+            break;
+        case 1:
+            we_btn_set_text(&btn_dynamic, "SEL");
+            break;
+        case 2:
+            we_btn_set_text(&btn_dynamic, "PRESS");
+            break;
+        default:
+            we_btn_set_text(&btn_dynamic, "DIS");
+            break;
+        }
     }
 
     we_demo_update_fps(lcd, &btn_fps, &btn_fps_timer,

@@ -17,26 +17,31 @@
 #include <stdio.h>
 #include <string.h>
 
-static we_label_obj_t tb_title;
-static we_label_obj_t tb_fps_label;
-static we_label_obj_t tb_hint_label;  /* 拖拽滚动操作提示 */
+/* 表格对象、单元格数据与实时游走状态为大小屏共享；标题/FPS/提示仅大屏版有 */
 static we_table_obj_t tb_table;
 
-static uint32_t tb_fps_timer;
-static uint32_t tb_last_frames;
 static uint32_t tb_live_timer;        /* 实时数据刷新累计计时 */
 static uint16_t tb_rand_state;        /* 整数 LCG 伪随机状态 */
 static int16_t tb_temp_x10;           /* Temp 值 ×10（一位小数定点） */
 static int16_t tb_curr_ma;            /* Current 值（mA 整数） */
-static char tb_fps_buf[16];
 static char tb_val_temp[12];          /* Temp 行 VAL 实时缓冲（调用方持有） */
 static char tb_val_curr[12];          /* Current 行 VAL 实时缓冲 */
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t tb_title;
+static we_label_obj_t tb_fps_label;
+static we_label_obj_t tb_hint_label;  /* 拖拽滚动操作提示 */
+
+static uint32_t tb_fps_timer;
+static uint32_t tb_last_frames;
+static char tb_fps_buf[16];
 
 /* 布局（280x240 基准） */
 #define TB_X 14
 #define TB_Y 58
 #define TB_W 252
 #define TB_H 170
+#endif
 
 /* 实时数据刷新周期（毫秒） */
 #define TB_LIVE_PERIOD 400U
@@ -101,6 +106,8 @@ static void tb_update_live_vals(void)
     sprintf(tb_val_curr, "%d", tb_curr_ma);
 }
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /**
  * @brief 初始化 table demo
  * @param lcd 传入：GUI 屏幕上下文指针
@@ -157,3 +164,47 @@ void we_table_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &tb_fps_label, &tb_fps_timer,
                        &tb_last_frames, tb_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 table demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_table_preview_demo_init(we_lcd_t *lcd)
+{
+    tb_live_timer = 0U;
+    tb_rand_state = 0x5A5AU;
+    tb_temp_x10 = 235; /* 23.5 C 起始 */
+    tb_curr_ma = 560;
+    tb_update_live_vals(); /* 先填好实时缓冲再挂表格 */
+
+    /* 表格独占全屏：同一份 4 列 x 14 行数据，行高 13，超宽文本列内硬截断 */
+    we_table_obj_init(&tb_table, lcd, 0, 0, 128, 64, (uint8_t)TB_COLS, we_font_consolas_18);
+    we_table_set_cells(&tb_table, tb_cells, (uint16_t)TB_ROWS);
+    we_table_set_col_weights(&tb_table, tb_col_weights);
+    we_table_set_row_h(&tb_table, 13U);
+}
+
+/**
+ * @brief table demo 周期更新：每 400ms 原地改写两行 VAL 后 refresh
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_table_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    tb_live_timer += ms_tick;
+    if (tb_live_timer >= TB_LIVE_PERIOD)
+    {
+        tb_live_timer = 0U;
+        tb_update_live_vals();
+        we_table_refresh(&tb_table);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

@@ -18,6 +18,8 @@
 #include "widgets_preview/keyboard/we_widget_keyboard.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /* 文本缓冲上限（含结尾 0）：39 字符约在 18 字符处开始溢出滚动 */
 #define TA_TEXT_BUF_MAX 40U
 
@@ -122,3 +124,81 @@ void we_textarea_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &ta_fps_label, &ta_fps_timer,
                        &ta_last_frames, ta_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/* 文本缓冲上限（含结尾 0）：约 10 字符处开始溢出滚动 */
+#define TA_TEXT_BUF_MAX 24U
+
+/* 弹层键盘面板高度（含 13px 小屏回显条；滑入后覆盖 6..63） */
+#define TA_KB_H 58
+
+static we_label_obj_t    ta_echo;
+static we_textarea_obj_t ta_name;
+static we_keyboard_obj_t ta_kb;
+
+static char ta_name_buf[TA_TEXT_BUF_MAX];
+static char ta_echo_buf[TA_TEXT_BUF_MAX + 6];
+
+/**
+ * @brief "OK" 确定回调：把提交的输入框内容回显到底部 label
+ * @param kb 传入：键盘对象指针（未用）
+ * @param target 传入：show 时绑定的目标输入框（we_textarea_obj_t*）
+ * @return 无
+ */
+static void _ta_kb_done_cb(void *kb, void *target)
+{
+    const char *text;
+
+    (void)kb;
+    if (target == NULL)
+        return;
+    text = we_textarea_get_text((const we_textarea_obj_t *)target);
+    if (text == NULL)
+        return;
+
+    memcpy(ta_echo_buf, "OK: ", 4U);
+    strncpy(&ta_echo_buf[4], text, sizeof(ta_echo_buf) - 5U);
+    ta_echo_buf[sizeof(ta_echo_buf) - 1U] = '\0';
+    we_label_set_text(&ta_echo, ta_echo_buf);
+}
+
+/**
+ * @brief 初始化 textarea + 弹层键盘 preview demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_textarea_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(ta_name_buf, 0, sizeof(ta_name_buf));
+    memset(ta_echo_buf, 0, sizeof(ta_echo_buf));
+
+    /* 单输入框（高度自动 = 行高 + 上下边距，约占 0..27） */
+    we_textarea_obj_init(&ta_name, lcd, 2, 2, 124,
+                         ta_name_buf, (uint16_t)sizeof(ta_name_buf), we_font_consolas_18);
+    we_textarea_set_placeholder(&ta_name, "Tap to edit...");
+
+    /* 底部回显：OK 提交内容 */
+    we_label_obj_init(&ta_echo, lcd, 2, 48,
+                      "", we_font_consolas_18,
+                      RGB888TODEV(112, 184, 255), 255);
+
+    /* 弹层软键盘（单例）：呼出时覆盖屏幕下部，回显条镜像输入内容 */
+    we_keyboard_popup_init(&ta_kb, lcd, TA_KB_H, we_font_consolas_18);
+    we_keyboard_set_done_cb(&ta_kb, _ta_kb_done_cb);
+    we_textarea_bind_keyboard(&ta_name, &ta_kb);
+}
+
+/**
+ * @brief textarea preview demo 周期更新（交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_textarea_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

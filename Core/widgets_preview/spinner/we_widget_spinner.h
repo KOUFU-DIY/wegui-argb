@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_SPINNER_H
 #define __WE_WIDGET_SPINNER_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 加载指示器控件（spinner）—— preview 孵化区实验控件

@@ -1,7 +1,7 @@
 #ifndef SIMPLE_WIDGET_DEMOS_H
 #define SIMPLE_WIDGET_DEMOS_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 小屏 demo 判定：屏宽不超过 128 时，1~33 号 demo 编译各自的 128x64
  * 参考布局小屏实现（每个 demo_xxx.c 内 #if !WE_DEMO_SMALL_SCREEN 大屏
@@ -30,7 +30,7 @@
 /* 所有 simple demo 统一按固定 280x240 样式组织（小屏实现按 128x64）：
  * 1. 先调用对应 init(...) 创建控件并完成固定布局；
  * 2. 再用 we_gui_timer_create(lcd, &节点, 对应 tick, 16U, 1U) 注册周期定时器；
- * 3. 主循环里继续调用 we_gui_tick_inc(...) 和 we_gui_task_handler(...)。 */
+ * 3. 主循环里继续调用 we_gui_run(...)。 */
 
 /* label demo：init 创建并布局控件，tick 每帧推进（ms_tick 为毫秒增量）。 */
 void we_label_simple_demo_init(we_lcd_t *lcd);

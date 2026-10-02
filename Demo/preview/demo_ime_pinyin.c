@@ -33,15 +33,20 @@
 /* 自动脚本单目标最多向后翻页数（翻尽仍未找到则兜底选第 1 候选） */
 #define IME_PICK_PAGE_MAX 6U
 
-static we_label_obj_t      ime_title;
-static we_label_obj_t      ime_fps_label;
+/* 输入框/IME 面板/自动脚本为大小屏共享；标题/FPS 仅大屏版有 */
 static we_textarea_obj_t   ime_echo;
 static we_ime_pinyin_obj_t ime_pad;
+
+static char ime_echo_buf[IME_ECHO_BUF_MAX];
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t ime_title;
+static we_label_obj_t ime_fps_label;
 
 static uint32_t ime_fps_timer;
 static uint32_t ime_last_frames;
 static char     ime_fps_buf[16];
-static char     ime_echo_buf[IME_ECHO_BUF_MAX];
+#endif
 
 /* ---------------- 自动演示脚本 ---------------- */
 
@@ -134,6 +139,8 @@ static uint8_t _ime_demo_run_step(void)
     return 1U;
 }
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /**
  * @brief 初始化 ime_pinyin preview demo
  * @param lcd 传入：GUI 屏幕上下文指针
@@ -197,3 +204,60 @@ void we_ime_pinyin_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
             ime_step_idx = (uint16_t)((ime_step_idx + 1U) % IME_STEP_NUM);
     }
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 ime_pinyin preview demo（128x64 布局：顶部输入框 +
+ *        近全屏弹层 IME；条高走头文件小屏默认档，键区只余装饰性高度，
+ *        输入主要由自动脚本 / 候选栏触摸驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_ime_pinyin_preview_demo_init(we_lcd_t *lcd)
+{
+    ime_step_idx   = 0U;
+    ime_step_acc   = 0U;
+    ime_pick_pages = 0U;
+    memset(ime_echo_buf, 0, sizeof(ime_echo_buf));
+
+    /* 输入框：点击呼出弹层输入法（含中文字库，按其行高重算高度） */
+    we_textarea_obj_init(&ime_echo, lcd, 2, 0, 124,
+                         ime_echo_buf, (uint16_t)sizeof(ime_echo_buf), IME_DEMO_FONT);
+    ime_echo.base.h = (int16_t)(we_font_get_line_height(IME_DEMO_FONT) + 2 * WE_TEXTAREA_PAD_Y);
+    we_textarea_set_placeholder(&ime_echo, "Tap to type...");
+
+    /* 弹层输入法：回显 13 + 拼音条 14 + 候选栏 18 = 45，键区高度 0——
+     * 64px 屏放不下可用的触摸键区（4 行只剩 4px/行），干脆整个隐去，
+     * 字母注入交给自动脚本 / we_ime_pinyin_inject_key；候选栏与翻页键
+     * 仍可触摸。弹层滑入后停在 y=19，顶部输入框保持可见 */
+    we_ime_pinyin_popup_init(&ime_pad, lcd, 45, IME_DEMO_FONT);
+    we_ime_pinyin_bind_textarea(&ime_echo, &ime_pad);
+    we_ime_pinyin_popup_show(&ime_pad, &ime_echo);
+}
+
+/**
+ * @brief ime_pinyin preview demo 周期更新（128x64：自动演示脚本步进）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_ime_pinyin_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    /* 自动演示脚本只在弹层展开期间步进（收回后暂停，点输入框恢复） */
+    if (we_modal_get(lcd) != (we_obj_t *)&ime_pad)
+        return;
+
+    ime_step_acc = (uint16_t)(ime_step_acc + ms_tick);
+    if (ime_step_acc >= IME_STEP_MS)
+    {
+        ime_step_acc = 0U;
+        if (_ime_demo_run_step())
+            ime_step_idx = (uint16_t)((ime_step_idx + 1U) % IME_STEP_NUM);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

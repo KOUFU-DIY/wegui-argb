@@ -51,8 +51,8 @@ void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size)
 
 /**
  * @brief 通过底层端口输出 RGB888 像素流。
- * @param gram RGB888 像素缓冲区指针。
- * @param pix_size 本次输出像素数量。
+ * @param gram RGB888 像素缓冲区指针（每像素 R/G/B 3 字节）。
+ * @param pix_size 本次输出像素数量（字节数 = pix_size * 3）。
  * @return 无。
  */
 void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)

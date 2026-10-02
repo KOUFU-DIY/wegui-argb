@@ -32,7 +32,7 @@
 - `WE_SLIDESHOW_SNAP_COMPLEX_DAMP_DEN`
 - `WE_SLIDESHOW_SNAP_COMPLEX_MAX_STEP`
 - `WE_SLIDESHOW_PAGE_MAX`
-- （子控件数量无上限，槽位表已移除）
+- （子控件数量无上限）
 
 ## 事件与行为
 - 支持拖拽、释放吸附、左右滑动切页
@@ -44,6 +44,10 @@
 - 页面内子控件位置使用局部坐标，不是屏幕绝对坐标
 - 页面宽高固定等于控件宽高
 - 如果要做“翻页按钮 + 手势翻页”混合模式，直接给子页按钮传自定义回调即可
+
+## 已完成的毕业优化
+- 修正：没有移动回调，`we_obj_set_pos` 移动幻灯片（或它嵌在 group / scroll_panel 里被带着走）时只挪外框、页面留在原地——背景、子控件区、移动三个类回调直接复用 group 的
+- 删掉只写不读的 `last_touch_y`；删除接口改为内联包装（吸附动画节点由内核摘链）
 
 ## 对应 demo
 - `Demo/demo_slideshow.c`

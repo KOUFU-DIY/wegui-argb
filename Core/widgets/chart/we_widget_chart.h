@@ -1,7 +1,7 @@
 #ifndef WE_WIDGET_CHART_H
 #define WE_WIDGET_CHART_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * chart 使用说明
@@ -27,7 +27,7 @@
  * 波形标脏配置：
  *   WE_CFG_CHART_DIRTY_MODE — 0: 整个控件包围盒标脏
  *                             1: push 时按列块联合包络标脏（默认）
- *   WE_CHART_DIRTY_BLOCK_W  — 列块宽度（像素），默认 8
+ *   WE_CHART_DIRTY_BLOCK_W  — 列块宽度（像素），默认 16
  * -------------------------------------------------------------------------- */
 
 #ifndef WE_CHART_GRID_COLS
@@ -86,7 +86,7 @@ typedef struct
     uint16_t data_count; /* 当前有效样本数 */
 
     colour_t line_color;
-    uint8_t stroke; /* 波形主体厚度（像素）；顶部/底部额外固定附加 1px 柔边 */
+    uint8_t stroke; /* 波形主体厚度（像素）；顶部/底部另加 WE_CHART_AA_MAX 层柔边 */
     uint8_t opacity;
 
     /* init 时预计算的网格线相对偏移（gx = bx + grid_dx[i]）。

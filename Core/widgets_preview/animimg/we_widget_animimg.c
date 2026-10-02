@@ -7,13 +7,13 @@
  * 停播时节点摘链（空闲零开销）。
  *
  * 渲染：控件自写的带 PFB 条带裁剪逐像素 blit（cx0/cy0/cx1/cy1 与
- * pfb_area/pfb_y_start/pfb_y_end 求交 + row 指针 stride 步进，照 box
+ * lcd->clip 求交 + row 指针 stride 步进，照 box
  * 角落合成函数的标准套路）；帧数据为本机字节序 uint16_t RGB565 裸数组，
  * we_color_from_rgb565 转设备色后 we_store_color 直写，半透明走混色。
  */
 
 #include "we_widget_animimg.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -64,10 +64,10 @@ static void _animimg_draw_cb(void *ptr)
     cy0 = o->base.y;
     cx1 = (int16_t)(o->base.x + o->base.w - 1);
     cy1 = (int16_t)(o->base.y + o->base.h - 1);
-    if (cx0 < (int16_t)lcd->pfb_area.x0) cx0 = (int16_t)lcd->pfb_area.x0;
-    if (cy0 < (int16_t)lcd->pfb_y_start) cy0 = (int16_t)lcd->pfb_y_start;
-    if (cx1 > (int16_t)lcd->pfb_area.x1) cx1 = (int16_t)lcd->pfb_area.x1;
-    if (cy1 > (int16_t)lcd->pfb_y_end) cy1 = (int16_t)lcd->pfb_y_end;
+    if (cx0 < (int16_t)lcd->clip.x0) cx0 = (int16_t)lcd->clip.x0;
+    if (cy0 < (int16_t)lcd->clip.y0) cy0 = (int16_t)lcd->clip.y0;
+    if (cx1 > (int16_t)lcd->clip.x1) cx1 = (int16_t)lcd->clip.x1;
+    if (cy1 > (int16_t)lcd->clip.y1) cy1 = (int16_t)lcd->clip.y1;
     if (cx0 > cx1 || cy0 > cy1)
         return;
 
@@ -75,8 +75,8 @@ static void _animimg_draw_cb(void *ptr)
     src_line = frame + (uint32_t)(cy0 - o->base.y) * (uint32_t)o->base.w
                      + (uint32_t)(cx0 - o->base.x);
     dst_line = lcd->pfb_gram
-             + (uint32_t)(cy0 - (int16_t)lcd->pfb_y_start) * stride
-             + (uint32_t)(cx0 - (int16_t)lcd->pfb_area.x0);
+             + (uint32_t)(cy0 - (int16_t)lcd->clip.y0) * stride
+             + (uint32_t)(cx0 - (int16_t)lcd->clip.x0);
 
     /* opacity 整次绘制内是常量，循环外分类：不透明直写 / 半透明混色 */
     if (eff_op >= 250U)

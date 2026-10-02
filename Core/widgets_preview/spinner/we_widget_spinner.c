@@ -9,7 +9,7 @@
  */
 
 #include "we_widget_spinner.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -183,7 +183,12 @@ void we_spinner_obj_init(we_spinner_obj_t *obj, we_lcd_t *lcd,
     obj->base.next    = NULL;
 
     {
+        /* 默认调色盘：单色样式切纯白（拖尾低透明点经二值化自然缩短） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t c = RGB888_CONST(255, 255, 255);
+#else
         colour_t c = RGB888_CONST(WE_SPINNER_DEF_R, WE_SPINNER_DEF_G, WE_SPINNER_DEF_B);
+#endif
         obj->color = c;
     }
     obj->opacity = 255U;

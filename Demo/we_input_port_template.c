@@ -23,22 +23,21 @@ void input_hw_init(void)
 }
 
 /**
- * @brief 读取输入硬件状态并填充输入事件数据。
- * @param data 输入状态输出结构体指针。
+ * @brief 采样当前触摸状态。
+ * @param data 传出：是否按下与坐标（内核调用前已预填上一次的坐标）。
  * @return 无。
  */
-void we_input_port_read(we_indev_data_t *data)
+void we_touch_port_read(we_touch_data_t *data)
 {
     if (data == NULL)
     {
         return;
     }
 
-    /* 默认返回“当前没有输入事件”。
-     * 这样即使项目没有输入设备，GUI 仍然可以正常运行。 */
-    data->x = 0;
-    data->y = 0;
-    data->state = WE_TOUCH_STATE_NONE;
+    /* 默认返回“未按下”。
+     * 真正移植时读取触摸芯片：按下时填 data->x / data->y 并置 pressed = 1。
+     * 没有触摸设备的项目直接在端口描述里把 touch_read 填 NULL 即可。 */
+    data->pressed = 0U;
 }
 
 /* --------------------------------------------------------------------------

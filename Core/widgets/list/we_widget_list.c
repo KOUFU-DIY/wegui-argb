@@ -1,19 +1,21 @@
 #include "we_widget_list.h"
-#include "components/we_scroll.h"
 
 /* 滚动物理参数（沿用本控件既有宏值，交给 we_scroll_t 状态机执行） */
 static const we_scroll_cfg_t _list_scroll_cfg = {
-    WE_LIST_DRAG_THRESHOLD,   WE_LIST_OVERSCROLL_LIMIT, WE_LIST_INERTIA_NUM,
-    WE_LIST_INERTIA_DEN,      WE_LIST_REBOUND_PULL_DIV, WE_LIST_REBOUND_MAX_STEP,
-    WE_LIST_SWIPE_SLICE_MS,
+    .drag_threshold = WE_LIST_DRAG_THRESHOLD,
+    .overscroll = WE_LIST_OVERSCROLL_LIMIT,
+    .inertia_num = WE_LIST_INERTIA_NUM,
+    .inertia_den = WE_LIST_INERTIA_DEN,
+    .rebound_pull_div = WE_LIST_REBOUND_PULL_DIV,
+    .rebound_max_step = WE_LIST_REBOUND_MAX_STEP,
+    .swipe_slice_ms = WE_LIST_SWIPE_SLICE_MS,
 };
-#include "we_render.h"
 
 /* --------------------------------------------------------------------------
  * list —— 数据驱动列表菜单
  *
- * 结构：面板背景（圆角可选）+ PFB 收窄裁剪的行内容（按压高亮条 /
- * 左对齐文字 / 行底 1px 分隔线）+ 右缘空闲淡出滚动条。
+ * 结构：面板背景（圆角可选）+ 行内容（按压高亮条 / 左对齐文字 /
+ * 行底 1px 分隔线，内核按控件包围盒裁剪）+ 右缘空闲淡出滚动条。
  *
  * 滚动为像素级 scroll_px（int32 累计），拖拽/惯性允许越界过冲至多
  * WE_LIST_OVERSCROLL_LIMIT，松手后经中央动画引擎回弹到边界
@@ -54,7 +56,7 @@ static int32_t _list_max_scroll(const we_list_obj_t *obj)
  * @brief 标脏内容裁剪矩形（滚动位移用）。
  * @param obj 传入：控件对象指针。
  * @return 无。
- * @note 行内容经 PFB 窗口裁剪在面板矩形内，因此内容裁剪矩形 = 面板矩形，
+ * @note 行内容由内核按控件包围盒裁剪在面板矩形内，因此内容裁剪矩形 = 面板矩形，
  *       绝不越过面板边界向外扩。圆角外圈的 4 个角落死区无法被单个矩形
  *       排除（脏区只能是矩形），但这些像素重绘结果与原值等同，代价可忽略。
  */
@@ -147,7 +149,7 @@ static void _list_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
     we_list_obj_t *obj = (we_list_obj_t *)owner;
     uint32_t step;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (obj->sb_alpha <= WE_LIST_SB_IDLE_ALPHA)
     {
@@ -191,7 +193,6 @@ static void _list_sb_fade_step_cb(void *owner, uint16_t elapsed_ms)
  * 滚动提交与夹紧
  * -------------------------------------------------------------------------- */
 
-
 /**
  * @brief 将 scroll_px 硬夹紧到 [0, max] 后提交（程序化定位/参数变更用）。
  * @param obj 传入：控件对象指针。
@@ -207,7 +208,6 @@ static void _list_apply_scroll(we_list_obj_t *obj, int32_t new_scroll)
     }
 }
 
-
 /* --------------------------------------------------------------------------
  * 惯性 + 回弹动画（单个中央动画节点）
  * -------------------------------------------------------------------------- */
@@ -219,6 +219,8 @@ static void _list_apply_scroll(we_list_obj_t *obj, int32_t new_scroll)
  */
 static void _list_stop_anim(we_list_obj_t *obj)
 {
+    obj->sc.animating = 0U;
+    obj->sc.vel = 0;
     we_anim_stop(obj->base.lcd, &obj->anim);
 }
 
@@ -235,7 +237,7 @@ static void _list_anim_step_cb(void *owner, uint16_t elapsed_ms)
 {
     we_list_obj_t *obj = (we_list_obj_t *)owner;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (!obj->sc.animating)
     {
@@ -319,7 +321,11 @@ static void _list_draw_scrollbar(we_list_obj_t *obj)
     track_y0 = (int16_t)(obj->base.y + (int16_t)obj->radius);
     track_h = (int16_t)(obj->base.h - 2 * (int16_t)obj->radius);
     if (track_h < (int16_t)obj->row_h)
-        track_h = obj->base.h; /* 圆角过大时退化为整高轨道 */
+    {
+        /* 圆角过大时退化为整高轨道（起点同时回到控件顶，滑块不越出底边） */
+        track_y0 = obj->base.y;
+        track_h = obj->base.h;
+    }
 
     we_scroll_bar_geom(track_y0, track_h, obj->base.h, content_h,
                        obj->sc.pos, max_scroll, 8, &thumb_y, &thumb_h);
@@ -332,24 +338,47 @@ static void _list_draw_scrollbar(we_list_obj_t *obj)
 }
 
 /**
- * @brief 绘制回调：面板背景 + PFB 收窄裁剪的行内容 + 滚动条。
+ * @brief 行文字墨迹竖直中线（一项缓存：连续切片多半画同一行，同一行只测一次）。
+ * @param obj 传入：控件对象指针。
+ * @param text 传入：行文字。
+ * @return (墨迹顶 + 墨迹底) / 2（相对基线）。
+ * @note 缓存按文字指针识别；set_options / set_font 时清空。
+ */
+static int8_t _list_text_ymid(we_list_obj_t *obj, const char *text)
+{
+    if (text != obj->ymid_txt)
+    {
+        int8_t y_top;
+        int8_t y_bot;
+
+        we_get_text_bbox(obj->font, text, &y_top, &y_bot);
+        obj->ymid_txt = text;
+        obj->ymid = (int8_t)((y_top + y_bot) / 2);
+    }
+    return obj->ymid;
+}
+
+/**
+ * @brief 绘制回调：面板背景 + 行内容 + 滚动条。
  * @param ptr 传入：控件对象指针。
  * @return 无。
+ * @note 内核已把窗口收窄到控件包围盒内，行内容不会画出控件；只画与当前
+ *       窗口行范围相交的行（每行的高亮、文字、分隔线都在行条带之内）。
  */
 static void _list_draw_cb(void *ptr)
 {
     we_list_obj_t *obj = (we_list_obj_t *)ptr;
-    we_lcd_t *lcd;
-    we_pfb_clip_t sv;
+    we_lcd_t *lcd = obj->base.lcd;
+    int32_t top;
+    int32_t first;
+    int16_t iy;
+    int32_t idx;
 #if (WE_CFG_MONO_STYLE == 1)
     static const colour_t mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
     static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
 #endif
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-    lcd = obj->base.lcd;
-    if (lcd == NULL)
+    if (obj->opacity == 0U)
         return;
 
 #if (WE_CFG_MONO_STYLE == 1)
@@ -368,105 +397,81 @@ static void _list_draw_cb(void *ptr)
         obj->row_h == 0U || obj->font == NULL)
         return;
 
-    /* 2. PFB 窗口收窄：把行内容裁剪在控件矩形内（save/restore 套路） */
-    we_pfb_clip_save(lcd, &sv);
+    /* 2. 行内容：从与窗口顶部相交的行起画，画到窗口底部为止。负向过冲时
+     *    top 为负，从第 0 行起，由"行号反推屏幕 Y"公式留出顶部空隙。 */
+    top = (int32_t)lcd->clip.y0 - (int32_t)obj->base.y + obj->sc.pos;
+    first = (top > 0) ? top / (int32_t)obj->row_h : 0;
+    iy = (int16_t)((int32_t)obj->base.y + first * (int32_t)obj->row_h - obj->sc.pos);
 
-    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                       (int16_t)(obj->base.x + obj->base.w - 1),
-                       (int16_t)(obj->base.y + obj->base.h - 1)))
+    for (idx = first; idx < (int32_t)obj->item_cnt && iy <= lcd->clip.y1; idx++)
     {
-        /* 首个（可能半露）可见行：负向过冲时 first 会算成负/零，统一
-         * 夹到 0 并由"行号反推屏幕 Y"公式覆盖过冲露出的顶部空隙。 */
-        int32_t first = obj->sc.pos / (int32_t)obj->row_h;
-        int16_t iy;
-        int32_t idx;
+        const char *text = obj->items[idx];
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t tc = ((int16_t)idx == obj->pressed_row) ? mono_bg : mono_fg; /* 反白行挖空字 */
+#else
+        colour_t tc = obj->text_color;
+#endif
 
-        if (first < 0)
-            first = 0;
-        iy = (int16_t)((int32_t)obj->base.y + first * (int32_t)obj->row_h - obj->sc.pos);
-
-        for (idx = first; idx < (int32_t)obj->item_cnt; idx++)
+        /* 按压行高亮：内缩圆角条，先与"面板内缩矩形"求交（半露行不外溢），
+         * 贴到内缩边界（落在面板圆角带）时改用同心半径 radius-内缩，
+         * 高亮圆弧与面板圆角同心贴合，首/末行不再溢出直角。 */
+        if ((int16_t)idx == obj->pressed_row)
         {
-            const char *text = obj->items[idx];
-#if (WE_CFG_MONO_STYLE == 1)
-            colour_t tc = ((int16_t)idx == obj->pressed_row) ? mono_bg : mono_fg; /* 反白行挖空字 */
-#else
-            colour_t tc = obj->text_color;
-#endif
-            int16_t ty;
-            int8_t y_top;
-            int8_t y_bot;
+            int16_t hx = (int16_t)(obj->base.x + WE_LIST_PRESS_INSET);
+            uint16_t hw = (uint16_t)(obj->base.w - 2 * WE_LIST_PRESS_INSET);
+            int16_t hy0 = (int16_t)(iy + 1);
+            int16_t hy1 = (int16_t)(iy + (int16_t)obj->row_h - 2);
+            int16_t py0 = (int16_t)(obj->base.y + WE_LIST_PRESS_INSET);
+            int16_t py1 = (int16_t)(obj->base.y + obj->base.h - 1 - WE_LIST_PRESS_INSET);
+            uint16_t hr = WE_LIST_PRESS_RADIUS;
 
-            if (iy > (int16_t)(obj->base.y + obj->base.h - 1))
-                break; /* 已画到控件底部之外 */
-
-            /* 按压行高亮：内缩圆角条，先与"面板内缩矩形"求交（半露行不外溢），
-             * 贴到内缩边界（落在面板圆角带）时改用同心半径 radius-内缩，
-             * 高亮圆弧与面板圆角同心贴合，首/末行不再溢出直角。 */
-            if ((int16_t)idx == obj->pressed_row)
+            if (hy0 < py0)
+                hy0 = py0;
+            if (hy1 > py1)
+                hy1 = py1;
+            if (hy0 <= hy1)
             {
-                int16_t hx = (int16_t)(obj->base.x + WE_LIST_PRESS_INSET);
-                uint16_t hw = (uint16_t)(obj->base.w - 2 * WE_LIST_PRESS_INSET);
-                int16_t hy0 = (int16_t)(iy + 1);
-                int16_t hy1 = (int16_t)(iy + (int16_t)obj->row_h - 2);
-                int16_t py0 = (int16_t)(obj->base.y + WE_LIST_PRESS_INSET);
-                int16_t py1 = (int16_t)(obj->base.y + obj->base.h - 1 - WE_LIST_PRESS_INSET);
-                uint16_t hr = WE_LIST_PRESS_RADIUS;
-
-                if (hy0 < py0)
-                    hy0 = py0;
-                if (hy1 > py1)
-                    hy1 = py1;
-                if (hy0 <= hy1)
+                if ((hy0 == py0 || hy1 == py1) &&
+                    obj->radius > (uint16_t)WE_LIST_PRESS_INSET)
                 {
-                    if ((hy0 == py0 || hy1 == py1) &&
-                        obj->radius > (uint16_t)WE_LIST_PRESS_INSET)
-                    {
-                        /* 内缩矩形要包在面板圆角内，同心半径需 >= 面板半径-内缩 */
-                        uint16_t cr = (uint16_t)(obj->radius - WE_LIST_PRESS_INSET);
-                        if (cr > hr)
-                            hr = cr;
-                    }
-#if (WE_CFG_MONO_STYLE == 1)
-                    we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
-                                                     (uint16_t)(hy1 - hy0 + 1),
-                                                     hr, mono_fg, obj->opacity); /* 反白条 */
-#else
-                    we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
-                                                     (uint16_t)(hy1 - hy0 + 1),
-                                                     hr, obj->press_color, obj->opacity);
-#endif
+                    /* 内缩矩形要包在面板圆角内，同心半径需 >= 面板半径-内缩 */
+                    uint16_t cr = (uint16_t)(obj->radius - WE_LIST_PRESS_INSET);
+                    if (cr > hr)
+                        hr = cr;
                 }
+#if (WE_CFG_MONO_STYLE == 1)
+                we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
+                                                 (uint16_t)(hy1 - hy0 + 1),
+                                                 hr, mono_fg, obj->opacity); /* 反白条 */
+#else
+                we_draw_round_rect_analytic_fill(lcd, hx, hy0, hw,
+                                                 (uint16_t)(hy1 - hy0 + 1),
+                                                 hr, obj->press_color, obj->opacity);
+#endif
             }
+        }
 
-            /* 行文字：左对齐 + 行内垂直居中 */
-            if (text != NULL)
-            {
-                we_get_text_bbox(obj->font, text, &y_top, &y_bot);
-                ty = (int16_t)(iy + (int16_t)obj->row_h / 2 - (y_top + y_bot) / 2);
-                we_draw_string(lcd, (int16_t)(obj->base.x + WE_LIST_TEXT_PAD), ty,
-                               obj->font, text, tc,
-                               we_opa_scale(255U, obj->opacity));
-            }
+        /* 行文字：左对齐 + 行内垂直居中 */
+        if (text != NULL)
+            we_draw_string(lcd, (int16_t)(obj->base.x + WE_LIST_TEXT_PAD),
+                           (int16_t)(iy + (int16_t)obj->row_h / 2 - _list_text_ymid(obj, text)),
+                           obj->font, text, tc, obj->opacity);
 
 #if (WE_CFG_MONO_STYLE == 0)
-            /* 行底 1px 分隔线（低透明度，最后一行不画；单色样式省略弱对比装饰） */
-            if (idx < (int32_t)(obj->item_cnt - 1U))
-            {
-                we_fill_rect(lcd,
-                             (int16_t)(obj->base.x + WE_LIST_TEXT_PAD),
-                             (int16_t)(iy + (int16_t)obj->row_h - 1),
-                             (uint16_t)(obj->base.w - 2 * WE_LIST_TEXT_PAD), 1U,
-                             obj->sep_color,
-                             we_opa_scale(WE_LIST_SEP_OPA, obj->opacity));
-            }
+        /* 行底 1px 分隔线（低透明度，最后一行不画；单色样式省略弱对比装饰） */
+        if (idx < (int32_t)(obj->item_cnt - 1U))
+        {
+            we_fill_rect(lcd,
+                         (int16_t)(obj->base.x + WE_LIST_TEXT_PAD),
+                         (int16_t)(iy + (int16_t)obj->row_h - 1),
+                         (uint16_t)(obj->base.w - 2 * WE_LIST_TEXT_PAD), 1U,
+                         obj->sep_color,
+                         we_opa_scale(WE_LIST_SEP_OPA, obj->opacity));
+        }
 #endif
 
-            iy = (int16_t)(iy + (int16_t)obj->row_h);
-        }
+        iy = (int16_t)(iy + (int16_t)obj->row_h);
     }
-
-    we_pfb_clip_restore(lcd, &sv);
 
     /* 3. 内容溢出时叠加右缘滚动条（透明度由淡出动画驱动） */
     _list_draw_scrollbar(obj);
@@ -476,17 +481,20 @@ static void _list_draw_cb(void *ptr)
  * 事件
  * -------------------------------------------------------------------------- */
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
+static uint8_t _list_key_cb(void *ptr, uint8_t key_evt);
+#endif
+
 /**
- * @brief 事件回调：行按压高亮 / 拖拽滚动 / 同行释放触发点击回调 /
+ * @brief 事件回调：行按压高亮 / 拖拽滚动 / 点击回调 /
  *        惯性（拖拽测速 + 快扫 SWIPE 注入）/ 越界回弹。
  * @param ptr 传入：控件对象指针。
  * @param event 传入：输入事件类型。
  * @param data 传入：输入数据。
  * @return 1 表示消费事件，0 表示穿透。
+ * @note 点击在内核的 CLICKED 上判定（快扫、手指滑出控件时内核不发 CLICKED），
+ *       且要求松手点仍在按下的那一行；滑行/回弹中按下只是让列表停住，不算点击。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
-static uint8_t _list_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_LIST_USE_KEY == 1)
@@ -497,16 +505,31 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
 
     we_list_obj_t *obj = (we_list_obj_t *)ptr;
 
-    if (obj == NULL || data == NULL)
+    if (data == NULL)
         return 0U;
 
     if (event == WE_EVENT_PRESSED)
     {
+        uint8_t was_moving = obj->sc.animating;
+
         _list_stop_anim(obj); /* 按住即停惯性/回弹（越界时定格，松手再回弹） */
         we_scroll_press(&obj->sc, data->y);
-        obj->pressed_row = _list_hit_row(obj, data->x, data->y);
+        obj->click_row = -1;
+        /* 滑行/回弹中按下只用来停住列表，不进入行按压 */
+        obj->pressed_row = was_moving ? (int16_t)-1 : _list_hit_row(obj, data->x, data->y);
         if (obj->pressed_row >= 0)
             _list_invalidate_row(obj, obj->pressed_row); /* 只标脏按压行条带 */
+        return 1U;
+    }
+
+    if (event == WE_EVENT_CLICKED)
+    {
+        int16_t row = obj->click_row;
+
+        obj->click_row = -1;
+        /* 松手点仍在按下的那一行才算点击 */
+        if (row >= 0 && _list_hit_row(obj, data->x, data->y) == row && obj->clicked_cb != NULL)
+            obj->clicked_cb(obj, (uint16_t)row);
         return 1U;
     }
 
@@ -547,30 +570,23 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
 
     if (event == WE_EVENT_RELEASED)
     {
-        uint8_t was_drag = obj->sc.dragging;
         int16_t row = obj->pressed_row;
-        int32_t max_scroll = _list_max_scroll(obj);
 
-        if (!was_drag && row >= 0)
+        if (!obj->sc.dragging && row >= 0)
         {
-            /* 未拖拽：释放点仍在同一行才算点击 */
-            if (_list_hit_row(obj, data->x, data->y) == row)
-            {
-                if (obj->clicked_cb != NULL)
-                    obj->clicked_cb(obj, (uint16_t)row);
-            }
+            /* 未拖拽：记下按压行，紧随其后的 CLICKED 再判定点击；清除按压高亮 */
+            obj->click_row = row;
             obj->pressed_row = -1;
-            _list_invalidate_row(obj, row); /* 只标脏该行清除按压高亮 */
+            _list_invalidate_row(obj, row);
         }
 
         /* 拖拽松手带速度 → 惯性（回弹并入同一动画）；
          * 越界（含按住定格后轻点松开）→ 纯回弹 */
-        if (we_scroll_release(&obj->sc, max_scroll))
+        if (we_scroll_release(&obj->sc, _list_max_scroll(obj)))
             we_anim_start(obj->base.lcd, &obj->anim, _list_anim_step_cb, obj);
         return 1U;
     }
 
-    /* CLICKED：点击回调已在 RELEASED 处理，这里仅消费防穿透 */
     return 1U;
 }
 
@@ -579,7 +595,7 @@ static uint8_t _list_event_cb(void *ptr, we_event_t event, we_indev_data_t *data
  * @brief 按键/焦点回调：OK 进编辑态并落高亮行，编辑态上下键移动高亮 +
  *        滚动跟随，OK 触发行选中回调（停留编辑态），BACK 交管理器退出。
  * @param ptr 回调透传对象指针。
- * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @param key_evt 语义键值或焦点通知（WE_KEY_xx / WE_KEY_EVT_xx）。
  * @return 非 0 表示已消费。
  * @note 键控高亮直接复用触摸按压行字段 pressed_row 与其行条带精细标脏，
  *       零新增视觉代码；退出编辑后高亮保留，可作"当前选中行"记忆。
@@ -669,6 +685,34 @@ static const we_class_t _list_class = {
  * -------------------------------------------------------------------------- */
 
 /**
+ * @brief 按字体行高推导默认行高（字体行高 + 2*WE_LIST_ROW_PAD）。
+ * @param font 传入：字体资源指针。
+ * @return 行高（像素）。
+ */
+static uint16_t _list_default_row_h(const unsigned char *font)
+{
+    uint16_t line_h = we_font_get_line_height(font);
+
+    if (line_h == 0U)
+        line_h = 16U; /* 字库异常兜底 */
+    return (uint16_t)(line_h + 2U * WE_LIST_ROW_PAD);
+}
+
+/**
+ * @brief 行高变化后的收尾：停动画、滚动偏移硬夹紧到新范围（过冲态一并归位）、整控件标脏。
+ * @param obj 传入：控件对象指针。
+ * @param row_h 传入：新行高。
+ * @return 无。
+ */
+static void _list_apply_row_h(we_list_obj_t *obj, uint16_t row_h)
+{
+    _list_stop_anim(obj);
+    obj->row_h = row_h;
+    (void)we_scroll_set(&obj->sc, obj->sc.pos, _list_max_scroll(obj));
+    we_obj_invalidate((we_obj_t *)obj);
+}
+
+/**
  * @brief 初始化列表控件并挂载到 LCD 对象链表。
  * @param obj 传入：控件对象指针。
  * @param lcd 传入：GUI 运行时 LCD 上下文指针。
@@ -682,8 +726,6 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
                       int16_t x, int16_t y, int16_t w, int16_t h,
                       const unsigned char *font)
 {
-    uint16_t line_h;
-
     if (obj == NULL || lcd == NULL || font == NULL)
         return;
 
@@ -700,10 +742,8 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
     obj->item_cnt = 0U;
 
     obj->font = font;
-    line_h = we_font_get_line_height(obj->font);
-    if (line_h == 0U)
-        line_h = 16U; /* 字库异常兜底 */
-    obj->row_h = (uint16_t)(line_h + 2U * WE_LIST_ROW_PAD);
+    obj->row_h = _list_default_row_h(font);
+    obj->ymid_txt = NULL;
 
     obj->radius = WE_LIST_DEF_RADIUS;
     obj->opacity = 255U;
@@ -717,12 +757,11 @@ void we_list_obj_init(we_list_obj_t *obj, we_lcd_t *lcd,
     obj->clicked_cb = NULL;
 
     obj->pressed_row = -1;
+    obj->click_row = -1;
 
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;
     obj->anim.owner = NULL;
-    obj->sc.animating = 0U;
-    obj->sc.vel = 0;
 
     obj->sb_alpha = 0U;   /* 未绑定条目前不显示滚动条 */
     obj->sb_idle_ms = 0U;
@@ -746,16 +785,19 @@ void we_list_set_options(we_list_obj_t *obj,
 {
     if (obj == NULL)
         return;
+    obj->ymid_txt = NULL; /* 同一数组再调一次可刷新原地改过的文字 */
     if (obj->items == items && obj->item_cnt == count)
+    {
+        we_obj_invalidate((we_obj_t *)obj);
         return;
+    }
 
     _list_stop_anim(obj);
     obj->items = items;
     obj->item_cnt = (items != NULL) ? count : 0U;
     we_scroll_reset(&obj->sc);
     obj->pressed_row = -1;
-    obj->sc.tracking = 0U;
-    obj->sc.dragging = 0U;
+    obj->click_row = -1;
     we_obj_invalidate((we_obj_t *)obj);
     /* 内容溢出时让滚动条短暂全显提示"此处可滚动"，随后自动渐隐；
      * 不溢出时 wake 内部直接返回，保持隐藏 */
@@ -785,21 +827,9 @@ void we_list_set_clicked_cb(we_list_obj_t *obj, we_list_clicked_cb_t cb)
  */
 void we_list_set_row_height(we_list_obj_t *obj, uint16_t row_h)
 {
-    int32_t max_scroll;
-
     if (obj == NULL || row_h == 0U || obj->row_h == row_h)
         return;
-
-    _list_stop_anim(obj);
-    obj->row_h = row_h;
-
-    max_scroll = _list_max_scroll(obj);
-    if (obj->sc.pos > max_scroll)
-        obj->sc.pos = max_scroll;
-    if (obj->sc.pos < 0)
-        obj->sc.pos = 0;
-
-    we_obj_invalidate((we_obj_t *)obj);
+    _list_apply_row_h(obj, row_h);
 }
 
 /**
@@ -812,27 +842,11 @@ void we_list_set_row_height(we_list_obj_t *obj, uint16_t row_h)
  */
 void we_list_set_font(we_list_obj_t *obj, const unsigned char *font)
 {
-    uint16_t line_h;
-    int32_t max_scroll;
-
     if (obj == NULL || font == NULL || obj->font == font)
         return;
-
-    _list_stop_anim(obj);
     obj->font = font;
-
-    line_h = we_font_get_line_height(font);
-    if (line_h == 0U)
-        line_h = 16U; /* 字库异常兜底 */
-    obj->row_h = (uint16_t)(line_h + 2U * WE_LIST_ROW_PAD);
-
-    max_scroll = _list_max_scroll(obj);
-    if (obj->sc.pos > max_scroll)
-        obj->sc.pos = max_scroll;
-    if (obj->sc.pos < 0)
-        obj->sc.pos = 0;
-
-    we_obj_invalidate((we_obj_t *)obj);
+    obj->ymid_txt = NULL;
+    _list_apply_row_h(obj, _list_default_row_h(font));
 }
 
 /**
@@ -861,18 +875,4 @@ void we_list_set_scroll(we_list_obj_t *obj, int32_t scroll_px)
         return;
     _list_stop_anim(obj);
     _list_apply_scroll(obj, scroll_px);
-}
-
-/**
- * @brief 删除列表控件：先摘除惯性与滚动条淡出动画节点再摘链。
- * @param obj 传入：控件对象指针。
- * @return 无。
- */
-void we_list_obj_delete(we_list_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL)
-        return;
-    _list_stop_anim(obj);                        /* 惯性/回弹节点归控件所有 */
-    we_anim_stop(obj->base.lcd, &obj->sb_anim);  /* 滚动条淡出节点同样必须摘链 */
-    we_obj_delete((we_obj_t *)obj);
 }

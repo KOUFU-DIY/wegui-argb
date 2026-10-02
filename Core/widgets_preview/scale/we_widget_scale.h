@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_SCALE_H
 #define __WE_WIDGET_SCALE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 刻度尺控件（scale）—— preview 孵化区实验控件

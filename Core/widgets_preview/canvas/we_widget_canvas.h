@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_CANVAS_H
 #define __WE_WIDGET_CANVAS_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 用户自绘壳控件（canvas）—— preview 孵化区实验控件
@@ -19,7 +19,7 @@
  *
  * 用户绘制回调内可用的常见原语（均自动被收窄后的窗口裁剪）：
  *   we_fill_rect / we_draw_pixel / we_draw_line / we_draw_line_round /
- *   we_draw_string / we_draw_round_rect_analytic_fill（需 we_render.h）等。
+ *   we_draw_string / we_draw_round_rect_analytic_fill（均由 wegui.h 引入）等。
  *
  * 零 malloc、无动画节点。preview 限制见 widget.md。
  * -------------------------------------------------------------------------- */

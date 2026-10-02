@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_CHECKBOX_H
 #define __WE_WIDGET_CHECKBOX_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 置 0 单独裁剪复选框的按键回调与可聚焦性，其余控件不受影响。 */
@@ -46,6 +46,7 @@ typedef struct
     uint8_t opacity;
     uint8_t checked : 1; /* 0=未选中, 1=选中 */
     uint8_t pressed : 1; /* 当前是否被按下 */
+    int8_t txt_ymid;     /* 文字墨迹竖直中线（相对基线，随文本缓存） */
 } we_checkbox_obj_t;
 
 /**
@@ -58,7 +59,7 @@ typedef struct
  * @param text UTF-8 文本字符串。
  * @param font 字体资源指针。
  * @param event_cb 回调函数指针。
- * @return 无。。
+ * @return 无。
  */
 void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, uint16_t box_size,
                           const char *text, const unsigned char *font, we_checkbox_event_cb_t event_cb);
@@ -67,14 +68,14 @@ void we_checkbox_obj_init(we_checkbox_obj_t *obj, we_lcd_t *lcd, int16_t x, int1
  * @brief 设置勾选状态并刷新方框区域。
  * @param obj 目标控件对象指针。
  * @param checked 目标勾选状态（0=未选中，1=选中）。
- * @return 无。。
+ * @return 无。
  */
 void we_checkbox_set_checked(we_checkbox_obj_t *obj, uint8_t checked);
 
 /**
  * @brief 切换勾选状态并刷新方框区域。
  * @param obj 目标控件对象指针。
- * @return 无。。
+ * @return 无。
  */
 void we_checkbox_toggle(we_checkbox_obj_t *obj);
 
@@ -97,7 +98,7 @@ void we_checkbox_set_changed_cb(we_checkbox_obj_t *obj, we_checkbox_changed_cb_t
  * @brief 设置文本内容并触发重排或重绘。
  * @param obj 目标控件对象指针。
  * @param text UTF-8 文本字符串。
- * @return 无。。
+ * @return 无。
  */
 void we_checkbox_set_text(we_checkbox_obj_t *obj, const char *text);
 
@@ -105,7 +106,7 @@ void we_checkbox_set_text(we_checkbox_obj_t *obj, const char *text);
  * @brief 设置控件样式参数并刷新显示。
  * @param obj 目标控件对象指针。
  * @param styles 样式表指针（NULL 时恢复内置默认样式）。
- * @return 无。。
+ * @return 无。
  */
 void we_checkbox_set_styles(we_checkbox_obj_t *obj, const we_cb_style_t *styles);
 

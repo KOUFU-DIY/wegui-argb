@@ -1,5 +1,5 @@
 #include "we_widget_slider.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /**
  * @brief 控件绘制回调，向当前 PFB 输出滑条内容。
@@ -21,7 +21,7 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 /**
  * @brief 按键/焦点回调：OK 进/退编辑态，编辑态方向键按 量程/20 步进调值。
  * @param ptr 回调透传对象指针。
- * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @param key_evt 语义键值或焦点通知（WE_KEY_xx / WE_KEY_EVT_xx）。
  * @return 非 0 表示已消费。
  * @note we_slider_set_value 属程序路径不触发 changed_cb；键控调值视为用户
  *       交互，值变化后在此手动补发回调（与触摸拖拽口径一致）。
@@ -71,7 +71,7 @@ static uint8_t _slider_key_cb(void *ptr, uint8_t key_evt)
 static const we_class_t _slider_class = {
     .draw_cb = _slider_draw_cb,
     .event_cb = _slider_event_cb,
-        .set_pos_cb = NULL,
+    .set_pos_cb = NULL,
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
     .class_flags = WE_CLASS_FLAG_FOCUSABLE, /* 键/焦点走统一 event_cb 通道 */
 #endif
@@ -92,8 +92,6 @@ static const colour_t _slider_mono_bg = RGB888_CONST(0, 0, 0);
  */
 static uint8_t _slider_clamp_value(const we_slider_obj_t *obj, uint8_t value)
 {
-    if (obj == NULL)
-        return value;
     if (value < obj->min_value)
         return obj->min_value;
     if (value > obj->max_value)
@@ -108,7 +106,7 @@ static uint8_t _slider_clamp_value(const we_slider_obj_t *obj, uint8_t value)
  */
 static uint8_t _slider_value_span(const we_slider_obj_t *obj)
 {
-    if (obj == NULL || obj->max_value <= obj->min_value)
+    if (obj->max_value <= obj->min_value)
         return 0U;
     return (uint8_t)(obj->max_value - obj->min_value);
 }
@@ -123,9 +121,6 @@ static uint8_t _slider_track_thickness(const we_slider_obj_t *obj)
     uint16_t thickness;
     uint16_t max_size;
 
-    if (obj == NULL)
-        return WE_SLIDER_TRACK_THICKNESS;
-
     thickness = obj->track_thickness ? obj->track_thickness : (uint16_t)WE_SLIDER_TRACK_THICKNESS;
     if (thickness < 2U)
         thickness = 2U;
@@ -136,9 +131,6 @@ static uint8_t _slider_track_thickness(const we_slider_obj_t *obj)
     max_size = (obj->base.w > 0) ? (uint16_t)obj->base.w : 0U;
     if (max_size > 0U && thickness > max_size)
         thickness = max_size;
-
-    if (thickness > 255U)
-        thickness = 255U;
     return (uint8_t)thickness;
 }
 
@@ -146,29 +138,18 @@ static uint8_t _slider_track_thickness(const we_slider_obj_t *obj)
  * @brief 计算实际绘制用滑块尺寸。
  * @param obj 滑条对象指针。
  * @return 滑块尺寸（像素）。
+ * @note 最小 4px，但不超过控件的宽和高（滑块画不出包围盒）。
  */
 static uint8_t _slider_thumb_size(const we_slider_obj_t *obj)
 {
-    uint16_t size;
-    uint16_t max_size;
+    uint16_t size = obj->thumb_size ? obj->thumb_size : (uint16_t)WE_SLIDER_THUMB_SIZE;
 
-    if (obj == NULL)
-        return WE_SLIDER_THUMB_SIZE;
-
-    size = obj->thumb_size ? obj->thumb_size : (uint16_t)WE_SLIDER_THUMB_SIZE;
-#if (WE_SLIDER_ENABLE_VERTICAL == 1)
-    max_size = (obj->orient == WE_SLIDER_ORIENT_VER) ? (uint16_t)obj->base.w : (uint16_t)obj->base.h;
-#else
-    max_size = (uint16_t)obj->base.h;
-#endif
-    if (max_size == 0U)
-        return (uint8_t)size;
-    if (size > max_size)
-        size = max_size;
     if (size < 4U)
         size = 4U;
-    if (size > 255U)
-        size = 255U;
+    if (obj->base.w > 0 && size > (uint16_t)obj->base.w)
+        size = (uint16_t)obj->base.w;
+    if (obj->base.h > 0 && size > (uint16_t)obj->base.h)
+        size = (uint16_t)obj->base.h;
     return (uint8_t)size;
 }
 
@@ -181,9 +162,6 @@ static uint8_t _slider_thumb_size(const we_slider_obj_t *obj)
 static uint16_t _slider_travel_len(const we_slider_obj_t *obj, uint8_t thumb_size)
 {
     int16_t len;
-
-    if (obj == NULL)
-        return 0U;
 
 #if (WE_SLIDER_ENABLE_VERTICAL == 1)
     if (obj->orient == WE_SLIDER_ORIENT_VER)
@@ -224,21 +202,7 @@ static uint16_t _slider_fill_len_for_value(const we_slider_obj_t *obj, uint8_t v
  */
 static uint16_t _slider_fill_len(const we_slider_obj_t *obj, uint8_t thumb_size)
 {
-    if (obj == NULL)
-        return 0U;
     return _slider_fill_len_for_value(obj, obj->value, thumb_size);
-}
-
-/**
- * @brief 标脏整个滑条控件区域。
- * @param obj 滑条对象指针。
- * @return 无。
- */
-static void _slider_invalidate_full(we_slider_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -252,7 +216,7 @@ static void _slider_invalidate_full(we_slider_obj_t *obj)
  */
 static void _slider_invalidate_rect(we_slider_obj_t *obj, int16_t x0, int16_t y0, int16_t w, int16_t h)
 {
-    if (obj == NULL || w <= 0 || h <= 0)
+    if (w <= 0 || h <= 0)
         return;
 
     if (x0 < obj->base.x)
@@ -275,6 +239,31 @@ static void _slider_invalidate_rect(we_slider_obj_t *obj, int16_t x0, int16_t y0
 }
 
 /**
+ * @brief 计算指定填充长度下滑块外接框的左上角（绘制与标脏共用）。
+ * @param obj 滑条对象指针。
+ * @param thumb_size 滑块尺寸（像素）。
+ * @param fill_len 填充长度（像素）。
+ * @param x 传出：外接框左上角 X。
+ * @param y 传出：外接框左上角 Y。
+ * @return 无。
+ * @note 横向滑块从左缘起右移 fill；竖向从底缘起上移 fill，奇数尺寸也恰好贴边。
+ */
+static void _slider_thumb_origin(const we_slider_obj_t *obj, uint8_t thumb_size, uint16_t fill_len,
+                                 int16_t *x, int16_t *y)
+{
+#if (WE_SLIDER_ENABLE_VERTICAL == 1)
+    if (obj->orient == WE_SLIDER_ORIENT_VER)
+    {
+        *x = (int16_t)(obj->base.x + obj->base.w / 2 - (int16_t)(thumb_size / 2U));
+        *y = (int16_t)(obj->base.y + obj->base.h - (int16_t)thumb_size - (int16_t)fill_len);
+        return;
+    }
+#endif
+    *x = (int16_t)(obj->base.x + (int16_t)fill_len);
+    *y = (int16_t)(obj->base.y + obj->base.h / 2 - (int16_t)(thumb_size / 2U));
+}
+
+/**
  * @brief 按指定填充长度标脏对应滑块外接区域。
  * @param obj 滑条对象指针。
  * @param fill_len 填充长度（像素）。
@@ -282,35 +271,11 @@ static void _slider_invalidate_rect(we_slider_obj_t *obj, int16_t x0, int16_t y0
  */
 static void _slider_invalidate_thumb_at_fill(we_slider_obj_t *obj, uint16_t fill_len)
 {
-    uint8_t thumb_size;
-    int16_t half_thumb;
-    int16_t center_x;
-    int16_t center_y;
+    uint8_t thumb_size = _slider_thumb_size(obj);
     int16_t x0;
     int16_t y0;
 
-    if (obj == NULL)
-        return;
-
-    thumb_size = _slider_thumb_size(obj);
-    half_thumb = (int16_t)(thumb_size / 2U);
-
-#if (WE_SLIDER_ENABLE_VERTICAL == 1)
-    if (obj->orient == WE_SLIDER_ORIENT_VER)
-    {
-        center_x = (int16_t)(obj->base.x + obj->base.w / 2);
-        center_y = (int16_t)(obj->base.y + obj->base.h - half_thumb - (int16_t)fill_len);
-    }
-    else
-#endif
-    {
-        center_x = (int16_t)(obj->base.x + half_thumb + (int16_t)fill_len);
-        center_y = (int16_t)(obj->base.y + obj->base.h / 2);
-    }
-
-    x0 = (int16_t)(center_x - half_thumb);
-    y0 = (int16_t)(center_y - half_thumb);
-
+    _slider_thumb_origin(obj, thumb_size, fill_len, &x0, &y0);
     _slider_invalidate_rect(obj, x0, y0, (int16_t)thumb_size, (int16_t)thumb_size);
 }
 
@@ -321,13 +286,7 @@ static void _slider_invalidate_thumb_at_fill(we_slider_obj_t *obj, uint16_t fill
  */
 static void _slider_invalidate_thumb(we_slider_obj_t *obj)
 {
-    uint8_t thumb_size;
-
-    if (obj == NULL)
-        return;
-
-    thumb_size = _slider_thumb_size(obj);
-    _slider_invalidate_thumb_at_fill(obj, _slider_fill_len(obj, thumb_size));
+    _slider_invalidate_thumb_at_fill(obj, _slider_fill_len(obj, _slider_thumb_size(obj)));
 }
 
 /**
@@ -350,7 +309,7 @@ static void _slider_invalidate_value_change(we_slider_obj_t *obj, uint8_t old_va
     int16_t track_span;
     uint8_t track_thickness;
 
-    if (obj == NULL || old_value == new_value)
+    if (old_value == new_value)
         return;
 
     thumb_size = _slider_thumb_size(obj);
@@ -401,9 +360,6 @@ static uint8_t _slider_value_from_point(const we_slider_obj_t *obj, int16_t x, i
     int16_t offset;
     uint16_t value;
 
-    if (obj == NULL)
-        return 0U;
-
     thumb_size = _slider_thumb_size(obj);
     travel_len = _slider_travel_len(obj, thumb_size);
     span = _slider_value_span(obj);
@@ -413,7 +369,8 @@ static uint8_t _slider_value_from_point(const we_slider_obj_t *obj, int16_t x, i
 #if (WE_SLIDER_ENABLE_VERTICAL == 1)
     if (obj->orient == WE_SLIDER_ORIENT_VER)
     {
-        offset = (int16_t)(obj->base.y + obj->base.h - (int16_t)(thumb_size / 2U) - y);
+        /* 竖向滑块中心在 底缘 - 尺寸 + 尺寸/2 = 底缘 - (尺寸+1)/2 */
+        offset = (int16_t)(obj->base.y + obj->base.h - (int16_t)((thumb_size + 1U) / 2U) - y);
     }
     else
 #endif
@@ -460,28 +417,7 @@ static void _slider_draw_track(we_slider_obj_t *obj, we_lcd_t *lcd,
                                int16_t x, int16_t y, uint16_t w, uint16_t h,
                                colour_t color)
 {
-    if (obj == NULL || lcd == NULL || w == 0U || h == 0U)
-        return;
     we_draw_round_rect_analytic_fill(lcd, x, y, w, h, (uint16_t)(h / 2U), color, obj->opacity);
-}
-
-/**
- * @brief 绘制滑块圆头。
- * @param obj 滑条对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x 滑块外接框左上角 X 坐标。
- * @param y 滑块外接框左上角 Y 坐标。
- * @param size 滑块尺寸。
- * @param color 滑块颜色。
- * @return 无。
- */
-static void _slider_draw_thumb(we_slider_obj_t *obj, we_lcd_t *lcd,
-                               int16_t x, int16_t y, uint16_t size,
-                               colour_t color)
-{
-    if (obj == NULL || lcd == NULL || size == 0U)
-        return;
-    we_draw_round_rect_analytic_fill(lcd, x, y, size, size, (uint16_t)(size / 2U), color, obj->opacity);
 }
 
 #if (WE_CFG_MONO_STYLE == 1)
@@ -500,8 +436,6 @@ static void _slider_draw_track_outline(we_slider_obj_t *obj, we_lcd_t *lcd,
 {
     uint16_t m = (w < h) ? w : h;
 
-    if (obj == NULL || lcd == NULL || w == 0U || h == 0U)
-        return;
     we_draw_round_rect_outline_fill(lcd, x, y, w, h, (uint16_t)(m / 2U),
                                     _slider_mono_fg, _slider_mono_bg, obj->opacity);
 }
@@ -515,7 +449,7 @@ static void _slider_draw_track_outline(we_slider_obj_t *obj, we_lcd_t *lcd,
 static void _slider_draw_cb(void *ptr)
 {
     we_slider_obj_t *obj = (we_slider_obj_t *)ptr;
-    we_lcd_t *lcd;
+    we_lcd_t *lcd = obj->base.lcd;
     uint8_t thumb_size;
     uint8_t track_thickness;
     uint16_t travel_len;
@@ -524,17 +458,11 @@ static void _slider_draw_cb(void *ptr)
     int16_t rail_y;
     int16_t thumb_x;
     int16_t thumb_y;
-    int16_t thumb_cx;
-    int16_t thumb_cy;
 #if (WE_CFG_MONO_STYLE == 0)
     colour_t thumb_color;
 #endif
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-
-    lcd = obj->base.lcd;
-    if (lcd == NULL)
+    if (obj->opacity == 0U)
         return;
 
     thumb_size = _slider_thumb_size(obj);
@@ -547,8 +475,6 @@ static void _slider_draw_cb(void *ptr)
     {
         rail_x = obj->base.x + (int16_t)((obj->base.w - (int16_t)track_thickness) / 2);
         rail_y = (int16_t)(obj->base.y + thumb_size / 2U);
-        thumb_cx = (int16_t)(obj->base.x + obj->base.w / 2);
-        thumb_cy = (int16_t)(obj->base.y + obj->base.h - (int16_t)(thumb_size / 2U) - (int16_t)fill_len);
 
 #if (WE_CFG_MONO_STYLE == 1)
         _slider_draw_track_outline(obj, lcd, rail_x, rail_y, track_thickness, travel_len);
@@ -573,8 +499,6 @@ static void _slider_draw_cb(void *ptr)
     {
         rail_x = obj->base.x + (int16_t)(thumb_size / 2U);
         rail_y = obj->base.y + (int16_t)((obj->base.h - (int16_t)track_thickness) / 2);
-        thumb_cx = (int16_t)(rail_x + (int16_t)fill_len);
-        thumb_cy = (int16_t)(obj->base.y + obj->base.h / 2);
 
 #if (WE_CFG_MONO_STYLE == 1)
         _slider_draw_track_outline(obj, lcd, rail_x, rail_y, travel_len, track_thickness);
@@ -585,22 +509,20 @@ static void _slider_draw_cb(void *ptr)
 #endif
     }
 
-    thumb_x = (int16_t)(thumb_cx - (int16_t)(thumb_size / 2U));
-    thumb_y = (int16_t)(thumb_cy - (int16_t)(thumb_size / 2U));
+    _slider_thumb_origin(obj, thumb_size, fill_len, &thumb_x, &thumb_y);
 
 #if (WE_CFG_MONO_STYLE == 1)
     /* 单色滑块：黑圈 + 白芯（压在白色已填段上仍可辨） */
-    _slider_draw_thumb(obj, lcd, thumb_x, thumb_y, thumb_size, _slider_mono_bg);
-    if (thumb_size > 2U)
-        _slider_draw_thumb(obj, lcd, (int16_t)(thumb_x + 1), (int16_t)(thumb_y + 1),
-                           (uint8_t)(thumb_size - 2U), _slider_mono_fg);
+    we_draw_round_rect_outline_fill(lcd, thumb_x, thumb_y, thumb_size, thumb_size, (uint16_t)(thumb_size / 2U),
+                                    _slider_mono_bg, _slider_mono_fg, obj->opacity);
 #else
     if (obj->pressed)
         thumb_color = we_colour_blend(_slider_black, obj->thumb_color, 40U);
     else
         thumb_color = obj->thumb_color;
 
-    _slider_draw_thumb(obj, lcd, thumb_x, thumb_y, thumb_size, thumb_color);
+    we_draw_round_rect_analytic_fill(lcd, thumb_x, thumb_y, thumb_size, thumb_size, (uint16_t)(thumb_size / 2U),
+                                     thumb_color, obj->opacity);
 #endif
 }
 
@@ -609,11 +531,8 @@ static void _slider_draw_cb(void *ptr)
  * @param ptr 回调透传对象指针。
  * @param event 输入事件类型。
  * @param data 输入设备事件数据指针。
- * @return 1 表示事件已消费，0 表示无效。
+ * @return 1 表示事件已消费，0 表示不接（全透明时按压交给外层）。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
-static uint8_t _slider_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_SLIDER_USE_KEY == 1)
@@ -626,12 +545,11 @@ static uint8_t _slider_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
     uint8_t old_value;
     uint8_t new_value;
 
-    if (obj == NULL)
-        return 0U;
-
     switch (event)
     {
     case WE_EVENT_PRESSED:
+        if (obj->opacity == 0U)
+            return 0U; /* 看不见的滑条不接触摸 */
         obj->pressed = 1U;
         if (data != NULL)
         {
@@ -767,18 +685,6 @@ void we_slider_set_changed_cb(we_slider_obj_t *obj, we_slider_changed_cb_t cb)
 }
 
 /**
- * @brief 删除滑条控件对象并从对象链表移除。
- * @param obj 滑条对象指针。
- * @return 无。
- */
-void we_slider_obj_delete(we_slider_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    we_obj_delete((we_obj_t *)obj);
-}
-
-/**
  * @brief 设置滑条当前值并按需标脏。
  * @param obj 滑条对象指针。
  * @param value 新值。
@@ -857,7 +763,7 @@ void we_slider_set_opacity(we_slider_obj_t *obj, uint8_t opacity)
     if (obj == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
-    _slider_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -873,10 +779,13 @@ void we_slider_set_colors(we_slider_obj_t *obj, colour_t track_color,
 {
     if (obj == NULL)
         return;
+    if (we_colour_eq(obj->track_color, track_color) && we_colour_eq(obj->fill_color, fill_color) &&
+        we_colour_eq(obj->thumb_color, thumb_color))
+        return;
     obj->track_color = track_color;
     obj->fill_color = fill_color;
     obj->thumb_color = thumb_color;
-    _slider_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -890,7 +799,7 @@ void we_slider_set_thumb_size(we_slider_obj_t *obj, uint8_t thumb_size)
     if (obj == NULL || obj->thumb_size == thumb_size)
         return;
     obj->thumb_size = thumb_size;
-    _slider_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -904,5 +813,5 @@ void we_slider_set_track_thickness(we_slider_obj_t *obj, uint8_t track_thickness
     if (obj == NULL || obj->track_thickness == track_thickness)
         return;
     obj->track_thickness = track_thickness;
-    _slider_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }

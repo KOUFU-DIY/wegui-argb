@@ -1,15 +1,15 @@
 #ifndef __WE_WIDGET_GAUGE_H
 #define __WE_WIDGET_GAUGE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
  * 仪表盘控件（gauge）
  *
  * 表盘内切于 base.x/y/w/h 的 w×h 区域：中心 = 矩形中心，
- * 外半径 R = min(w,h)/2 - 2（留 2px 抗锯齿羽化余量；
- * min(w,h) < WE_GAUGE_SMALL_SIZE 时按护栏进一步钳缩，见下）。
+ * 外半径 R = min(w,h)/2 - 2（留 2px 抗锯齿羽化余量，刻度线宽超过 2 时
+ * 按线宽加大；min(w,h) < WE_GAUGE_SMALL_SIZE 时按护栏进一步钳缩，见下）。
  *
  * 组成（全部复用现有绘图原语，不新增渲染图元）：
  *   - 主刻度：沿弧线均布的短线段，外端在 R、内端向心收 tick_len，
@@ -25,21 +25,22 @@
  *
  * 数值模型：int32 量程 [v_min, v_max] 线性映射到扫角。
  *   - we_gauge_set_value：立即就位（打断进行中的扫动）；
- *   - we_gauge_anim_value：经单个中央动画节点（we_anim_t，不占 timer 槽）
- *     平滑扫动，缓动函数可用 we_gauge_set_ease 配置（默认缓入缓出正弦）。
+ *   - we_gauge_anim_value：经单个中央动画节点（we_anim_t）平滑扫动，
+ *     缓动函数可用 we_gauge_set_ease 配置（默认缓入缓出正弦）。
  *
  * 全程整数运算（Q15 三角 / Q8 进度插值），零 malloc、渲染路径零浮点。
  * 所有 setter 值未变时直接返回不重绘。
- * 默认装饰性：event_cb 返回 0，输入事件穿透给背后控件。
+ * 装饰性控件：event_cb 为 NULL，命中测试跳过它，触摸落到背后的控件。
  *
  * 实现要点（做法详见 widget.md）：
  *   - 指针差分标脏：数值变化只标"旧指针位形 + 新指针位形"两块包围盒
  *     （各自并入中心帽并钳到控件框，两块独立提交不合成大盒），
  *     静态刻度区零重绘；set_colors/set_range/set_tick_count/set_opacity
  *     等结构性变化仍整控件标脏。
- *   - 刻度几何缓存：主刻度内外端点相对表盘中心的偏移在 init/set_range/
+ *   - 刻度几何缓存：主刻度内外端点相对表盘中心的偏移在 init/
  *     set_tick_count 时一次算好（上限 WE_GAUGE_TICK_MAX 条），draw 内
- *     零三角函数、零乘除；偏移相对中心存储，控件移动无需重算。
+ *     零三角函数、零乘除；偏移相对中心存储，控件移动无需重算；
+ *     外半径变了（we_obj_set_size 改尺寸）由绘制回调自动重建。
  *   - Q16 量程斜率：set_range 时预除 slope_q16，draw/anim 内只乘 + 移位；
  *     span ≤ 65536 时误差 ≤ 1 角度步且正向扫角端点精确落位，
  *     更大跨度自动回退除法保精度。
@@ -140,16 +141,17 @@ typedef struct we_gauge_obj_t
     /* 量程映射 Q16 预除斜率：value→角度 只乘 + 移位（见 _gauge_update_slope） */
     int32_t  slope_q16;        /* (sweep << 16) / span；span > 65536 时为 0（回退除法） */
 
-    /* 主刻度几何缓存：端点相对表盘中心的偏移（init/set_range/set_tick_count
-     * 时重算，相对中心存储 → 控件移动无需重算；draw 内零 we_cos/we_sin。
+    /* 主刻度几何缓存：端点相对表盘中心的偏移（init/set_tick_count 时重算，
+     * 相对中心存储 → 控件移动无需重算；draw 内零 we_cos/we_sin。
      * tick_cnt 在写入口被钳制 <= WE_GAUGE_TICK_MAX，缓存条数恒等于 tick_cnt） */
     int16_t  tick_ox[WE_GAUGE_TICK_MAX];   /* 外端点 X 偏移 */
     int16_t  tick_oy[WE_GAUGE_TICK_MAX];   /* 外端点 Y 偏移 */
     int16_t  tick_ix[WE_GAUGE_TICK_MAX];   /* 内端点 X 偏移 */
     int16_t  tick_iy[WE_GAUGE_TICK_MAX];   /* 内端点 Y 偏移 */
+    int16_t  tick_r;           /* 建缓存时的外半径（与当前不符即重建） */
 
-    /* 扫动动画：单个中央动画引擎节点（不占 GUI timer 槽） */
-    we_anim_t    anim;         /* 动画节点（归控件所有，删除前必须摘链） */
+    /* 扫动动画：单个中央动画引擎节点 */
+    we_anim_t    anim;         /* 动画节点（删除控件时由内核摘链） */
     we_ease_fn_t ease;         /* 缓动函数（NULL 时按线性推进） */
     uint16_t     anim_ms;      /* 本次扫动时长（毫秒） */
     uint16_t     anim_t;       /* Q8 进度 0..256，>= 256 表示空闲 */
@@ -258,10 +260,10 @@ void we_gauge_set_ease(we_gauge_obj_t *obj, we_ease_fn_t ease);
 void we_gauge_set_opacity(we_gauge_obj_t *obj, uint8_t opacity);
 
 /**
- * @brief 删除控件：先摘除动画节点（we_anim_stop）再从对象链表移除。
+ * @brief 删除控件并从对象链表移除（扫动动画节点由内核一并摘链）。
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_gauge_obj_delete(we_gauge_obj_t *obj);
+static inline void we_gauge_obj_delete(we_gauge_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif /* __WE_WIDGET_GAUGE_H */

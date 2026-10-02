@@ -1,8 +1,8 @@
-# WeGui-ARGB · V0.4.0 beta
+# WeGui-ARGB · V0.4.1 beta
 
 轻量级嵌入式 GUI 框架，面向多种 MCU / SoC 平台，同时提供轻量 PC 模拟器（SimLite，无 SDL 依赖，TCC 秒级编译）。
 
-> 当前版本 **V0.4.0 beta**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
+> 当前版本 **V0.4.1 beta**（版本宏定义见 `we_user_config.h` 的 `WE_GUI_VERSION`）。
 
 ## 特性
 
@@ -11,10 +11,10 @@
 - 统一的 GUI tick / timer / 中央动画调度
 - 全局聚焦 + 按键导航（方向键空间就近移动 / Tab 环序 / OK 双沿按压 / 容器下钻，触摸与按键共存，纯触摸工程可整体编译剔除）
 - 图片格式：RGB565 / ARGB8565（无压缩与索引 QOI）+ A1/A2/A4/A8 透明位图（前景色上色，同一份取模反复换色复用）+ 索引QOI_MASK 压缩 A8 蒙版（alpha 推荐格式，行索引随机访问、流式解码零额外 RAM，48×48 图标约为裸 A8 的 21%~40%）
+- GRAY8 色深 + 页式单色 / 灰度 OLED 端口（SSD13xx / SH11xx 全家桶 + SSD1327，SPI / 软 IIC），配套控件级单色样式（`WE_CFG_MONO_STYLE`）与全套 128×64 小屏 demo 布局——详见下方 "GRAY8 / 单色 OLED 与小屏支持"
 - 内置控件与完整 demo 工程；`tool/` 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → 烧录）
 - 支持外部 Flash 图片与字体资源（模拟器直读 `merged_bin.bin`，与硬件"重烧"流程对应）
 - 同时支持 STM32F103 / STM32F030 硬件目标与 SimLite PC 模拟器目标（fenster 三平台窗口底座：Win32 GDI / macOS Cocoa / Linux X11）
-- headless 基准哈希回归：67 项逐帧 CRC 金样（含 10 条交互轨迹脚本），一条命令全量校验
 
 ## 资源占用（实测）
 
@@ -33,7 +33,7 @@
 
 分项四列均为 ROM 占用（Code + RO-data + RW-data，单位 KB，四列相加 = 总 ROM）：
 
-- **内核** — GUI 引擎本体（`we_gui_driver` / `we_render` / `we_font_text` / `dirty_driver` / `we_scroll`）；未引用的内核函数会被链接器剔除，所以逐 demo 不同——纯控件类 demo 约 7.3~9.7 KB，图片类 demo 链入索引 QOI / QOI_MASK 解码器后约 11 KB
+- **内核** — GUI 引擎本体（`we_core` / `we_obj` / `we_tick` / `we_input` / `we_focus` / `we_refresh` / `we_draw` / `we_image` / `we_text` / `we_dirty` / `we_scroll`）；未引用的内核函数会被链接器剔除，所以逐 demo 不同——纯控件类 demo 约 7.3~9.7 KB，图片类 demo 链入索引 QOI / QOI_MASK 解码器后约 11 KB
 - **控件** — 该 demo 链入的全部 `we_widget_*` 本体
 - **资源** — 字体点阵与 demo 内嵌图片数组；其中约 3.21 KB 是各 demo 共有的 ASCII 字体资产
 - **其他** — demo 代码 + LCD/输入/外挂存储端口 + 启动文件 + C 库，约 6.4~7.6 KB 基本恒定
@@ -155,7 +155,7 @@
 - `Demo/` — 各控件 demo 与模板端口文件
 - `STM32F103/` — STM32F103 硬件入口、Keil 工程与 LCD/输入/外挂 Flash 端口层
 - `STM32F030/` — STM32F030 硬件入口、Keil 工程与 LCD/输入端口层
-- `SimLite/` — 轻量 PC 模拟器：移植模板式入口、fenster 端口与配置、TCC/gcc 构建脚本、headless 基准哈希回归（`autotest.ps1` + `debug/` 开发者工具）
+- `SimLite/` — 轻量 PC 模拟器：移植模板式入口、fenster 端口与配置、TCC/gcc 构建脚本
 - `tool/` — 编号例程式资源流水线（字体/图片取模 → 外挂 bin 合并 → W25Qxx 烧录）
 
 ## 快速开始
@@ -177,13 +177,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Demo 25 -Run
 ```
 
-开发者版 `wegui_lite_dev`（运行时选 demo：`wegui_lite_dev 25`，另有 `--list` / `--shot` / `--autotest`）：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/build_lite.ps1" -Dev
-```
-
-macOS / Linux（clang+Cocoa / cc+libx11-dev）：`sh SimLite/build_lite.sh [--dev]`
+macOS / Linux（clang+Cocoa / cc+libx11-dev）：`sh SimLite/build_lite.sh`
 
 ### 2. STM32F103 / STM32F030 — Keil MDK-ARM AC5
 
@@ -246,27 +240,71 @@ UV4.exe -r "STM32F030/MDK-ARM/Project.uvprojx" -t "STM32F030"
 > `0`（showcase）仅 SimLite 提供；硬件目标无此项。未列编号各目标统一回退到 `label`。`29/30` 依赖 `WE_CFG_ENABLE_KEY_INPUT=1`（共享配置默认开启；关闭时这两个 demo 编译为提示桩）。模拟器按键映射：方向键 / Tab / Shift+Tab / Enter / 空格 / Esc / 退格。
 
 ### 修改方法
-改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`SimLite/main_lite.c`、`STM32F103/main.c`、`STM32F030/main.c`。硬件目标改完需重新编译 / 烧录；SimLite 也可用 `build_lite.ps1 -Demo N` 免改源码，或直接用开发者版 `wegui_lite_dev N` 运行时切换。
+改对应入口 `main` 顶部的 `#define DEMO_ID` 数字即可：`SimLite/main_lite.c`、`STM32F103/main.c`、`STM32F030/main.c`。硬件目标改完需重新编译 / 烧录；SimLite 也可用 `build_lite.ps1 -Demo N` 免改源码。
 
 ## 构建与验证
 
 推荐的最小验证方式：
 
-- **SimLite**：编译并运行 `wegui_lite`（或 `wegui_lite_dev <id>`），检查选定 demo 是否正常绘制与动画
+- **SimLite**：编译并运行 `wegui_lite`，检查选定 demo 是否正常绘制与动画
 - **STM32**：编译 Keil 工程并在板上运行选定 demo
 
-回归验证（headless 基准哈希，无需人工看屏）：
+## GRAY8 / 单色 OLED 与小屏支持
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "SimLite/autotest.ps1"
-```
+V0.4.1 起框架原生支持 8 位灰度色深与页式单色 OLED，配套控件级单色样式与全套
+128×64 小屏 demo 布局，并为该配置建立了独立的回归基线。
 
-只构建一次开发者版 exe（运行时选 demo，无需逐个重编译），对 1..33 与 preview
-101..126（跳过毕业空洞 117/120）逐 demo 跑 180 帧（headless 不开窗、固定 16ms 步进），
-对每帧屏幕缓冲做链式 FNV-1a 哈希并与 `SimLite/autotest/golden.txt` 比对（67 项，
-全量约 80 秒）；`SimLite/autotest/scripts/*.evt` 存在时额外注入触摸/按键轨迹回放，
-把拖拽惯性、焦点导航、弹层开合锁到逐帧精确。改动导致 FAIL 时先确认是回归还是
-有意变更，有意变更用 `-Update` 重录基准（合并写回，只覆盖本次跑过的条目）。
+### GRAY8 渲染架构
+
+- `we_user_config.h` 选 `LCD_DEEP (DEEP_GRAY8)`：PFB 每像素 1 字节灰度，渲染管线
+  （抗锯齿、混色、透明度级联）与彩色档完全一致，无独立代码路径；
+- 单色屏的黑白化发生在**端口层**：刷屏时按 `WE_OLED_GRAY_THRESHOLD`（默认 128）
+  把灰度二值化并按页打包输出（`lcd_oled_port`）；灰度屏（SSD1327）2 像素并 1 字节
+  输出 16 级灰度（`lcd_gray_port`）；
+- 页式 OLED 要求脏矩形 y 向 8 行页对齐（`WE_LCD_FLUSH_ALIGN_Y (8)`），SSD1327 要求
+  x 向 2 像素对齐——对齐扩边在脏矩形入库时统一完成，端口收到的窗口天然对齐；
+- GRAY8 档派生参数自动锁定（`we_user_config.h` 末尾派生段）：软 SPI / 软 IIC 均为
+  阻塞端口，`GRAM_DMA_BUFF_EN` 强制 0；PFB 固定 8 行页对齐（128 宽下仅 1 KB，比
+  280×240 RGB565 的 4.48 KB 更轻，小 RAM MCU 反而更宽裕）。
+
+### OLED 端口与屏 IC（STM32F103）
+
+- 驱动接口 5 种：软 3SPI（暂无 OLED/GRAY 刷屏，编译期拦截）/ 软 4SPI / 硬 4SPI /
+  DMA 4SPI / 软 IIC（`OLED_IIC_7ADDR` 默认 0x3C）；
+- 屏 IC 14 款：6 款 TFT（ST77xx / GC9A01）+ 8 款页式单色 OLED（SSD1306 / 1309 /
+  1312 / 1315、SH1106 / 1107 / 1108 / 1115）+ 1 款灰度 OLED（SSD1327）；
+- `LCD_TYPE` 由所选 IC 自动派生（OLED / GRAY / RGB565 / RGB888），
+  `stm32f103_hw_config.h` 参数检查段用 `#error` 拦截非法组合（OLED IC 配非 GRAY8
+  色深、TFT 配 IIC 接口、对齐不满足等）；
+- **STM32F030 现状**：只有 TFT SPI 端口，选 `DEEP_GRAY8` 会被
+  `stm32f030_hw_config.h` 编译期 `#error` 拦下（防“编译通过但上电黑屏”）。移植
+  路线：照 F103 的 Lcd_Port 结构搬软 IIC 端口 + 3 个 SPI 端口的 OLED/GRAY 刷屏
+  分支 + 9 款 IC 驱动，RAM 无压力（GRAY8 PFB 更小），新增 `.c` 需手工加入 Keil
+  工程。
+
+### 单色样式（WE_CFG_MONO_STYLE）
+
+- 置 1 后参与控件的默认调色盘切到纯黑 / 纯白高对比档，绘制策略同步切换：实体
+  填充改“白描边 + 黑底”、按压 / 选中改“反白 + 挖空字”、半透明装饰（网格线、
+  滚动条、拖尾、按压预览块）改全不透明或直接省略——经端口阈值二值化后对比关系
+  仍完整可读；
+- 仅控件绘制策略分支，渲染管线不受影响；彩色档（置 0，默认）行为完全不变；
+- 覆盖：稳定控件 11 个（btn / toggle / slider / msgbox / progress / dropdown /
+  stepper / list / roller / box / toast），预览控件 20 个全部接入；colorwheel /
+  animimg / canvas 无自有调色盘、mask_group 默认色自适应 LCD 背景，四者天然无需
+  宏组。
+
+### 128×64 小屏 demo 分支
+
+- `WE_DEMO_SMALL_SCREEN`（`SCREEN_WIDTH <= 128` 时自动置 1）：全部 33 个稳定 demo
+  与 24 个预览 demo 均带独立 128×64 布局分支，demo 字体别名自动切
+  `simsun_12_2bpp`（ASCII）；
+- 控件头文件带小屏默认档（`SCREEN_WIDTH <= 128` 时自动生效）：keyboard 回显条
+  26→13，ime_pinyin 拼音条 22→14 / 候选栏 30→18 / 翻页键 26→16，radio 指示器
+  18→12 / 行距 6→3；
+- 113 拼音输入法在小屏用“无键区弹层”（回显 + 拼音条 + 候选栏三条横带，中文字库
+  仍为 16px msyh）：字母注入走自动演示脚本 / `we_ime_pinyin_inject_key`，候选与
+  翻页键仍可触摸。
 
 ## 资源与工具
 

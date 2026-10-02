@@ -1,19 +1,19 @@
 #include "we_widget_roller.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * roller —— 滚轮选值器
  *
  * 结构：面板背景（圆角矩形）+ 中心高亮条 + 逐行文字。
- * 行文字统一经 PFB 窗口收窄裁剪在控件矩形内（scroll_panel 同款套路），
- * 半露行不会渗出控件边界。滚动为像素级 scroll_px（int32 累计）。
+ * 行文字由内核按控件包围盒裁剪，半露行不会渗出控件边界；每个切片
+ * 只画与之相交的行。滚动为像素级 scroll_px（int32 累计）。
  *
  * 实现要点：
  *   1. 惯性甩动：STAY 步进测速（scroll_panel 同款约定），松手速度超阈值
  *      时按几何衰减级数外推落点取整到行，速度作为吸附动画初速种子；
  *   2. 点击直达：轻点上/下可见行经吸附动画滚到该行，点中心行不动作；
- *   3. 精细标脏：滚动位移只标"文本列带"（排除面板圆角外区域），
- *      吸附 commit 只标中心行条带；
+ *   3. 精细标脏：滚动位移只标"文本列带"（排除面板圆角外区域）；
+ *      吸附到位提交选中项时画面不变，不标脏；
  *   4. 文字测量缓存：y 方向 bbox 字体常量化 + 行宽直接映射缓存，
  *      绘制内环零 we_get_text_width / we_get_text_bbox 调用；
  *   5. we_roller_set_font：字体参数化（几何重推导 + scroll 比例换算）。
@@ -30,15 +30,14 @@
 static const uint8_t _roller_alpha_tab[5] = { 255U, 160U, 90U, 55U, 40U };
 
 /**
- * @brief 按距中心的像素距离计算行文字透明度（分档 + 线性插值）。
- * @param dist_px 传入：行中心距控件中心的像素距离（>= 0）。
+ * @brief 按距中心的"整行数 + 行内余量"计算行文字透明度（分档 + 线性插值）。
+ * @param level 传入：距中心的整行数（>= 0）。
+ * @param frac 传入：不足一行的余量（像素，0 <= frac < row_h）。
  * @param row_h 传入：行高（像素，> 0）。
  * @return 行文字透明度（0~255）。
  */
-static uint8_t _roller_row_alpha(int32_t dist_px, uint16_t row_h)
+static uint8_t _roller_row_alpha(int32_t level, int32_t frac, uint16_t row_h)
 {
-    int32_t level = dist_px / (int32_t)row_h;
-    int32_t frac = dist_px % (int32_t)row_h;
     int32_t a0;
     int32_t a1;
 
@@ -60,6 +59,48 @@ static int32_t _roller_max_scroll(const we_roller_obj_t *obj)
     if (obj->option_cnt == 0U)
         return 0;
     return (int32_t)(obj->option_cnt - 1U) * (int32_t)obj->row_h;
+}
+
+/**
+ * @brief 把滚动目标夹紧到 [0, max_scroll]。
+ * @param obj 传入：控件对象指针。
+ * @param v 传入：滚动目标（像素）。
+ * @return 夹紧后的值。
+ */
+static int32_t _roller_clamp_scroll(const we_roller_obj_t *obj, int32_t v)
+{
+    int32_t max_scroll = _roller_max_scroll(obj);
+
+    if (v < 0)
+        v = 0;
+    if (v > max_scroll)
+        v = max_scroll;
+    return v;
+}
+
+/**
+ * @brief 把滚动像素四舍五入到最近的整行位置（v >= 0）。
+ * @param obj 传入：控件对象指针。
+ * @param v 传入：滚动像素。
+ * @return 行对齐后的滚动像素。
+ */
+static int32_t _roller_round_to_row(const we_roller_obj_t *obj, int32_t v)
+{
+    return ((v + (int32_t)(obj->row_h / 2U)) / (int32_t)obj->row_h) * (int32_t)obj->row_h;
+}
+
+/**
+ * @brief 按字体行高推导行高（字体行高 + 2*WE_ROLLER_ROW_PAD）。
+ * @param font 传入：字体资源指针。
+ * @return 行高（像素）。
+ */
+static uint16_t _roller_default_row_h(const unsigned char *font)
+{
+    uint16_t line_h = we_font_get_line_height(font);
+
+    if (line_h == 0U)
+        line_h = 16U; /* 字库异常兜底 */
+    return (uint16_t)(line_h + 2U * WE_ROLLER_ROW_PAD);
 }
 
 /* --------------------------------------------------------------------------
@@ -143,8 +184,6 @@ static void _roller_refresh_text_metrics(we_roller_obj_t *obj)
         bot = (int16_t)lh;
     }
 
-    obj->text_y_top = (int8_t)top;
-    obj->text_y_bot = (int8_t)bot;
     /* 行内垂直居中：ty = 行顶 + row_h/2 - (top+bot)/2，后两项均为常量，
      * 合并成 text_dy 后绘制内环只剩一次加法 */
     obj->text_dy = (int16_t)((int16_t)(obj->row_h / 2U) - (int16_t)((top + bot) / 2));
@@ -233,20 +272,6 @@ static void _roller_invalidate_scroll_band(we_roller_obj_t *obj)
                            (int16_t)dirty_w, obj->base.h);
 }
 
-/**
- * @brief 标脏中心行条带（吸附完成 commit 专用）。
- * @param obj 传入：控件对象指针。
- * @return 无。
- */
-static void _roller_invalidate_center_row(we_roller_obj_t *obj)
-{
-    int16_t half_rows = (int16_t)(obj->visible_rows / 2U);
-    int16_t center_top = (int16_t)(obj->base.y + half_rows * (int16_t)obj->row_h);
-
-    we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, center_top,
-                           obj->base.w, (int16_t)obj->row_h);
-}
-
 /* --------------------------------------------------------------------------
  * 滚动 / 吸附 / 惯性
  * -------------------------------------------------------------------------- */
@@ -259,13 +284,7 @@ static void _roller_invalidate_center_row(we_roller_obj_t *obj)
  */
 static void _roller_apply_scroll(we_roller_obj_t *obj, int32_t new_scroll)
 {
-    int32_t max_scroll = _roller_max_scroll(obj);
-
-    if (new_scroll < 0)
-        new_scroll = 0;
-    if (new_scroll > max_scroll)
-        new_scroll = max_scroll;
-
+    new_scroll = _roller_clamp_scroll(obj, new_scroll);
     if (new_scroll == obj->scroll_px)
         return;
 
@@ -289,8 +308,8 @@ static void _roller_stop_anim(we_roller_obj_t *obj)
  * @brief 吸附到位后提交选中索引，索引变化时触发 changed_cb。
  * @param obj 传入：控件对象指针。
  * @return 无。
- * @note 只标脏中心行条带：滚动过程的位移已由文本列带标脏覆盖，
- *       commit 补标中心行保证终帧高亮条 + 主色文字完整重绘。
+ * @note 不标脏：绘制只看滚动位置（中心行由几何决定，不读 sel_idx），
+ *       滚动的每一步已经标过文本列带，到位时画面已是终态。
  */
 static void _roller_commit_selection(we_roller_obj_t *obj)
 {
@@ -298,8 +317,6 @@ static void _roller_commit_selection(we_roller_obj_t *obj)
 
     if (obj->option_cnt == 0U || obj->row_h == 0U)
         return;
-
-    _roller_invalidate_center_row(obj);
 
     idx = (int16_t)((obj->scroll_px + (int32_t)(obj->row_h / 2U)) / (int32_t)obj->row_h);
     if (idx < 0)
@@ -333,7 +350,7 @@ static void _roller_anim_step_cb(void *owner, uint16_t elapsed_ms)
     int32_t max_step;
     uint16_t step_ms;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (!obj->snap_animating || obj->dragging)
         return;
@@ -412,21 +429,9 @@ static void _roller_start_snap_to(we_roller_obj_t *obj, int32_t target, int32_t 
  */
 static void _roller_begin_snap(we_roller_obj_t *obj)
 {
-    int32_t target;
-    int32_t max_scroll;
-
     if (obj->option_cnt == 0U || obj->row_h == 0U)
         return;
-
-    target = ((obj->scroll_px + (int32_t)(obj->row_h / 2U)) / (int32_t)obj->row_h)
-             * (int32_t)obj->row_h;
-    max_scroll = _roller_max_scroll(obj);
-    if (target < 0)
-        target = 0;
-    if (target > max_scroll)
-        target = max_scroll;
-
-    _roller_start_snap_to(obj, target, 0);
+    _roller_start_snap_to(obj, _roller_clamp_scroll(obj, _roller_round_to_row(obj, obj->scroll_px)), 0);
 }
 
 /**
@@ -447,22 +452,14 @@ static void _roller_begin_fling(we_roller_obj_t *obj)
 {
     int32_t landing;
     int32_t target;
-    int32_t max_scroll;
     int32_t seed;
 
     if (obj->option_cnt == 0U || obj->row_h == 0U)
         return;
 
-    landing = obj->scroll_px
-              + ((int32_t)obj->fling_v * WE_ROLLER_FLING_PROJ_NUM) / WE_ROLLER_FLING_PROJ_DEN;
-    max_scroll = _roller_max_scroll(obj);
-    if (landing < 0)
-        landing = 0;
-    if (landing > max_scroll)
-        landing = max_scroll;
-
-    target = ((landing + (int32_t)(obj->row_h / 2U)) / (int32_t)obj->row_h)
-             * (int32_t)obj->row_h;
+    landing = _roller_clamp_scroll(obj, obj->scroll_px
+              + ((int32_t)obj->fling_v * WE_ROLLER_FLING_PROJ_NUM) / WE_ROLLER_FLING_PROJ_DEN);
+    target = _roller_round_to_row(obj, landing);
 
     /* 初速种子仅在与目标方向一致时保留：落点被量程夹紧（或超大行高下
      * 取整回卷）可能使目标落在速度反方向，此时按普通吸附从 0 起速 */
@@ -478,19 +475,21 @@ static void _roller_begin_fling(we_roller_obj_t *obj)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 绘制回调：面板背景 + 中心高亮条 + PFB 收窄裁剪的逐行文字。
+ * @brief 绘制回调：面板背景 + 中心高亮条 + 逐行文字。
  * @param ptr 传入：控件对象指针。
  * @return 无。
  * @note 行宽与垂直居中偏移全部来自测量缓存，内环零字体测量调用。
+ *       内核已把窗口收窄到控件包围盒内；只画行条带（上下各放宽一行）与
+ *       当前窗口相交的行，每行的透明度分档由一次"整行数 + 余量"拆分推出。
  */
 static void _roller_draw_cb(void *ptr)
 {
     we_roller_obj_t *obj = (we_roller_obj_t *)ptr;
-    we_lcd_t *lcd;
-    we_pfb_clip_t sv;
+    we_lcd_t *lcd = obj->base.lcd;
     int16_t half_rows;
     int16_t center_top;
     int32_t center_idx;
+    int32_t rem;
     int32_t i0;
     int32_t i1;
     int32_t i;
@@ -499,10 +498,7 @@ static void _roller_draw_cb(void *ptr)
     static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
 #endif
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-    lcd = obj->base.lcd;
-    if (lcd == NULL || obj->row_h == 0U)
+    if (obj->opacity == 0U || obj->row_h == 0U)
         return;
 
     half_rows = (int16_t)(obj->visible_rows / 2U);
@@ -542,73 +538,74 @@ static void _roller_draw_cb(void *ptr)
     if (obj->options == NULL || obj->option_cnt == 0U || obj->font == NULL)
         return;
 
-    /* 3. PFB 窗口收窄：把行文字裁剪在控件矩形内（save/restore 套路） */
-    we_pfb_clip_save(lcd, &sv);
+    /* 3. 可见窗：中心行索引 ± (半屏 + 1)；scroll_px 恒 >= 0，
+     *    第 i 行距中心 = (i - center_idx) 行 - rem 像素 */
+    center_idx = obj->scroll_px / (int32_t)obj->row_h;
+    rem = obj->scroll_px - center_idx * (int32_t)obj->row_h;
+    i0 = center_idx - (int32_t)half_rows - 1;
+    i1 = center_idx + (int32_t)half_rows + 1;
+    if (i0 < 0)
+        i0 = 0;
+    if (i1 > (int32_t)(obj->option_cnt - 1U))
+        i1 = (int32_t)(obj->option_cnt - 1U);
 
-    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                       (int16_t)(obj->base.x + obj->base.w - 1),
-                       (int16_t)(obj->base.y + obj->base.h - 1)))
+    for (i = i0; i <= i1; i++)
     {
-        /* 只遍历可能可见的行：中心行索引 ± (半屏 + 1) */
-        center_idx = obj->scroll_px / (int32_t)obj->row_h;
-        i0 = center_idx - (int32_t)half_rows - 1;
-        i1 = center_idx + (int32_t)half_rows + 1;
-        if (i0 < 0)
-            i0 = 0;
-        if (i1 > (int32_t)(obj->option_cnt - 1U))
-            i1 = (int32_t)(obj->option_cnt - 1U);
+        const char *text = obj->options[i];
+        int32_t dist = (i - center_idx) * (int32_t)obj->row_h - rem; /* 行相对中心偏移 */
+        int16_t ry = (int16_t)(center_top + dist);                    /* 行顶部屏幕 Y */
+        uint8_t alpha;
+        colour_t tc;
 
-        for (i = i0; i <= i1; i++)
+        if (text == NULL)
+            continue;
+        /* 行条带上下各放宽一行仍与窗口不相交：这一行的字不会落进本切片 */
+        if ((int32_t)ry + 2 * (int32_t)obj->row_h <= (int32_t)lcd->clip.y0 ||
+            (int32_t)ry - (int32_t)obj->row_h > (int32_t)lcd->clip.y1)
+            continue;
+
+        /* 距中心半行以内视为"中心行"：主色 + 满透明度 */
+        if (WE_ABS(dist) <= (int32_t)(obj->row_h / 2U))
         {
-            const char *text = obj->options[i];
-            int32_t dist = i * (int32_t)obj->row_h - obj->scroll_px; /* 行相对中心偏移 */
-            int32_t ady = WE_ABS(dist);
-            int16_t ry = (int16_t)(center_top + dist);               /* 行顶部屏幕 Y */
-            uint8_t alpha;
-            colour_t tc;
-            uint16_t text_w;
-            int16_t tx;
-            int16_t ty;
-
-            if (text == NULL)
-                continue;
-
-            /* 距中心半行以内视为"中心行"：主色 + 满透明度 */
-            if (ady <= (int32_t)(obj->row_h / 2U))
-            {
 #if (WE_CFG_MONO_STYLE == 1)
-                tc = mono_bg; /* 反白条上的挖空字 */
+            tc = mono_bg; /* 反白条上的挖空字 */
 #else
-                tc = obj->text_sel_color;
+            tc = obj->text_sel_color;
 #endif
-                alpha = 255U;
-            }
-            else
-            {
-#if (WE_CFG_MONO_STYLE == 1)
-                tc = mono_fg;
-#else
-                tc = obj->text_color;
-#endif
-                alpha = _roller_row_alpha(ady, obj->row_h);
-            }
-            alpha = we_opa_scale(alpha, obj->opacity);
-
-            /* 水平居中（行宽走缓存）+ 行内垂直居中（bbox 常量派生 text_dy） */
-            text_w = _roller_text_width_cached(obj, i);
-            tx = (int16_t)(obj->base.x + (obj->base.w - (int16_t)text_w) / 2);
-            ty = (int16_t)(ry + obj->text_dy);
-
-            we_draw_string(lcd, tx, ty, obj->font, text, tc, alpha);
+            alpha = 255U;
         }
-    }
+        else
+        {
+#if (WE_CFG_MONO_STYLE == 1)
+            tc = mono_fg;
+#else
+            tc = obj->text_color;
+#endif
+            /* |dist| 拆成整行数 + 余量：中心上方为 (c-i) 行 + rem；下方 rem 为 0 时
+             * 正好 (i-c) 行，否则 (i-c-1) 行 + (row_h-rem) */
+            if (i <= center_idx)
+                alpha = _roller_row_alpha(center_idx - i, rem, obj->row_h);
+            else if (rem == 0)
+                alpha = _roller_row_alpha(i - center_idx, 0, obj->row_h);
+            else
+                alpha = _roller_row_alpha(i - center_idx - 1, (int32_t)obj->row_h - rem, obj->row_h);
+        }
+        alpha = we_opa_scale(alpha, obj->opacity);
 
-    we_pfb_clip_restore(lcd, &sv);
+        /* 水平居中（行宽走缓存）+ 行内垂直居中（bbox 常量派生 text_dy） */
+        we_draw_string(lcd,
+                       (int16_t)(obj->base.x + (obj->base.w - (int16_t)_roller_text_width_cached(obj, i)) / 2),
+                       (int16_t)(ry + obj->text_dy), obj->font, text, tc, alpha);
+    }
 }
 
 /* --------------------------------------------------------------------------
  * 事件
  * -------------------------------------------------------------------------- */
+
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
+static uint8_t _roller_key_cb(void *ptr, uint8_t key_evt);
+#endif
 
 /**
  * @brief 事件回调主状态机：按下记录起点，跟手拖拽 + 步进测速，松手吸附/甩动。
@@ -617,9 +614,6 @@ static void _roller_draw_cb(void *ptr)
  * @param data 传入：输入数据。
  * @return 1 表示消费事件，0 表示穿透。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
-static uint8_t _roller_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _roller_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_ROLLER_USE_KEY == 1)
@@ -630,7 +624,7 @@ static uint8_t _roller_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 
     we_roller_obj_t *obj = (we_roller_obj_t *)ptr;
 
-    if (obj == NULL || data == NULL)
+    if (data == NULL)
         return 0U;
 
     if (event == WE_EVENT_PRESSED)
@@ -709,7 +703,6 @@ static uint8_t _roller_event_cb(void *ptr, we_event_t event, we_indev_data_t *da
 static void _roller_handle_swipe(we_roller_obj_t *obj, we_event_t event)
 {
     int32_t target;
-    int32_t max_scroll;
 
     if (obj->option_cnt == 0U || obj->row_h == 0U)
         return;
@@ -721,13 +714,7 @@ static void _roller_handle_swipe(we_roller_obj_t *obj, we_event_t event)
     else
         target -= (int32_t)obj->row_h;   /* 手指下滑 → 选上一项 */
 
-    max_scroll = _roller_max_scroll(obj);
-    if (target < 0)
-        target = 0;
-    if (target > max_scroll)
-        target = max_scroll;
-
-    _roller_start_snap_to(obj, target, 0);
+    _roller_start_snap_to(obj, _roller_clamp_scroll(obj, target), 0);
 }
 
 /**
@@ -745,8 +732,6 @@ static void _roller_handle_tap(we_roller_obj_t *obj, we_indev_data_t *data)
     int16_t row;
     int16_t delta;
     int32_t base_scroll;
-    int32_t target;
-    int32_t max_scroll;
 
     if (!obj->tap_armed)
         return;
@@ -768,19 +753,8 @@ static void _roller_handle_tap(we_roller_obj_t *obj, we_indev_data_t *data)
 
     /* 以当前吸附基准行外推目标：RELEASED 已启动就近吸附时用其目标，
      * 否则以当前 scroll 就近取整（轻点场景 scroll 本就行对齐） */
-    base_scroll = obj->snap_animating
-                      ? obj->snap_target
-                      : ((obj->scroll_px + (int32_t)(obj->row_h / 2U)) / (int32_t)obj->row_h)
-                            * (int32_t)obj->row_h;
-    target = base_scroll + (int32_t)delta * (int32_t)obj->row_h;
-
-    max_scroll = _roller_max_scroll(obj);
-    if (target < 0)
-        target = 0;
-    if (target > max_scroll)
-        target = max_scroll;
-
-    _roller_start_snap_to(obj, target, 0);
+    base_scroll = obj->snap_animating ? obj->snap_target : _roller_round_to_row(obj, obj->scroll_px);
+    _roller_start_snap_to(obj, _roller_clamp_scroll(obj, base_scroll + (int32_t)delta * (int32_t)obj->row_h), 0);
 }
 
 /**
@@ -793,9 +767,6 @@ static void _roller_handle_tap(we_roller_obj_t *obj, we_indev_data_t *data)
 static uint8_t _roller_event_dispatch(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_roller_obj_t *obj = (we_roller_obj_t *)ptr;
-
-    if (obj == NULL)
-        return 0U;
 
     if (event == WE_EVENT_SWIPE_UP || event == WE_EVENT_SWIPE_DOWN)
     {
@@ -818,7 +789,7 @@ static uint8_t _roller_event_dispatch(void *ptr, we_event_t event, we_indev_data
 /**
  * @brief 按键/焦点回调：OK 进/退编辑态，编辑态上下键逐行吸附滚动。
  * @param ptr 回调透传对象指针。
- * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @param key_evt 语义键值或焦点通知（WE_KEY_xx / WE_KEY_EVT_xx）。
  * @return 非 0 表示已消费。
  * @note 复用触摸路径的拉力+阻尼吸附动画（_roller_start_snap_to）；
  *       连按基于当前吸附目标行推进，滚动途中也能连续步进；
@@ -891,8 +862,6 @@ void we_roller_obj_init(we_roller_obj_t *obj, we_lcd_t *lcd,
                         int16_t x, int16_t y, int16_t w, uint8_t visible_rows,
                         const unsigned char *font)
 {
-    uint16_t line_h;
-
     if (obj == NULL || lcd == NULL || font == NULL)
         return;
 
@@ -902,10 +871,7 @@ void we_roller_obj_init(we_roller_obj_t *obj, we_lcd_t *lcd,
         visible_rows++; /* 偶数补成奇数，保证有唯一中心行 */
 
     obj->font = font;
-    line_h = we_font_get_line_height(obj->font);
-    if (line_h == 0U)
-        line_h = 16U; /* 字库异常兜底 */
-    obj->row_h = (uint16_t)(line_h + 2U * WE_ROLLER_ROW_PAD);
+    obj->row_h = _roller_default_row_h(font);
     obj->visible_rows = visible_rows;
 
     obj->base.lcd = lcd;
@@ -1041,9 +1007,7 @@ void we_roller_set_changed_cb(we_roller_obj_t *obj, we_roller_changed_cb_t cb)
  */
 void we_roller_set_font(we_roller_obj_t *obj, const unsigned char *font)
 {
-    uint16_t line_h;
     uint16_t old_row_h;
-    int32_t max_scroll;
 
     if (obj == NULL || font == NULL || obj->font == font)
         return;
@@ -1060,10 +1024,7 @@ void we_roller_set_font(we_roller_obj_t *obj, const unsigned char *font)
     /* 2. 换字体并重推导行高 / 控件高 */
     old_row_h = obj->row_h;
     obj->font = font;
-    line_h = we_font_get_line_height(font);
-    if (line_h == 0U)
-        line_h = 16U; /* 字库异常兜底 */
-    obj->row_h = (uint16_t)(line_h + 2U * WE_ROLLER_ROW_PAD);
+    obj->row_h = _roller_default_row_h(font);
     obj->base.h = (int16_t)((int16_t)obj->visible_rows * (int16_t)obj->row_h);
 
     /* 3. scroll 按行高比例换算保持选中行：拆成整行 + 余数避免大数乘法。
@@ -1077,9 +1038,7 @@ void we_roller_set_font(we_roller_obj_t *obj, const unsigned char *font)
         obj->scroll_px = idx * (int32_t)obj->row_h
                          + (rem * (int32_t)obj->row_h) / (int32_t)old_row_h;
     }
-    max_scroll = _roller_max_scroll(obj);
-    if (obj->scroll_px > max_scroll)
-        obj->scroll_px = max_scroll;
+    obj->scroll_px = _roller_clamp_scroll(obj, obj->scroll_px);
 
     /* 4. 刷新文字测量缓存（bbox 常量依赖字体与 row_h，行宽缓存全清） */
     _roller_refresh_text_metrics(obj);
@@ -1091,17 +1050,4 @@ void we_roller_set_font(we_roller_obj_t *obj, const unsigned char *font)
     /* 6. 换算后若停在行间（换字体前正处拖拽/动画中被打断），就近吸附归位 */
     if (obj->row_h != 0U && (obj->scroll_px % (int32_t)obj->row_h) != 0)
         _roller_begin_snap(obj);
-}
-
-/**
- * @brief 删除滚轮控件：先摘除吸附动画节点（we_anim_stop）再摘链。
- * @param obj 传入：控件对象指针。
- * @return 无。
- */
-void we_roller_obj_delete(we_roller_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL)
-        return;
-    _roller_stop_anim(obj); /* 节点归控件所有，删除前必须摘链 */
-    we_obj_delete((we_obj_t *)obj);
 }

@@ -18,7 +18,7 @@
 
 #if (LCD_PORT == _SOFT_3SPI)
 #include "stm32f103_lcd_soft_3spi_port.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 3 线 SPI（9-bit 帧）：每字节前先发 1 位 D/C（0=命令 1=数据）再发 8 位数据，
  * 无 DC 引脚。位时序与 4 线软 SPI 相同——OLED/灰度屏 SCL 常高、第二跳变沿
@@ -206,6 +206,7 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
     }
 
     LCD_CS_Clr();
+    pix_size *= 3U; /* 内核按像素数传入，RGB888 每像素 3 字节 */
     while (pix_size--)
     {
         lcd_spi_send_dc_bit(1);

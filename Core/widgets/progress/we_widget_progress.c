@@ -1,6 +1,6 @@
 #include "we_widget_progress.h"
 #include "components/we_motion.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /**
  * @brief 控件绘制回调，向当前 PFB 输出可视内容。
@@ -10,15 +10,6 @@
 static void _progress_draw_cb(void *ptr);
 
 /**
- * @brief 控件事件回调，处理按压/滑动/点击输入。
- * @param ptr 回调透传对象指针。
- * @param event 输入事件类型。
- * @param data 输入设备事件数据指针。
- * @return 返回状态标志（1 有效，0 无效）。
- */
-static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
-
-/**
  * @brief 中央动画引擎回调，按时间步长推进本控件动画。
  * @param owner 控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
@@ -26,19 +17,11 @@ static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *
  */
 static void _progress_anim_step_cb(void *owner, uint16_t elapsed_ms);
 
-/**
- * @brief 在当前 PFB 裁剪区内绘制整条圆角轨道。
- * @param obj 目标控件对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param color 目标颜色值。
- * @return 无。
- */
-static void _progress_draw_track_bar(we_progress_obj_t *obj, we_lcd_t *lcd, colour_t color);
-
+/* 不处理输入：event_cb 为 NULL，命中测试跳过它，触摸落到背后的控件 */
 static const we_class_t _progress_class = {
     .draw_cb = _progress_draw_cb,
-    .event_cb = _progress_event_cb,
-        .set_pos_cb = NULL
+    .event_cb = NULL,
+    .set_pos_cb = NULL
 };
 
 /**
@@ -49,258 +32,74 @@ static const we_class_t _progress_class = {
  */
 static uint16_t _progress_calc_fill_w(const we_progress_obj_t *obj, uint8_t value)
 {
-    uint32_t scaled;
-
-    if (obj == NULL || obj->base.w <= 0)
-        return 0U;
-
-    if (value == 0U)
+    if (obj->base.w <= 0 || value == 0U)
         return 0U;
     if (value >= 255U)
         return (uint16_t)obj->base.w;
-
-    scaled = (uint32_t)((uint32_t)value * (uint32_t)obj->base.w / 255U);
-    if (scaled > (uint32_t)obj->base.w)
-        scaled = (uint32_t)obj->base.w;
-    return (uint16_t)scaled;
+    return (uint16_t)((uint32_t)value * (uint32_t)obj->base.w / 255U);
 }
 
 /**
- * @brief 计算脏区并发起局部重绘请求。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static void _progress_invalidate(we_progress_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    we_obj_invalidate((we_obj_t *)obj);
-}
-
-/**
- * @brief 计算脏区并发起局部重绘请求。
+ * @brief 进度宽度变化时只标脏扫过的那段列带。
  * @param obj 目标控件对象指针。
  * @param old_fill_w 变更前的填充宽度。
- * @param new_fill_w 新的 fill_w 值。
+ * @param new_fill_w 变更后的填充宽度。
  * @return 无。
+ * @note 已填段是“整条圆角轨道裁到填充宽度”，同一列的像素只取决于它在不在
+ *       填充宽度以内，所以左侧不变的部分两次绘制完全相同，只需标
+ *       [min, max) 这段列带，不必按圆角半径向两侧扩张。
  */
 static void _progress_invalidate_fill_change(we_progress_obj_t *obj, uint16_t old_fill_w, uint16_t new_fill_w)
 {
     uint16_t min_fill_w;
     uint16_t max_fill_w;
-    int16_t x0;
-    int16_t w;
-
-    if (obj == NULL)
-        return;
 
     if (old_fill_w == new_fill_w)
         return;
 
     min_fill_w = (old_fill_w < new_fill_w) ? old_fill_w : new_fill_w;
     max_fill_w = (old_fill_w > new_fill_w) ? old_fill_w : new_fill_w;
-
-    /* 现在前景填充统一走“完整圆角轨道 mask + 当前宽度裁剪”路径：
-     * - 左侧已保留区域在 old/new 两次绘制中几何完全一致
-     * - 真正发生变化的只有 fill 宽度边界扫过的那一段列带
-     * 因此这里只标脏 [min_fill_w, max_fill_w) 对应的窄条区域，
-     * 无需按 radius 额外向两侧扩张。 */
-    x0 = (int16_t)(obj->base.x + (int16_t)min_fill_w);
-    w = (int16_t)(max_fill_w - min_fill_w);
-
-    if (w > 0)
-    {
-        we_obj_invalidate_area((we_obj_t *)obj, x0, obj->base.y, w, obj->base.h);
-    }
+    we_obj_invalidate_area((we_obj_t *)obj, (int16_t)(obj->base.x + (int16_t)min_fill_w), obj->base.y,
+                           (int16_t)(max_fill_w - min_fill_w), obj->base.h);
 }
 
 /**
- * @brief 使用完整圆角轨道的公共 mask，对指定左侧进度区域执行逐像素填充。
+ * @brief 在当前窗口内绘制整条圆角轨道。
  * @param obj 目标控件对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x0 屏幕绝对起始 X 坐标。
- * @param x1 屏幕绝对结束 X 坐标。
  * @param color 目标颜色值。
  * @return 无。
+ * @note 圆角半径超过宽高一半时由绘图原语自行钳制。
  */
-static void _progress_draw_fill_mask_span(we_progress_obj_t *obj, we_lcd_t *lcd,
-                                          int16_t x0, int16_t x1, colour_t color)
+static void _progress_draw_track_bar(we_progress_obj_t *obj, colour_t color)
 {
-    uint16_t r;
-    int16_t draw_x0;
-    int16_t draw_y0;
-    int16_t draw_x1;
-    int16_t draw_y1;
-    int16_t px;
-    int16_t py;
-    uint16_t stride;
-    colour_t *row;
-
-    if (obj == NULL || lcd == NULL || x0 > x1)
-        return;
-
-    /* 容器透明度级联：与中段 we_fill_rect 路径保持同一份有效 opacity */
-    uint8_t eff_op = we_opa_apply(lcd, obj->opacity);
-
-    r = obj->radius;
-    if (r > (uint16_t)obj->base.w / 2U)
-        r = (uint16_t)obj->base.w / 2U;
-    if (r > (uint16_t)obj->base.h / 2U)
-        r = (uint16_t)obj->base.h / 2U;
-
-    draw_x0 = x0;
-    draw_y0 = obj->base.y;
-    draw_x1 = x1;
-    draw_y1 = (int16_t)(obj->base.y + obj->base.h - 1);
-
-    if (draw_x0 < (int16_t)lcd->pfb_area.x0) draw_x0 = (int16_t)lcd->pfb_area.x0;
-    if (draw_y0 < (int16_t)lcd->pfb_y_start) draw_y0 = (int16_t)lcd->pfb_y_start;
-    if (draw_x1 > (int16_t)lcd->pfb_area.x1) draw_x1 = (int16_t)lcd->pfb_area.x1;
-    if (draw_y1 > (int16_t)lcd->pfb_y_end) draw_y1 = (int16_t)lcd->pfb_y_end;
-    if (draw_x0 > draw_x1 || draw_y0 > draw_y1)
-        return;
-
-    stride = lcd->pfb_width;
-    row = lcd->pfb_gram
-        + (uint32_t)(draw_y0 - (int16_t)lcd->pfb_y_start) * stride
-        + (uint32_t)(draw_x0 - (int16_t)lcd->pfb_area.x0);
-
-    for (py = draw_y0; py <= draw_y1; py++, row += stride)
-    {
-        colour_t *p = row;
-
-        for (px = draw_x0; px <= draw_x1; px++, p++)
-        {
-            uint8_t mask_alpha = we_mask_round_rect_alpha(obj->base.x, obj->base.y,
-                                                          (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                                                          r, px, py);
-            if (mask_alpha == 0U)
-                continue;
-            if (mask_alpha >= 250U && eff_op >= 250U)
-            {
-                we_store_color(p, color);
-            }
-            else
-            {
-                uint8_t alpha = we_div255((uint32_t)eff_op * mask_alpha);
-                we_store_blended_color(p, color, alpha);
-            }
-        }
-    }
-}
-
-/**
- * @brief 使用完整圆角轨道的公共 mask，对左侧进度区域执行裁剪填充。
- * @param obj 目标控件对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param w 目标区域宽度（像素）。
- * @param color 目标颜色值。
- * @return 无。
- */
-static void _progress_draw_fill_masked(we_progress_obj_t *obj, we_lcd_t *lcd, uint16_t w, colour_t color)
-{
-    uint16_t r;
-    int16_t fill_x1;
-    int16_t left_x0;
-    int16_t left_x1;
-    int16_t mid_x0;
-    int16_t mid_x1;
-    int16_t right_x0;
-    int16_t right_mask_x0;
-
-    if (obj == NULL || lcd == NULL || w == 0U)
-        return;
-
-    if (w >= (uint16_t)obj->base.w)
-    {
-        _progress_draw_track_bar(obj, lcd, color);
-        return;
-    }
-
-    r = obj->radius;
-    if (r > (uint16_t)obj->base.w / 2U)
-        r = (uint16_t)obj->base.w / 2U;
-    if (r > (uint16_t)obj->base.h / 2U)
-        r = (uint16_t)obj->base.h / 2U;
-
-    if (r == 0U)
-    {
-        we_fill_rect(lcd, obj->base.x, obj->base.y, w, (uint16_t)obj->base.h, color, obj->opacity);
-        return;
-    }
-
-    fill_x1 = (int16_t)(obj->base.x + (int16_t)w - 1);
-
-    /* 小宽度仍走完整 mask，避免左圆角被矩形快路径削平。 */
-    if (w <= r)
-    {
-        _progress_draw_fill_mask_span(obj, lcd, obj->base.x, fill_x1, color);
-        return;
-    }
-
-    /* 左右圆角区域保留逐像素 mask；中间实心区域直接填充。 */
-    left_x0 = obj->base.x;
-    left_x1 = (int16_t)(obj->base.x + (int16_t)r - 1);
-    _progress_draw_fill_mask_span(obj, lcd, left_x0, left_x1, color);
-
-    mid_x0 = (int16_t)(obj->base.x + (int16_t)r);
-    mid_x1 = fill_x1;
-    right_mask_x0 = (int16_t)(obj->base.x + obj->base.w - (int16_t)r);
-    if (mid_x1 >= right_mask_x0)
-        mid_x1 = (int16_t)(right_mask_x0 - 1);
-
-    if (mid_x0 <= mid_x1)
-    {
-        we_fill_rect(lcd, mid_x0, obj->base.y, (uint16_t)(mid_x1 - mid_x0 + 1),
-                     (uint16_t)obj->base.h, color, obj->opacity);
-    }
-
-    right_x0 = (mid_x1 < fill_x1) ? (int16_t)(mid_x1 + 1) : (int16_t)(fill_x1 + 1);
-    if (right_x0 <= fill_x1)
-    {
-        _progress_draw_fill_mask_span(obj, lcd, right_x0, fill_x1, color);
-    }
-}
-
-/**
- * @brief 在当前 PFB 裁剪区内绘制整条圆角轨道。
- * @param obj 目标控件对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param color 目标颜色值。
- * @return 无。
- */
-static void _progress_draw_track_bar(we_progress_obj_t *obj, we_lcd_t *lcd, colour_t color)
-{
-    uint16_t draw_r;
-
-    if (obj == NULL || lcd == NULL)
-        return;
-
-    draw_r = obj->radius;
-    if (draw_r > (uint16_t)obj->base.w / 2U)
-        draw_r = (uint16_t)obj->base.w / 2U;
-    if (draw_r > (uint16_t)obj->base.h / 2U)
-        draw_r = (uint16_t)obj->base.h / 2U;
-
-    we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
+    we_draw_round_rect_analytic_fill(obj->base.lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                                     draw_r, color, obj->opacity);
+                                     obj->radius, color, obj->opacity);
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内执行局部绘制。
+ * @brief 绘制已填段：把窗口收窄到左侧 fill_w 列，再画一整条圆角轨道。
  * @param obj 目标控件对象指针。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param w 目标区域宽度（像素）。
- * @param color 目标颜色值。
+ * @param fill_w 已填宽度（像素）。
+ * @param color 填充颜色。
  * @return 无。
+ * @note 左右两端沿用整条轨道的圆角，填充很短时左端圆角也不会被削平。
  */
-static void _progress_draw_fill_bar(we_progress_obj_t *obj, we_lcd_t *lcd, uint16_t w, colour_t color)
+static void _progress_draw_fill(we_progress_obj_t *obj, uint16_t fill_w, colour_t color)
 {
-    if (w == 0U)
-        return;
+    we_lcd_t *lcd = obj->base.lcd;
+    we_pfb_clip_t sv;
 
-    _progress_draw_fill_masked(obj, lcd, w, color);
+    if (fill_w == 0U)
+        return;
+    we_pfb_clip_save(lcd, &sv);
+    if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
+                       (int16_t)(obj->base.x + (int16_t)fill_w - 1),
+                       (int16_t)(obj->base.y + obj->base.h - 1)))
+    {
+        _progress_draw_track_bar(obj, color);
+        we_pfb_clip_restore(lcd, &sv);
+    }
 }
 
 /**
@@ -311,14 +110,8 @@ static void _progress_draw_fill_bar(we_progress_obj_t *obj, we_lcd_t *lcd, uint1
 static void _progress_draw_cb(void *ptr)
 {
     we_progress_obj_t *obj = (we_progress_obj_t *)ptr;
-    we_lcd_t *lcd;
-    uint16_t fill_w;
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-
-    lcd = obj->base.lcd;
-    if (lcd == NULL)
+    if (obj->opacity == 0U)
         return;
 
 #if (WE_CFG_MONO_STYLE == 1)
@@ -326,52 +119,16 @@ static void _progress_draw_cb(void *ptr)
     {
         static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
         static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
-        uint16_t ir;
 
-        _progress_draw_track_bar(obj, lcd, mono_fg);
-        if (obj->base.w > 2U && obj->base.h > 2U)
-        {
-            ir = obj->radius;
-            if (ir > 0U)
-                ir--;
-            if (ir > (uint16_t)(obj->base.w - 2U) / 2U)
-                ir = (uint16_t)((obj->base.w - 2U) / 2U);
-            if (ir > (uint16_t)(obj->base.h - 2U) / 2U)
-                ir = (uint16_t)((obj->base.h - 2U) / 2U);
-            we_draw_round_rect_analytic_fill(lcd, (int16_t)(obj->base.x + 1),
-                                             (int16_t)(obj->base.y + 1),
-                                             (uint16_t)(obj->base.w - 2U),
-                                             (uint16_t)(obj->base.h - 2U),
-                                             ir, mono_bg, obj->opacity);
-        }
-        fill_w = _progress_calc_fill_w(obj, obj->display_value);
-        if (fill_w > 0U)
-            _progress_draw_fill_bar(obj, lcd, fill_w, mono_fg);
+        we_draw_round_rect_outline_fill(obj->base.lcd, obj->base.x, obj->base.y,
+                                        (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                        obj->radius, mono_fg, mono_bg, obj->opacity);
+        _progress_draw_fill(obj, _progress_calc_fill_w(obj, obj->display_value), mono_fg);
     }
 #else
-    _progress_draw_track_bar(obj, lcd, obj->track_color);
-
-    fill_w = _progress_calc_fill_w(obj, obj->display_value);
-    if (fill_w > 0U)
-    {
-        _progress_draw_fill_bar(obj, lcd, fill_w, obj->fill_color);
-    }
+    _progress_draw_track_bar(obj, obj->track_color);
+    _progress_draw_fill(obj, _progress_calc_fill_w(obj, obj->display_value), obj->fill_color);
 #endif
-}
-
-/**
- * @brief 控件事件回调，处理按压/滑动/点击输入。
- * @param ptr 回调透传对象指针。
- * @param event 输入事件类型。
- * @param data 输入设备事件数据指针。
- * @return 返回状态标志（1 有效，0 无效）。
- */
-static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
-{
-    (void)ptr;
-    (void)event;
-    (void)data;
-    return 0U;
 }
 
 /**
@@ -382,14 +139,8 @@ static uint8_t _progress_event_cb(void *ptr, we_event_t event, we_indev_data_t *
  */
 static void _progress_anim_step(we_progress_obj_t *obj, uint16_t elapsed_ms)
 {
-    uint16_t t;
-    uint16_t eased;
     uint16_t old_fill_w;
-    uint16_t new_fill_w;
-    uint8_t next_value;
-
-    if (obj == NULL)
-        return;
+    uint32_t acc;
 
     if (!obj->animating)
     {
@@ -398,36 +149,34 @@ static void _progress_anim_step(we_progress_obj_t *obj, uint16_t elapsed_ms)
         return;
     }
 
+    old_fill_w = _progress_calc_fill_w(obj, obj->display_value);
+
+    acc = (uint32_t)obj->anim_elapsed_ms + elapsed_ms;
+    if (acc >= WE_PROGRESS_ANIM_DURATION_MS)
     {
-        old_fill_w = _progress_calc_fill_w(obj, obj->display_value);
-
-        obj->anim_elapsed_ms += elapsed_ms;
-        if (obj->anim_elapsed_ms >= obj->anim_duration_ms)
-        {
-            obj->anim_elapsed_ms = obj->anim_duration_ms;
-            obj->display_value = obj->anim_to_value;
-            obj->animating = 0U;
-            we_anim_stop(obj->base.lcd, &obj->anim); /* 本步到位 */
-        }
-        else
-        {
-            t = (uint16_t)(((uint32_t)obj->anim_elapsed_ms << 8) / obj->anim_duration_ms);
-            eased = we_ease_out_cubic(t);
-            next_value = (uint8_t)we_lerp(obj->anim_from_value, obj->anim_to_value, eased);
-
-            if (next_value == obj->display_value && obj->display_value != obj->anim_to_value)
-            {
-                if (obj->anim_to_value > obj->display_value)
-                    next_value = (uint8_t)(obj->display_value + 1U);
-                else
-                    next_value = (uint8_t)(obj->display_value - 1U);
-            }
-            obj->display_value = next_value;
-        }
-
-        new_fill_w = _progress_calc_fill_w(obj, obj->display_value);
-        _progress_invalidate_fill_change(obj, old_fill_w, new_fill_w);
+        obj->anim_elapsed_ms = (uint16_t)WE_PROGRESS_ANIM_DURATION_MS;
+        obj->display_value = obj->anim_to_value;
+        obj->animating = 0U;
+        we_anim_stop(obj->base.lcd, &obj->anim); /* 本步到位 */
     }
+    else
+    {
+        uint16_t t = (uint16_t)((acc << 8) / WE_PROGRESS_ANIM_DURATION_MS);
+        uint8_t next_value = (uint8_t)we_lerp(obj->anim_from_value, obj->anim_to_value, we_ease_out_cubic(t));
+
+        obj->anim_elapsed_ms = (uint16_t)acc;
+        /* 缓动开头/结尾一帧可能不前进：至少走 1 个值，保证动画不会停在中途 */
+        if (next_value == obj->display_value && obj->display_value != obj->anim_to_value)
+        {
+            if (obj->anim_to_value > obj->display_value)
+                next_value = (uint8_t)(obj->display_value + 1U);
+            else
+                next_value = (uint8_t)(obj->display_value - 1U);
+        }
+        obj->display_value = next_value;
+    }
+
+    _progress_invalidate_fill_change(obj, old_fill_w, _progress_calc_fill_w(obj, obj->display_value));
 }
 
 /**
@@ -480,7 +229,6 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
     obj->anim_from_value = init_value;
     obj->anim_to_value = init_value;
     obj->anim_elapsed_ms = 0U;
-    obj->anim_duration_ms = WE_PROGRESS_ANIM_DURATION_MS;
     obj->animating = 0U;
     obj->track_color = track_color;
     obj->fill_color = fill_color;
@@ -488,20 +236,7 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
     obj->radius = WE_PROGRESS_RADIUS;
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
-}
-
-/**
- * @brief 删除进度条对象，先从中央动画链摘除节点再从对象链表移除。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-void we_progress_obj_delete(we_progress_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    /* 节点归控件所有，删除前必须摘链 */
-    we_anim_stop(obj->base.lcd, &obj->anim);
-    we_obj_delete((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -513,13 +248,9 @@ void we_progress_obj_delete(we_progress_obj_t *obj)
 void we_progress_set_value(we_progress_obj_t *obj, uint8_t value)
 {
     uint16_t old_fill_w;
-    uint16_t new_fill_w;
     uint8_t diff;
 
-    if (obj == NULL)
-        return;
-
-    if (value == obj->value)
+    if (obj == NULL || value == obj->value)
         return;
 
     old_fill_w = _progress_calc_fill_w(obj, obj->display_value);
@@ -543,12 +274,11 @@ void we_progress_set_value(we_progress_obj_t *obj, uint8_t value)
         obj->anim_to_value = value;
         obj->anim_elapsed_ms = 0U;
         obj->animating = 1U;
-        /* 挂入中央动画链表（不占 task 槽、不会失败） */
+        /* 挂入中央动画链表（不会失败） */
         we_anim_start(obj->base.lcd, &obj->anim, _progress_anim_step_cb, obj);
     }
 
-    new_fill_w = _progress_calc_fill_w(obj, obj->display_value);
-    _progress_invalidate_fill_change(obj, old_fill_w, new_fill_w);
+    _progress_invalidate_fill_change(obj, old_fill_w, _progress_calc_fill_w(obj, obj->display_value));
 }
 
 /**
@@ -618,7 +348,7 @@ void we_progress_set_opacity(we_progress_obj_t *obj, uint8_t opacity)
     if (obj == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
-    _progress_invalidate(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -632,7 +362,7 @@ void we_progress_set_radius(we_progress_obj_t *obj, uint8_t radius)
     if (obj == NULL || obj->radius == radius)
         return;
     obj->radius = radius;
-    _progress_invalidate(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -647,7 +377,9 @@ void we_progress_set_colors(we_progress_obj_t *obj, colour_t track_color,
 {
     if (obj == NULL)
         return;
+    if (we_colour_eq(obj->track_color, track_color) && we_colour_eq(obj->fill_color, fill_color))
+        return;
     obj->track_color = track_color;
     obj->fill_color = fill_color;
-    _progress_invalidate(obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }

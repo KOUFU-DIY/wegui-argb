@@ -18,7 +18,7 @@
 
 #if (LCD_PORT == _SOFT_IIC)
 #include "stm32f103_lcd_soft_iic_port.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #define _IIC_ADDR_W  ((uint8_t)(OLED_IIC_7ADDR << 1)) /* 写方向从机地址 */
 #define _IIC_CTRL_CMD (0x00U)                          /* 控制字节：后续全为命令 */

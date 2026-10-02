@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_RADIO_H
 #define __WE_WIDGET_RADIO_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 置 0 单独裁剪单选组的按键回调与可聚焦性，其余控件不受影响。
@@ -35,14 +35,24 @@
  *   - 重绘遍历全部行，依赖 PFB 裁剪丢弃行外写入。
  * -------------------------------------------------------------------------- */
 
-/* 行上下内边距（像素），可在包含本头文件前用宏覆盖 */
+/* 行上下内边距（像素），可在包含本头文件前用宏覆盖。
+ * 小屏（宽 <=128）默认减半：行高 = max(字体行高, 指示器) + 2*PAD，
+ * 默认值下 3 行 90px 超出 64px 屏，小屏档 3 行 60px 刚好放下。 */
 #ifndef WE_RADIO_ROW_PAD
+#if (SCREEN_WIDTH <= 128)
+#define WE_RADIO_ROW_PAD 3
+#else
 #define WE_RADIO_ROW_PAD 6
 #endif
+#endif
 
-/* 圆形指示器直径（像素） */
+/* 圆形指示器直径（像素）；小屏默认缩小 */
 #ifndef WE_RADIO_IND_D
+#if (SCREEN_WIDTH <= 128)
+#define WE_RADIO_IND_D 12
+#else
 #define WE_RADIO_IND_D 18
+#endif
 #endif
 
 /* 指示器外环厚度（像素） */

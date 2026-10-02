@@ -4,13 +4,14 @@
  *
  * 刻度与指针全部复用 we_draw_line_round（圆头抗锯齿线），中心帽复用
  * we_draw_round_rect_analytic_fill 退化的实心抗锯齿圆，不新增渲染图元。
- * 数值扫动经单个中央动画节点推进（不占 GUI timer 槽），全程整数运算。
+ * 数值扫动经单个中央动画节点推进，全程整数运算。
  *
  * 实现要点：
  *   1. 指针差分标脏：数值变化只提交"旧指针位形"与"新指针位形"两块
  *      包围盒（各自并入中心帽），静态刻度区零重绘（_gauge_invalidate_pointer）；
  *   2. 刻度几何缓存：主刻度内外端点偏移在 init/set_tick_count 时一次算好，
- *      draw 内零 we_cos/we_sin、零乘除（_gauge_rebuild_ticks）；
+ *      绘制时零 we_cos/we_sin、零乘除；外半径变了（控件改尺寸）绘制回调
+ *      会先重建（_gauge_rebuild_ticks）；
  *   3. Q16 量程斜率：set_range 时预除 slope_q16，value→角度只乘 + 移位
  *      （_gauge_update_slope，大跨度自动回退除法保精度）；
  *   4. 极小表盘护栏：min(w,h) < WE_GAUGE_SMALL_SIZE 时按最外元素 AA 晕圈
@@ -18,17 +19,20 @@
  */
 
 #include "we_widget_gauge.h"
-#include "we_render.h"
+#include "wegui.h"
+
+/* 常规尺寸下外半径到控件边的留白：刻度圆头伸出端点 TICK_W/2，再加 1px 羽化，至少 2px */
+#define _GAUGE_EDGE (((WE_GAUGE_TICK_W) / 2U + 1U) > 2U ? ((WE_GAUGE_TICK_W) / 2U + 1U) : 2U)
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
  * -------------------------------------------------------------------------- */
-static void    _gauge_draw_cb(void *ptr);
-static uint8_t _gauge_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
+static void _gauge_draw_cb(void *ptr);
 
+/* 装饰性控件：event_cb 为 NULL，命中测试直接跳过，触摸落到背后的控件 */
 static const we_class_t _gauge_class = {
     .draw_cb    = _gauge_draw_cb,
-    .event_cb   = _gauge_event_cb,
+    .event_cb   = NULL,
     .set_pos_cb = NULL /* 几何全部由 base.x/y 推导，默认移动逻辑即正确 */
 };
 
@@ -125,8 +129,8 @@ static void _gauge_polar(int16_t cx, int16_t cy, int32_t r, int16_t angle,
  * @param out_cx 传出：表盘中心 X（屏幕绝对坐标）。
  * @param out_cy 传出：表盘中心 Y。
  * @return 外半径 R（像素）；<= 4 时调用方应放弃绘制/标脏。
- * @note 常规尺寸：R = min(w,h)/2 - 2（2px 抗锯齿羽化余量，覆盖默认
- *       刻度线宽 2 的有效像素晕圈：半宽 1 + 羽化 1）。极小表盘护栏：
+ * @note 常规尺寸：R = min(w,h)/2 - _GAUGE_EDGE（刻度圆头半宽 + 1px 羽化，
+ *       默认线宽 2 时为 2px）。极小表盘护栏：
  *       min(w,h) < WE_GAUGE_SMALL_SIZE 时按最外元素（外端点落在 R 上的
  *       圆头刻度线，指针线宽更大时用指针兜底）的有效像素晕圈
  *       线宽/2 + 1px 羽化 + 1px 取整余量钳缩 R，保证 AA 不越出包围盒。
@@ -136,7 +140,7 @@ static int16_t _gauge_geometry(const we_gauge_obj_t *obj,
                                int16_t *out_cx, int16_t *out_cy)
 {
     int16_t size = (int16_t)WE_MIN(obj->base.w, obj->base.h);
-    int16_t r = (int16_t)(size / 2 - 2);
+    int16_t r = (int16_t)(size / 2 - (int16_t)_GAUGE_EDGE);
 
     *out_cx = (int16_t)(obj->base.x + obj->base.w / 2);
     *out_cy = (int16_t)(obj->base.y + obj->base.h / 2);
@@ -158,7 +162,8 @@ static int16_t _gauge_geometry(const we_gauge_obj_t *obj,
  * @param obj 控件对象指针（tick_cnt 已被写入口钳制 <= WE_GAUGE_TICK_MAX）。
  * @return 无。
  * @note draw 内直接 中心 + 偏移，零 we_cos/we_sin、零乘除；
- *       偏移相对中心存储，we_obj_set_pos 移动控件无需重算。
+ *       偏移相对中心存储，we_obj_set_pos 移动控件无需重算；
+ *       记下建缓存时的外半径，尺寸变了由绘制回调发现并重建。
  */
 static void _gauge_rebuild_ticks(we_gauge_obj_t *obj)
 {
@@ -169,6 +174,7 @@ static void _gauge_rebuild_ticks(we_gauge_obj_t *obj)
     int16_t angle;
     uint8_t i;
 
+    obj->tick_r = r;
     if (r < 1)
         r = 1; /* 退化尺寸也保持缓存有定义（draw 侧另有 r<=4 拦截） */
     r_in = (int16_t)(r - (int16_t)obj->tick_len);
@@ -272,13 +278,14 @@ static void _gauge_invalidate_pointer(we_gauge_obj_t *obj, int32_t old_v, int32_
  * @brief 控件绘制回调：主刻度 -> 指针 -> 中心圆帽。
  * @param ptr 回调透传对象指针。
  * @return 无。
- * @note 刻度端点直接取缓存偏移（中心 + 偏移），本回调内零三角函数；
- *       仅指针端点按当前显示值实时算一次极坐标。
+ * @note 刻度端点直接取缓存偏移（中心 + 偏移）；指针端点按当前显示值
+ *       算一次极坐标（每个 PFB 切片一次，查表 + 乘移位，无除法）。
+ *       与当前切片不相交的刻度/指针/帽由绘图原语的包围盒快拒挡掉。
  */
 static void _gauge_draw_cb(void *ptr)
 {
     we_gauge_obj_t *obj = (we_gauge_obj_t *)ptr;
-    we_lcd_t *lcd;
+    we_lcd_t *lcd = obj->base.lcd;
     int16_t cx;
     int16_t cy;
     int16_t r;
@@ -286,16 +293,15 @@ static void _gauge_draw_cb(void *ptr)
     int16_t x0;
     int16_t y0;
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-    lcd = obj->base.lcd;
-    if (lcd == NULL)
+    if (obj->opacity == 0U)
         return;
 
     /* 表盘中心与外半径（含极小表盘护栏，与标脏/缓存同口径） */
     r = _gauge_geometry(obj, &cx, &cy);
     if (r <= 4)
         return;
+    if (r != obj->tick_r)
+        _gauge_rebuild_ticks(obj); /* 控件改过尺寸：刻度缓存按新半径重建 */
 
     /* ---- 主刻度：外端在 R、内端向心收 tick_len 的圆头短线（几何走缓存） ---- */
     if (obj->tick_cnt > 0U && obj->tick_len > 0U)
@@ -327,21 +333,6 @@ static void _gauge_draw_cb(void *ptr)
     }
 }
 
-/**
- * @brief 控件事件回调：装饰性控件，不消费事件，输入穿透给背后控件。
- * @param ptr 回调透传对象指针。
- * @param event 输入事件类型。
- * @param data 输入设备事件数据指针。
- * @return 恒为 0（穿透）。
- */
-static uint8_t _gauge_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
-{
-    (void)ptr;
-    (void)event;
-    (void)data;
-    return 0U;
-}
-
 /* --------------------------------------------------------------------------
  * 扫动动画（中央动画引擎节点）
  * -------------------------------------------------------------------------- */
@@ -354,11 +345,10 @@ static uint8_t _gauge_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
  */
 static void _gauge_anim_step(we_gauge_obj_t *obj, uint16_t elapsed_ms)
 {
-    uint32_t delta;
     uint16_t eased;
     int32_t new_disp;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
 
     if (obj->anim_t >= 256U)
@@ -367,18 +357,7 @@ static void _gauge_anim_step(we_gauge_obj_t *obj, uint16_t elapsed_ms)
         return;
     }
 
-    if (obj->anim_ms == 0U)
-    {
-        obj->anim_t = 256U; /* 零时长直接到位，避免除零 */
-    }
-    else
-    {
-        delta = (uint32_t)elapsed_ms * 256U / (uint32_t)obj->anim_ms;
-        if (delta == 0U)
-            delta = 1U; /* 保证慢主循环下也能缓慢前进 */
-        obj->anim_t = ((uint32_t)obj->anim_t + delta >= 256U)
-                      ? 256U : (uint16_t)(obj->anim_t + delta);
-    }
+    obj->anim_t = we_motion_advance(obj->anim_t, obj->anim_ms, elapsed_ms);
 
     eased = obj->ease ? obj->ease(obj->anim_t) : obj->anim_t;
     if (eased > 256U)
@@ -475,8 +454,7 @@ void we_gauge_set_range(we_gauge_obj_t *obj, int32_t v_min, int32_t v_max)
 
     obj->v_min = v_min;
     obj->v_max = v_max;
-    _gauge_update_slope(obj);  /* 量程变了：重算 Q16 预除斜率 */
-    _gauge_rebuild_ticks(obj); /* 刻度几何与量程无关，重建保持缓存口径统一 */
+    _gauge_update_slope(obj); /* 量程变了：重算 Q16 预除斜率（刻度几何与量程无关） */
 
     /* 打断进行中的扫动：目标值钳制到新量程，显示值同步就位，
      * 避免"显示值冻结在扫动中间量"的不一致态 */
@@ -578,13 +556,4 @@ void we_gauge_set_opacity(we_gauge_obj_t *obj, uint8_t opacity)
         return;
     obj->opacity = opacity;
     we_obj_invalidate((we_obj_t *)obj);
-}
-
-void we_gauge_obj_delete(we_gauge_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    /* 动画节点归控件所有，删除前必须摘链，否则中央动画链表留悬空指针 */
-    we_anim_stop(obj->base.lcd, &obj->anim);
-    we_obj_delete((we_obj_t *)obj);
 }

@@ -1,5 +1,5 @@
 #include "we_motion.h"
-#include "we_gui_driver.h"
+#include "we_types.h"
 
 /**
  * @brief 匀速缓动
@@ -174,4 +174,24 @@ uint16_t we_ease_out_back(uint16_t t)
     if (out < 0)
         out = 0;
     return (uint16_t)out;
+}
+
+/**
+ * @brief 按经过时间推进 Q8 动画进度
+ * @param t 传入：当前进度（Q8，0~256，256 = 完成）
+ * @param dur_ms 传入：动画总时长（毫秒），0 表示立即完成
+ * @param elapsed_ms 传入：本次经过的毫秒数
+ * @return 推进后的进度（不超过 256）
+ * @note 每次至少前进 1，主循环很慢时动画也能走完。
+ */
+uint16_t we_motion_advance(uint16_t t, uint16_t dur_ms, uint16_t elapsed_ms)
+{
+    uint32_t delta;
+
+    if (dur_ms == 0U)
+        return 256U;
+    delta = (uint32_t)elapsed_ms * 256U / (uint32_t)dur_ms;
+    if (delta == 0U)
+        delta = 1U;
+    return ((uint32_t)t + delta >= 256U) ? 256U : (uint16_t)(t + delta);
 }

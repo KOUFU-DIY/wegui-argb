@@ -3,9 +3,16 @@
 
 #include "stdint.h"
 
+/* 色深取值（用户配置里通常已定义，这里只补缺） */
+#ifndef DEEP_GRAY8
 #define DEEP_GRAY8 (3)  /* 8位灰度（单色/灰度 OLED：内核按灰度渲染，端口 flush 时量化打包） */
+#endif
+#ifndef DEEP_RGB565
 #define DEEP_RGB565 (4) /* RGB565 */
+#endif
+#ifndef DEEP_RGB888
 #define DEEP_RGB888 (5) /* RGB888 */
+#endif
 
 /* 平台端口头必须显式给出以下配置。
  * Core 层不再提供默认值，避免默认值和平台值混用后产生重复定义或歧义。 */
@@ -26,20 +33,11 @@
 #error "GRAM_DMA_BUFF_EN must be defined by platform port config."
 #endif
 
-/* 端口异步能力契约：
- * 平台端口配置声明 WE_PORT_FLUSH_ASYNC（1 = flush 为 DMA 异步发送，立即返回）。
- * GRAM 双缓冲只有在"用户开启 GRAM_DMA_BUFF_EN 且端口真异步"时才生效，
- * 阻塞端口下自动退回整块 PFB，避免砍半 PFB + 翻倍 flush 次数的负优化。
- * 未声明的旧平台保持历史行为（跟随 GRAM_DMA_BUFF_EN）。 */
-#ifndef WE_PORT_FLUSH_ASYNC
-#define WE_PORT_FLUSH_ASYNC (GRAM_DMA_BUFF_EN)
-#endif
-
 /* 刷新区域像素对齐粒度（QSPI 彩屏 / SSD1306 页式 OLED 等硬件需求）。
  * 部分屏幕对刷新窗口坐标有硬件粒度要求：
  *   - QSPI 接口彩屏常要求 set_addr 的 x/y 起止坐标为 2 或 4 的倍数；
  *   - SSD1306 等页式单色 OLED 以 8 行为一页，y 向必须按 8 对齐。
- * 语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把矩形
+ * 语义：脏矩形入库时（Core/we_dirty.c 的 we_dirty_invalidate）把矩形
  * 扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上取整到
  * 对齐倍数-1。扩出的边缘随本矩形整块走正常渲染路径重绘，因此推屏时
  * set_addr 收到的窗口天然对齐，且像素流与窗口严格一致。
@@ -54,11 +52,11 @@
 #endif
 
 #if (WE_LCD_FLUSH_ALIGN_X < 1) || ((WE_LCD_FLUSH_ALIGN_X & (WE_LCD_FLUSH_ALIGN_X - 1)) != 0)
-#error "WE_LCD_FLUSH_ALIGN_X must be a power of two (1/2/4/8...): dirty_driver.c expands rects with x0 &= ~(A-1) / x1 |= (A-1), which is only valid for power-of-two A."
+#error "WE_LCD_FLUSH_ALIGN_X must be a power of two (1/2/4/8...): we_dirty.c expands rects with x0 &= ~(A-1) / x1 |= (A-1), which is only valid for power-of-two A."
 #endif
 
 #if (WE_LCD_FLUSH_ALIGN_Y < 1) || ((WE_LCD_FLUSH_ALIGN_Y & (WE_LCD_FLUSH_ALIGN_Y - 1)) != 0)
-#error "WE_LCD_FLUSH_ALIGN_Y must be a power of two (1/2/4/8...): dirty_driver.c expands rects with y0 &= ~(A-1) / y1 |= (A-1), which is only valid for power-of-two A."
+#error "WE_LCD_FLUSH_ALIGN_Y must be a power of two (1/2/4/8...): we_dirty.c expands rects with y0 &= ~(A-1) / y1 |= (A-1), which is only valid for power-of-two A."
 #endif
 
 #if ((SCREEN_WIDTH % WE_LCD_FLUSH_ALIGN_X) != 0)
@@ -71,12 +69,6 @@
 
 #if (((USER_GRAM_NUM / SCREEN_WIDTH) % WE_LCD_FLUSH_ALIGN_Y) != 0)
 #error "PFB row count (USER_GRAM_NUM / SCREEN_WIDTH) must be a multiple of WE_LCD_FLUSH_ALIGN_Y: we_push_pfb splits each dirty rect into PFB-row chunks after one set_addr, and chunk boundaries inherit the Y alignment only if the PFB row capacity is itself a multiple of it (page-packing flush ports rely on whole pages per chunk)."
-#endif
-
-/* 真双缓冲会把可用 PFB 砍半：砍半后的行容量也必须够出至少一个 Y 对齐块，
- * 否则 we_push_pfb 的切片行数向下对齐后为 0，页打包端口将收不到任何数据 */
-#if (GRAM_DMA_BUFF_EN == 1) && (WE_PORT_FLUSH_ASYNC == 1) && ((((USER_GRAM_NUM / 2) / SCREEN_WIDTH) % WE_LCD_FLUSH_ALIGN_Y) != 0)
-#error "With true double buffering (GRAM_DMA_BUFF_EN=1 on an async port) each half of the PFB must still hold a multiple of WE_LCD_FLUSH_ALIGN_Y rows: enlarge USER_GRAM_NUM or disable double buffering."
 #endif
 
 #ifndef WE_CFG_DIRTY_STRATEGY
@@ -100,12 +92,19 @@
 #define WE_CFG_ENABLE_INDEXQOI_MASK (1)
 #endif
 
-#ifndef WE_CFG_ENABLE_INPUT_PORT_BIND
-#error "WE_CFG_ENABLE_INPUT_PORT_BIND must be defined by platform port config."
+/* 帧节奏（毫秒，默认 0）。
+ * 0：每次 we_gui_run 只要有脏区就渲染，动画每次调用都推进；
+ * N：两次渲染至少间隔 N 毫秒，期间动画的流逝时间攒到下一帧一次交给
+ *    动画，脏区合并后一起刷——主循环跑得比帧率快时省 CPU 与总线。 */
+#ifndef WE_CFG_REFR_PERIOD_MS
+#define WE_CFG_REFR_PERIOD_MS 0
 #endif
 
-#ifndef WE_CFG_ENABLE_STORAGE_PORT_BIND
-#error "WE_CFG_ENABLE_STORAGE_PORT_BIND must be defined by platform port config."
+/* 触摸采样间隔（毫秒，默认 0 = 每次 we_gui_run 都采样）。
+ * 触摸芯片走 I2C 等慢总线时可设 10~20，同时让 we_gui_run 的返回值
+ * 在无触摸时给出可休眠的时长。 */
+#ifndef WE_CFG_INDEV_PERIOD_MS
+#define WE_CFG_INDEV_PERIOD_MS 0
 #endif
 
 /* 滑动手势识别阈值 (像素)，位移超过此值才判定为滑动。
@@ -138,7 +137,7 @@
  * 覆盖范围：对象/定时器/动画/模态的生命周期 API 与各 init 绑定入口
  * （"参数明显非法 = 调用方代码写错"的冷入口）；断言之后紧跟的静默
  * 判空守卫保持不变——发布档行为始终是容错返回，断言只是开发期放大器。
- * 不覆盖：逐帧热路径（tick/task_handler/标脏/命中测试）与可在中断里
+ * 不覆盖：逐帧热路径（we_gui_run/标脏/命中测试）与可在中断里
  * 调用的键注入三函数（we_gui_key_inject/press/release）。 */
 #ifndef WE_ASSERT
 #define WE_ASSERT(expr) ((void)0)
@@ -175,9 +174,9 @@
  *    命中优先），we_modal_open 声明模态（命中限顶层、未命中交模态对象、
  *    语义键双沿直送其 event_cb）；
  * 0：整套编译剔除——we_lcd_t 不含顶层链/模态字段，we_obj_attach_to_top
- *    退化为 we_obj_bring_to_front（仍置顶但可能被普通层后来者盖住），
+ *    退化为挂到普通层链尾（仍在最上面，但可能被普通层后来者盖住），
  *    modal 三函数退化为空操作 stub（we_modal_get 恒返回 NULL）。
- *    msgbox/toast/dropdown 弹层照常编译可用，只是失去"保证置顶"与
+ *    msgbox/toast/dropdown 等弹层照常编译显示，只是失去"保证置顶"与
  *    模态吞键/全屏命中语义。不用弹层类控件的产品可整段裁掉。 */
 #ifndef WE_CFG_ENABLE_TOP_LAYER
 #define WE_CFG_ENABLE_TOP_LAYER 1

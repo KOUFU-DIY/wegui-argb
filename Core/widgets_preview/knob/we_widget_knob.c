@@ -10,7 +10,7 @@
  */
 
 #include "we_widget_knob.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -216,10 +216,10 @@ static void _knob_draw_cb(void *ptr)
         return;
 
     /* 与当前 PFB 条带求交，不在条带内直接退出 */
-    draw_x_start = WE_MAX(obj->base.x, lcd->pfb_area.x0);
-    draw_y_start = WE_MAX(obj->base.y, lcd->pfb_y_start);
-    draw_x_end   = WE_MIN((int16_t)(obj->base.x + obj->base.w - 1), lcd->pfb_area.x1);
-    draw_y_end   = WE_MIN((int16_t)(obj->base.y + obj->base.h - 1), lcd->pfb_y_end);
+    draw_x_start = WE_MAX(obj->base.x, lcd->clip.x0);
+    draw_y_start = WE_MAX(obj->base.y, lcd->clip.y0);
+    draw_x_end   = WE_MIN((int16_t)(obj->base.x + obj->base.w - 1), lcd->clip.x1);
+    draw_y_end   = WE_MIN((int16_t)(obj->base.y + obj->base.h - 1), lcd->clip.y1);
     if (draw_x_start > draw_x_end || draw_y_start > draw_y_end)
         return;
 
@@ -257,8 +257,8 @@ static void _knob_draw_cb(void *ptr)
         int16_t y;
 
         dst_line = (colour_t *)lcd->pfb_gram +
-                   ((draw_y_start - lcd->pfb_y_start) * lcd->pfb_width) +
-                   (draw_x_start - lcd->pfb_area.x0);
+                   ((draw_y_start - lcd->clip.y0) * lcd->pfb_width) +
+                   (draw_x_start - lcd->clip.x0);
 
         for (y = draw_y_start; y <= draw_y_end; y++)
         {
@@ -433,9 +433,17 @@ void we_knob_obj_init(we_knob_obj_t *obj, we_lcd_t *lcd,
     obj->value = 0;
 
     {
+        /* 默认调色盘：单色样式切黑轨白值白点（黑轨在黑底上隐形，
+         * value 弧 + 端点小圆承担全部指示，二值化后依然可辨） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t track = RGB888_CONST(0, 0, 0);
+        colour_t value = RGB888_CONST(255, 255, 255);
+        colour_t dot   = RGB888_CONST(255, 255, 255);
+#else
         colour_t track = RGB888_CONST(WE_KNOB_TRACK_R, WE_KNOB_TRACK_G, WE_KNOB_TRACK_B);
         colour_t value = RGB888_CONST(WE_KNOB_VALUE_R, WE_KNOB_VALUE_G, WE_KNOB_VALUE_B);
         colour_t dot   = RGB888_CONST(WE_KNOB_DOT_R8, WE_KNOB_DOT_G8, WE_KNOB_DOT_B8);
+#endif
         obj->track_color = track;
         obj->value_color = value;
         obj->dot_color   = dot;

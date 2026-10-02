@@ -21,11 +21,13 @@
  *    lcd_rgb565_port / lcd_rgb888_port 对应的底层链路里完成。
  * 5. 最后把 lcd_ic_init / lcd_set_windows / lcd_set_bright 这些宏，
  *    对接到你自己的底层驱动函数。
+ * 6. 在 main.c 里定义端口描述 we_port_t 传给 we_gui_init（见第 3 节）。
  *
  * 注意：
- * 1. Core 层通过 we_user_config.h 间接选择平台端口头。
+ * 1. 平台端口头由 we_hw_port.h 按编译宏（WE_PLATFORM_xxx）选择，
+ *    只被端口驱动和 main.c 包含，Core 不包含它。
  * 2. 所以这份模板本身不应该被 Core 直接 include。
- * 3. 真正投入使用时，请复制成正式平台文件后，再在 we_user_config.h 中接入。
+ * 3. 真正投入使用时，请复制成正式平台文件后，在 we_hw_port.h 中加一个分支接入。
  * -------------------------------------------------------------------------- */
 
 /* =========================
@@ -53,32 +55,22 @@ void lcd_rgb565_port(uint16_t *gram, uint32_t pix_size);
 
 /**
  * @brief 通过底层端口输出 RGB888 像素流。
- * @param gram RGB888 像素缓冲区指针。
- * @param pix_size 本次输出像素数量。
+ * @param gram RGB888 像素缓冲区指针（每像素 R/G/B 3 字节）。
+ * @param pix_size 本次输出像素数量（字节数 = pix_size * 3）。
  * @return 无。
  */
 void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
 
 /* =========================
- * 1. 屏幕与 PFB 基本参数
+ * 1. 屏幕偏移
  * =========================
  *
- * 这些参数决定：
- * 1. GUI 可见分辨率
- * 2. PFB 每次刷新的切片大小
- * 3. RAM 占用和单次推屏像素数量
+ * 分辨率、色深、PFB 行数（USER_GRAM_NUM）与 DMA 双缓冲开关
+ * （GRAM_DMA_BUFF_EN）统一在 we_user_config.h 设置；平台端口头只放
+ * 面板相关的参数，例如 GUI 画面在屏幕 IC 显存里的起始偏移：
  */
-#define SCREEN_WIDTH 240
-#define SCREEN_HEIGHT 240
-
 #define SCREEN_X_OFFSET 0
 #define SCREEN_Y_OFFSET 0
-
-/* 是否打开 DMA 双缓冲模式 */
-#define GRAM_DMA_BUFF_EN (1)
-
-/* PFB 缓冲像素数量，最小建议为 SCREEN_WIDTH * 1 */
-#define GRAM_NUM (SCREEN_WIDTH * 2)
 
 /* =========================
  * 2. 刷新区域像素对齐（可选）
@@ -86,7 +78,7 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
  *
  * WE_LCD_FLUSH_ALIGN_X / WE_LCD_FLUSH_ALIGN_Y（不定义时默认 1 = 不对齐）。
  * 部分屏幕对刷新窗口坐标有硬件粒度要求，核心会在脏矩形入库时把矩形扩张到
- * 对齐边界（Core/dirty_driver.c），扩出的边缘随矩形整块重绘，因此
+ * 对齐边界（Core/we_dirty.c），扩出的边缘随矩形整块重绘，因此
  * lcd_set_windows 收到的 x0/y0 恒为对齐倍数、x1/y1 恒为对齐倍数-1（含端点）。
  * 约束（we_gui_config.h 编译期校验）：对齐值必须是 2 的幂；SCREEN_WIDTH /
  * SCREEN_HEIGHT 及 PFB 行数（USER_GRAM_NUM / SCREEN_WIDTH）必须是对应
@@ -144,6 +136,33 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size);
  *
  * 在库参考实现：STM32F103/Lcd_Port/stm32f103_lcd_soft_iic_port.c 的
  * lcd_oled_port（1bpp 页打包）与 lcd_gray_port（SSD1327 类 4bpp 灰度）。
+ */
+
+/* =========================
+ * 3. 端口描述（main.c）
+ * =========================
+ *
+ * 把上面的函数填进一份常量端口描述，初始化时交给内核：
+ *
+ *   static const we_port_t s_port = {
+ *       .set_addr = lcd_set_windows,   // 必填：设刷新窗口（坐标含端点）
+ *       .flush = lcd_rgb565_port,      // 必填：推送像素，pix_size 恒为像素个数
+ *       .touch_read = touch_read,      // 选填：触摸采样，无触摸填 NULL
+ *       .storage_read = flash_read,    // 选填：外挂存储读取，没有填 NULL
+ *       .flush_async = 0,              // flush 只启动 DMA 就返回时填 1
+ *   };
+ *   we_gui_init(&lcd, &s_port, bg, gram, USER_GRAM_NUM);
+ *
+ * flush_async = 1 的约定：需 GRAM_DMA_BUFF_EN = 1 且显存至少 2 行，内核
+ * 把显存分两半交替使用，保证 DMA 正在发送的那一半不被改写；端口的
+ * flush 与 set_addr 开头都必须先等上一次 DMA 发完。
+ *
+ * 主循环：
+ *
+ *   uint32_t t0 = sys_ms;                     // 系统毫秒计数（SysTick 自增）
+ *   while (1) {
+ *       we_gui_run(&lcd, sys_ms - t0);        // 时间轴从 0 起算
+ *   }
  */
 
 #endif

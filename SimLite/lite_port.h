@@ -1,8 +1,8 @@
 #ifndef LITE_PORT_H
 #define LITE_PORT_H
 
-#include "we_sim_port_config.h" /* 端口面：必须先于内核头（WE_PORT_FLUSH_ASYNC 覆盖默认值） */
-#include "we_gui_driver.h"
+#include "we_sim_port_config.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * SimLite 端口接口（纯 Win32/GDI 实现，见 win32_port.c）
@@ -25,10 +25,10 @@ void input_hw_init(void);
 void storage_hw_init(void);
 
 /**
- * @brief 读取一帧触摸输入（鼠标模拟）
+ * @brief 触摸采样（鼠标模拟）：报告当前是否按下与坐标
  * @param data 输出指针
  */
-void we_input_port_read(we_indev_data_t *data);
+void lite_touch_read(we_touch_data_t *data);
 
 /**
  * @brief 外挂 flash 读取端口（fseek/fread 直读镜像文件）
@@ -51,22 +51,21 @@ int lite_handle_events(we_lcd_t *lcd);
 void lite_present(void);
 
 /**
- * @brief 开关 headless 模式（debug/debug_main.c 的 --shot 自检用：只建帧缓冲不开窗；
- *        正式入口 main_lite.c 不调用）
+ * @brief 开关 headless 模式（只建帧缓冲不开窗，供抓帧自检；正式入口 main_lite.c 不调用）
  * @param on 1 = headless
  */
 void lite_set_headless(int on);
 
 /**
- * @brief 把当前帧缓冲导出为 P6 PPM（debug 构建自检目检用）
+ * @brief 把当前帧缓冲导出为 P6 PPM（抓帧目检用）
  * @param path 输出文件路径
  * @return 0 成功，-1 失败
  */
 int lite_dump_ppm(const char *path);
 
 /**
- * @brief 取 GUI 分辨率 ARGB8888 帧缓冲首地址（debug/lite_autotest.c 帧哈希用；
- *        布局与转换公式与原 SDL 模拟器 screen_buffer 完全一致，基准哈希可互换）
+ * @brief 取 GUI 分辨率 ARGB8888 帧缓冲首地址（供帧哈希回归读取；布局与 565→8888
+ *        位复制公式固定不变，改动会使既有回归基准失效）
  * @return 帧缓冲指针（SCREEN_WIDTH x SCREEN_HEIGHT 个 uint32）
  */
 const uint32_t *lite_fb(void);

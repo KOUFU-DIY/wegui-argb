@@ -1,476 +1,298 @@
 
 #include "we_widget_img_flash.h"
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
-
-typedef struct
-{
-    we_storage_read_cb_t cb;
-    uint32_t             base;       /* QOI 数据段在 flash 中的绝对起始地址 */
-    uint32_t             cur_pos;    /* 当前读取位置（相对 base 的字节偏移） */
-    uint8_t              buf[WE_FLASH_IMG_CHUNK];
-    uint16_t             buf_pos;    /* buf 中当前游标 */
-    uint16_t             buf_valid;  /* buf 中有效字节数 */
-} flash_stream_t;
-
-/**
- * @brief 初始化 Flash 字节流读取器。
- * @param s 流对象。
- * @param cb 外部存储读取回调。
- * @param base 数据段在 Flash 中的基地址。
- */
-static void flash_stream_init(flash_stream_t *s, we_storage_read_cb_t cb, uint32_t base)
-{
-    s->cb        = cb;
-    s->base      = base;
-    s->cur_pos   = 0U;
-    s->buf_pos   = 0U;
-    s->buf_valid = 0U;
-}
-
-/**
- * @brief 将流定位到指定字节偏移并使内部缓冲失效。
- * @param s 流对象。
- * @param offset 相对 base 的目标偏移。
- */
-static void flash_stream_seek(flash_stream_t *s, uint32_t offset)
-{
-    s->cur_pos   = offset;
-    s->buf_pos   = 0U;
-    s->buf_valid = 0U;   /* 使缓冲区失效，下次 get 时重新加载 */
-}
-
-/**
- * @brief 从 Flash 流读取下一个字节。
- * @param s 流对象。
- * @return 当前读取到的字节值。
- */
-static uint8_t flash_stream_get(flash_stream_t *s)
-{
-    if (s->buf_pos >= s->buf_valid)
-    {
-        s->cb(s->base + s->cur_pos, s->buf, WE_FLASH_IMG_CHUNK);
-        s->buf_pos   = 0U;
-        s->buf_valid = WE_FLASH_IMG_CHUNK;
-    }
-    s->cur_pos++;
-    return s->buf[s->buf_pos++];
-}
 
 /* --------------------------------------------------------------------------
  * IMG_RGB565 Flash 渲染器（无压缩）
  *
- * 逐行直接寻址：每行可见像素地址 = flash_addr + 6 + (y * img_w + ix_start) * 2
- * 每次读取不超过 WE_FLASH_IMG_CHUNK 字节，大端拼色后写入 PFB。
+ * 逐行直接寻址：每行可见像素地址 = flash_addr + 6 + (y * img_w + ix_start) * 2。
+ * 内核已把窗口收窄到本控件包围盒内，窗口左上角即 pfb_gram 起点。
  * -------------------------------------------------------------------------- */
 
 /**
  * @brief 渲染未压缩 RGB565 Flash 图片到当前 PFB 切片。
  * @param p_lcd 当前 LCD 上下文。
  * @param obj 图片控件实例。
- * @param opacity 图片整体透明度（0~255）。
+ * @param opacity 图片整体透明度（容器级联后，> 5）。
  */
 static void _flash_render_rgb565(we_lcd_t *p_lcd,
                                   we_flash_img_obj_t *obj,
                                   uint8_t opacity)
 {
-    int16_t  x0    = obj->base.x;
-    int16_t  y0    = obj->base.y;
-    uint16_t img_w = (uint16_t)obj->base.w;
-    uint16_t img_h = (uint16_t)obj->base.h;
-    int16_t  x1    = x0 + (int16_t)img_w - 1;
-    int16_t  y1    = y0 + (int16_t)img_h - 1;
+    uint16_t  img_w  = (uint16_t)obj->base.w;
+    uint16_t  draw_w = (uint16_t)(p_lcd->clip.x1 - p_lcd->clip.x0 + 1);
+    uint16_t  draw_h = (uint16_t)(p_lcd->clip.y1 - p_lcd->clip.y0 + 1);
+    uint32_t  addr   = obj->flash_addr + 6U +
+                       ((uint32_t)(p_lcd->clip.y0 - obj->base.y) * img_w + (uint32_t)(p_lcd->clip.x0 - obj->base.x)) * 2U;
+    colour_t *row    = p_lcd->pfb_gram;
+    uint16_t  y;
 
-    if ((x0 > (int16_t)p_lcd->pfb_area.x1) || (x1 < (int16_t)p_lcd->pfb_area.x0) ||
-        (y0 > (int16_t)p_lcd->pfb_y_end)   || (y1 < (int16_t)p_lcd->pfb_y_start))
+#if (LCD_DEEP == DEEP_RGB565)
+    if (opacity >= 250U)
     {
+        /* 不透明：直接读进 PFB 行，再原地把大端字节拼成像素（每个像素只覆盖它自己
+         * 的 2 个源字节，与 CPU 字节序无关）。图宽正好等于窗口宽时各行在外挂与 PFB
+         * 里都首尾相接，整片一次读完 */
+        uint32_t n_px   = draw_w;
+        uint16_t n_rows = draw_h;
+
+        if (draw_w == img_w && draw_w == p_lcd->pfb_width)
+        {
+            n_px *= draw_h;
+            n_rows = 1U;
+        }
+        for (y = 0U; y < n_rows; y++, row += p_lcd->pfb_width, addr += (uint32_t)img_w * 2U)
+        {
+            const uint8_t *b = (const uint8_t *)row;
+            uint32_t i;
+
+            we_gui_storage(p_lcd)(addr, (uint8_t *)row, n_px * 2U);
+            for (i = 0U; i < n_px; i++)
+                row[i].dat16 = (uint16_t)(((uint16_t)b[2U * i] << 8) | b[2U * i + 1U]);
+        }
         return;
     }
+#endif
 
-    uint16_t ix_start = (x0 < (int16_t)p_lcd->pfb_area.x0) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_area.x0 - x0) : 0U;
-    uint16_t iy_start = (y0 < (int16_t)p_lcd->pfb_y_start) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_y_start - y0) : 0U;
-
-    uint16_t draw_w = img_w - ix_start -
-                      ((x1 > (int16_t)p_lcd->pfb_area.x1) ?
-                       (uint16_t)(x1 - (int16_t)p_lcd->pfb_area.x1) : 0U);
-    uint16_t draw_h = img_h - iy_start -
-                      ((y1 > (int16_t)p_lcd->pfb_y_end) ?
-                       (uint16_t)(y1 - (int16_t)p_lcd->pfb_y_end) : 0U);
-
-    uint16_t clip_y_end  = iy_start + draw_h;
-    int16_t  base_dest_x = x0 - (int16_t)p_lcd->pfb_area.x0;
-    int16_t  base_dest_y = y0 - (int16_t)p_lcd->pfb_y_start;
-    uint16_t dst_stride  = p_lcd->pfb_width;
-
-    /* 每次最多读 WE_FLASH_IMG_CHUNK/2 个像素 */
-    uint16_t pix_per_chunk = WE_FLASH_IMG_CHUNK / 2U;
-    uint8_t  chunk[WE_FLASH_IMG_CHUNK];
-
-    for (uint16_t cur_y = iy_start; cur_y < clip_y_end; cur_y++)
+    /* 半透明（或非 RGB565 色深）：分块读到栈上再逐像素混色，每块最多 WE_FLASH_IMG_CHUNK/2 个像素 */
+    for (y = 0U; y < draw_h; y++, row += p_lcd->pfb_width, addr += (uint32_t)img_w * 2U)
     {
-        uint32_t row_addr = obj->flash_addr + 6U +
-                            ((uint32_t)cur_y * img_w + ix_start) * 2U;
-        uint16_t pix_left = draw_w;
-        uint16_t dst_x    = 0U;
+        uint8_t   chunk[WE_FLASH_IMG_CHUNK];
+        uint32_t  a    = addr;
+        colour_t *dst  = row;
+        uint16_t  left = draw_w;
 
-        while (pix_left > 0U)
+        while (left > 0U)
         {
-            uint16_t n = (pix_left < pix_per_chunk) ? pix_left : pix_per_chunk;
-            p_lcd->storage_read_cb(row_addr, chunk, (uint32_t)n * 2U);
+            uint16_t n = (left < (uint16_t)(WE_FLASH_IMG_CHUNK / 2U)) ? left : (uint16_t)(WE_FLASH_IMG_CHUNK / 2U);
+            uint16_t i;
 
-            for (uint16_t i = 0U; i < n; i++)
+            we_gui_storage(p_lcd)(a, chunk, (uint32_t)n * 2U);
+            for (i = 0U; i < n; i++)
             {
-                uint16_t raw = ((uint16_t)chunk[i * 2U] << 8) | chunk[i * 2U + 1U];
-colour_t fg  = we_color_from_rgb565(raw);
-                colour_t *dst = p_lcd->pfb_gram +
-                                ((base_dest_y + cur_y) * dst_stride) +
-                                (base_dest_x + ix_start + dst_x + i);
-we_store_blended_color(dst, fg, opacity);
-            }
+                uint16_t raw = (uint16_t)(((uint16_t)chunk[2U * i] << 8) | chunk[2U * i + 1U]);
 
-            dst_x    += n;
-            row_addr += (uint32_t)n * 2U;
-            pix_left -= n;
+                we_store_blended_color(dst++, we_color_from_rgb565(raw), opacity);
+            }
+            a += (uint32_t)n * 2U;
+            left = (uint16_t)(left - n);
         }
     }
 }
 
+#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
 /* --------------------------------------------------------------------------
- * IMG_RGB565_INDEXQOI Flash 渲染器
+ * 索引 QOI 外挂读取状态
  *
- * 与 we_img_render_indexed_qoi_rgb565 逻辑完全相同（V3 行索引 + 行去重），
- * 差别仅在于：数据来自 flash_stream，而非内存指针。
- * 每个可见行：读一条行索引（2/4 字节）→ seek 流 → 解码一行，
- * 行内越过裁剪右缘立即停止；去重行回指旧偏移对 flash 只是普通随机读。
+ * 解码经两个窗口读外挂：索引窗口缓存一段连续的行索引项，数据窗口缓存一段
+ * 连续的 QOI 数据流。请求落在窗口已载区间内直接取，否则从请求地址起整块
+ * 重装。窗口按 flash 绝对地址命中：外挂数据运行期只读，不同图片的地址区间
+ * 互不重叠，按地址命中即可保证正确。V3 的非去重行按行序紧挨存放，相邻行的
+ * 索引项与数据都会连续命中同一窗口，去重行回指近处时同样命中。
+ *
+ * 头（m16、调色盘条目数）在 init 时读进对象；调色盘按图片资源地址缓存一份。
+ * 状态记下所属的外挂读取回调：多块屏接不同存储器时互不串用。
+ * WE_FLASH_IMG_CACHE = 1：整套状态放静态 RAM，跨切片、跨帧保留（单槽）；
+ * WE_FLASH_IMG_CACHE = 0：状态放栈上，只在单次绘制调用内有效。
+ * -------------------------------------------------------------------------- */
+typedef struct
+{
+    uint32_t addr; /* 窗口首字节的 flash 绝对地址 */
+    uint16_t len;  /* 窗口有效字节数，0 = 空 */
+} flash_win_t;
+
+typedef struct
+{
+    we_storage_read_cb_t owner;    /* 读取状态所属的外挂读取回调 */
+    uint32_t    pal_key;           /* 调色盘所属图片的资源头地址 */
+    uint8_t     pal_valid;         /* 1 = 调色盘有效 */
+    uint8_t     pal[64U * 3U];     /* 调色盘原始字节：RGB565 每项 2 字节，ARGB8565 每项 3 字节 */
+    flash_win_t idx_win;           /* 行索引窗口 */
+    flash_win_t dat_win;           /* 数据窗口 */
+    uint8_t     idx_buf[WE_FLASH_IMG_IDX_WIN];
+    uint8_t     dat_buf[WE_FLASH_IMG_CHUNK];
+} flash_qoi_state_t;
+
+#if (WE_FLASH_IMG_CACHE == 1)
+static flash_qoi_state_t s_qoi_state;
+#endif
+
+/* 数据流读取器：逐字节经数据窗口读取 */
+typedef struct
+{
+    we_storage_read_cb_t cb;
+    flash_qoi_state_t   *st;
+    uint32_t             pos; /* 下一个要读的字节的 flash 绝对地址 */
+} flash_stream_t;
+
+/**
+ * @brief 作废全部读取状态（调色盘、两个窗口）。
+ * @param st 读取状态。
+ */
+static void _flash_qoi_state_reset(flash_qoi_state_t *st)
+{
+    st->owner       = NULL;
+    st->pal_valid   = 0U;
+    st->idx_win.len = 0U;
+    st->dat_win.len = 0U;
+}
+
+/**
+ * @brief 从数据流读取下一个字节：落在数据窗口内直接取，否则从当前位置重装窗口。
+ * @param s 数据流读取器。
+ * @return 读到的字节。
+ */
+static uint8_t flash_stream_get(flash_stream_t *s)
+{
+    flash_qoi_state_t *st = s->st;
+    uint32_t o = s->pos - st->dat_win.addr; /* pos 在窗口前方时回绕成大数，同样判为未命中 */
+
+    if (o >= st->dat_win.len)
+    {
+        s->cb(s->pos, st->dat_buf, WE_FLASH_IMG_CHUNK);
+        st->dat_win.addr = s->pos;
+        st->dat_win.len  = WE_FLASH_IMG_CHUNK;
+        o = 0U;
+    }
+    s->pos++;
+    return st->dat_buf[o];
+}
+
+/**
+ * @brief 取第 row 行在 QOI 数据流中的字节偏移（经行索引窗口）。
+ * @param st 读取状态。
+ * @param cb 外部存储读取回调。
+ * @param idx_base 行索引表起点（flash 绝对地址）。
+ * @param m16 u16 行索引表项数（其后各行用 u32 表项）。
+ * @param row 行号。
+ * @return 行数据相对 QOI 数据流起点的偏移。
+ * @note 行号顺序递增，窗口一次重装即覆盖后续多行的索引项。
+ */
+static uint32_t _flash_qoi_row_off(flash_qoi_state_t *st, we_storage_read_cb_t cb,
+                                   uint32_t idx_base, uint16_t m16, uint16_t row)
+{
+    uint32_t       ep;
+    uint16_t       el;
+    const uint8_t *e;
+
+    if (row < m16)
+    {
+        ep = idx_base + ((uint32_t)row << 1);
+        el = 2U;
+    }
+    else
+    {
+        ep = idx_base + ((uint32_t)m16 << 1) + ((uint32_t)(row - m16) << 2);
+        el = 4U;
+    }
+
+    if ((st->idx_win.len == 0U) || (ep < st->idx_win.addr) ||
+        ((ep + el) > (st->idx_win.addr + st->idx_win.len)))
+    {
+        cb(ep, st->idx_buf, WE_FLASH_IMG_IDX_WIN);
+        st->idx_win.addr = ep;
+        st->idx_win.len  = WE_FLASH_IMG_IDX_WIN;
+    }
+
+    e = st->idx_buf + (ep - st->idx_win.addr);
+    if (el == 2U)
+        return ((uint32_t)e[0] << 8) | e[1];
+    return ((uint32_t)e[0] << 24) | ((uint32_t)e[1] << 16) | ((uint32_t)e[2] << 8) | e[3];
+}
+
+/* --------------------------------------------------------------------------
+ * 索引 QOI Flash 渲染器（RGB565 / ARGB8565 共用）
+ *
+ * 与 we_img_render_indexed_qoi_* 逻辑相同（V3 行索引 + 行去重），差别仅在于
+ * 字节经读取窗口来自外挂 flash，而非内存指针。每个可见行：经索引窗口取行偏移，
+ * 定位数据流，解码一行，行内越过裁剪右缘立即停止。
+ *
+ * ARGB8565 与 RGB565 的差异：
+ *   0x00..0x3F → 静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha）
+ *   0xFF → 读 3 字节 [A][H][L]，更新 alpha + RGB565
+ *   0xFE → 读 2 字节 [H][L]，alpha 不变
+ *   输出时 alpha = 像素 alpha × opacity / 255（RGB565 恒为 opacity）
+ * V3 行首 op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
+ * 每行定位后即自包含重建完整状态（包括 alpha；调色盘全局有效）。
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 渲染 RGB565_INDEXQOI 格式 Flash 图片到当前 PFB 切片。
+ * @brief 渲染索引 QOI 格式 Flash 图片到当前 PFB 切片。
  * @param p_lcd 当前 LCD 上下文。
  * @param obj 图片控件实例。
- * @param opacity 图片整体透明度（0~255）。
+ * @param opacity 图片整体透明度（容器级联后，> 5）。
+ * @param px_bytes 每像素字节数：RGB565 = 2，ARGB8565 = 3（决定调色盘项长与 0xFF 的载荷）。
  */
-static void _flash_render_indexed_qoi_rgb565(we_lcd_t *p_lcd,
-                                              we_flash_img_obj_t *obj,
-                                              uint8_t opacity)
+static void _flash_render_indexed_qoi(we_lcd_t *p_lcd, we_flash_img_obj_t *obj,
+                                      uint8_t opacity, uint8_t px_bytes)
 {
-    /* 每次绘制时读取 14 字节 V3 索引头，省去结构体缓存字段 */
-    uint8_t  inner[14];
-    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
-    uint8_t  head_size = inner[0];
-    uint16_t u16_rows  = ((uint16_t)inner[5] << 8) | inner[6];
-    uint8_t  pal_count = inner[13];
+#if (WE_FLASH_IMG_CACHE == 1)
+    flash_qoi_state_t *st = &s_qoi_state;
+#else
+    flash_qoi_state_t  st_local;
+    flash_qoi_state_t *st = &st_local;
+#endif
+    flash_stream_t  s;
+    uint16_t        img_h      = (uint16_t)obj->base.h;
+    uint16_t        m16        = obj->m16;
+    uint8_t         pal_count  = obj->pal_count;
+    uint16_t        ix_start   = (uint16_t)(p_lcd->clip.x0 - obj->base.x);
+    uint16_t        clip_x_end = (uint16_t)(p_lcd->clip.x1 - obj->base.x + 1);
+    uint16_t        cur_y      = (uint16_t)(p_lcd->clip.y0 - obj->base.y);
+    uint16_t        clip_y_end = (uint16_t)(p_lcd->clip.y1 - obj->base.y + 1);
+    colour_t       *row_dst    = p_lcd->pfb_gram - ix_start; /* 行内以图片列号寻址 */
+    /* payload 布局：[14字节索引头][u16行索引表][u32行索引表][静态调色盘][QOI数据流] */
+    uint32_t        idx_base   = obj->flash_addr + 6U + 14U;
+    uint32_t        pal_addr   = idx_base + ((uint32_t)m16 << 1) + ((uint32_t)(img_h - m16) << 2);
+    uint32_t        dat_base   = pal_addr + (uint32_t)pal_count * px_bytes;
+    /* 资源头没有总长度字段：用"最坏 4 字节/像素 + 余量"的保守流长上界拦截损坏索引表 */
+    uint32_t        stream_max = (((uint32_t)obj->base.w * img_h) << 2) + 16U;
 
-    /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
-     * 0x0D 均不支持）；调色盘条目数上限 64，超出视为损坏流。 */
-    if (head_size != 0x0FU || pal_count > 64U)
-        return;
-
-    int16_t  x0    = obj->base.x;
-    int16_t  y0    = obj->base.y;
-    uint16_t img_w = (uint16_t)obj->base.w;
-    uint16_t img_h = (uint16_t)obj->base.h;
-    int16_t  x1    = x0 + (int16_t)img_w - 1;
-    int16_t  y1    = y0 + (int16_t)img_h - 1;
-
-    /* m16 不可能超过行数，超出视为损坏流 */
-    if (u16_rows > img_h)
-        return;
-
-    /* 与当前 PFB 切片的可见性检查 */
-    if ((x0 > (int16_t)p_lcd->pfb_area.x1) || (x1 < (int16_t)p_lcd->pfb_area.x0) ||
-        (y0 > (int16_t)p_lcd->pfb_y_end)   || (y1 < (int16_t)p_lcd->pfb_y_start))
+    s.cb = we_gui_storage(p_lcd);
+    s.st = st;
+#if (WE_FLASH_IMG_CACHE == 0)
+    _flash_qoi_state_reset(st);
+#endif
+    if (st->owner != s.cb)
     {
-        return;
+        _flash_qoi_state_reset(st);
+        st->owner = s.cb;
+    }
+    if (pal_count > 0U && (st->pal_valid == 0U || st->pal_key != obj->flash_addr))
+    {
+        s.cb(pal_addr, st->pal, (uint32_t)pal_count * px_bytes);
+        st->pal_key   = obj->flash_addr;
+        st->pal_valid = 1U;
     }
 
-    uint16_t ix_start = (x0 < (int16_t)p_lcd->pfb_area.x0) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_area.x0 - x0) : 0U;
-    uint16_t iy_start = (y0 < (int16_t)p_lcd->pfb_y_start) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_y_start - y0) : 0U;
-
-    uint16_t draw_w = img_w - ix_start -
-                      ((x1 > (int16_t)p_lcd->pfb_area.x1) ?
-                       (uint16_t)(x1 - (int16_t)p_lcd->pfb_area.x1) : 0U);
-    uint16_t draw_h = img_h - iy_start -
-                      ((y1 > (int16_t)p_lcd->pfb_y_end) ?
-                       (uint16_t)(y1 - (int16_t)p_lcd->pfb_y_end) : 0U);
-
-    uint16_t clip_x_end  = ix_start + draw_w;
-    uint16_t clip_y_end  = iy_start + draw_h;
-    int16_t  base_dest_x = x0 - (int16_t)p_lcd->pfb_area.x0;
-    int16_t  base_dest_y = y0 - (int16_t)p_lcd->pfb_y_start;
-    uint16_t dst_stride  = p_lcd->pfb_width;
-
-    /* ---- payload 各区偏移（相对 6 字节通用头之后） ---- */
-    uint32_t idx_off = 14U;
-    uint32_t u32_off = idx_off + (uint32_t)u16_rows * 2U;
-    uint32_t pal_off = u32_off + ((uint32_t)(img_h - u16_rows)) * 4U;
-    uint32_t dat_off = pal_off + (uint32_t)pal_count * 2U;
-
-    /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 2 字节 = 128B）：
-     * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
-    uint8_t pal[128];
-    if (pal_count > 0U)
-        p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 2U);
-
-    /* 防御：用"最坏 4 字节/像素 + 余量"的保守流长上界拦截损坏索引表的
-     * 任意偏移跳转，并给解码循环一个硬性停止线（合法码流必然短于上界）。 */
-    uint32_t max_pixels = (uint32_t)img_w * img_h;
-    uint32_t stream_max = (max_pixels << 2) + 16U;
-
-    flash_stream_t stream;
-    flash_stream_init(&stream, p_lcd->storage_read_cb,
-                      obj->flash_addr + 6U + dat_off);
-
     /* ---- 行循环：逐可见行经行索引空降解码（RUN 不跨行、行自包含） ---- */
-    for (uint16_t cur_y = iy_start; cur_y < clip_y_end; cur_y++)
+    for (; cur_y < clip_y_end; cur_y++, row_dst += p_lcd->pfb_width)
     {
-        uint8_t  idx_buf[4];
-        uint32_t row_off;
+        uint32_t row_off     = _flash_qoi_row_off(st, s.cb, idx_base, m16, cur_y);
+        uint16_t cur_x       = 0U;
+        uint8_t  r = 0, g = 0, b = 0;
+        uint16_t cur_pixel   = 0U;
+        uint8_t  final_alpha = opacity; /* ARGB8565 行首 op 必然重建 alpha，这里只是缺省值 */
 
-        if (cur_y < u16_rows)
-        {
-            p_lcd->storage_read_cb(obj->flash_addr + 6U + idx_off + (uint32_t)cur_y * 2U, idx_buf, 2U);
-            row_off = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
-        }
-        else
-        {
-            p_lcd->storage_read_cb(obj->flash_addr + 6U + u32_off +
-                                   ((uint32_t)(cur_y - u16_rows)) * 4U, idx_buf, 4U);
-            row_off = ((uint32_t)idx_buf[0] << 24) | ((uint32_t)idx_buf[1] << 16) |
-                      ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
-        }
         if (row_off >= stream_max)
             return; /* 损坏索引表 */
 
-flash_stream_seek(&stream, row_off);
-
-        colour_t *row_dst = p_lcd->pfb_gram +
-                            ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-        uint16_t cur_x = 0U;
-        uint8_t  flag;
-        uint8_t  r = 0, g = 0, b = 0;
-        uint16_t cur_pixel = 0;
-
-        while ((cur_x < clip_x_end) && (stream.cur_pos < stream_max))
+        s.pos = dat_base + row_off;
+        while ((cur_x < clip_x_end) && ((s.pos - dat_base) < stream_max))
         {
-flag = flash_stream_get(&stream);
+            uint8_t flag = flash_stream_get(&s);
 
-            if ((flag == 0xFFU) || (flag == 0xFEU))
+            if (flag >= 0xFEU)
             {
-uint8_t h = flash_stream_get(&stream);
-uint8_t l = flash_stream_get(&stream);
-                cur_pixel = ((uint16_t)h << 8) | l;
-                r = h >> 3;
-                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-                b = l & 0x1FU;
-            }
-            else if ((flag & 0xC0U) == 0x40U)
-            {
-                r = (uint8_t)((r + ((flag >> 4) & 0x03U) - 2U) & 0x1FU);
-                g = (uint8_t)((g + ((flag >> 2) & 0x03U) - 2U) & 0x3FU);
-                b = (uint8_t)((b + ( flag       & 0x03U) - 2U) & 0x1FU);
-                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-            }
-            else if ((flag & 0xC0U) == 0x80U)
-            {
-                int8_t  vg   = (int8_t)((flag & 0x3FU) - 32U);
-uint8_t nb   = flash_stream_get(&stream);
-                r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
-                g = (uint8_t)((g + vg)                            & 0x3FU);
-                b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
-                cur_pixel = ((uint16_t)r << 11) | ((uint16_t)g << 5) | b;
-            }
-            else if (flag < 0x40U)
-            {
-                /* 0x00..0x3F：静态调色盘 op，查栈缓存的调色盘 */
+                /* 0xFF / 0xFE：原始像素（ARGB8565 的 0xFF 先带 1 字节 alpha） */
                 uint8_t h;
                 uint8_t l;
 
-                if (flag >= pal_count)
-                    return; /* 超出条目数视为损坏流 */
-                h = pal[(uint16_t)flag << 1];
-                l = pal[((uint16_t)flag << 1) + 1U];
-                cur_pixel = ((uint16_t)h << 8) | l;
-                r = h >> 3;
-                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-                b = l & 0x1FU;
-            }
-            else /* 0xC0..0xFD：RUN（不跨行） */
-            {
-                uint8_t run = (flag & 0x3FU) + 1U;
-colour_t fg = we_color_from_rgb565(cur_pixel);
-
-                while (run--)
-                {
-                    if (cur_x >= ix_start && cur_x < clip_x_end)
-                    {
-we_store_blended_color(row_dst + cur_x, fg, opacity);
-                    }
-                    cur_x++;
-                    if (cur_x >= clip_x_end)
-                        break; /* 行内右缘截断：本行剩余像素不可见 */
-                }
-                continue;
-            }
-
-            if (cur_x >= ix_start && cur_x < clip_x_end)
-            {
-colour_t fg = we_color_from_rgb565(cur_pixel);
-we_store_blended_color(row_dst + cur_x, fg, opacity);
-            }
-            cur_x++;
-        }
-    }
-}
-
-/* --------------------------------------------------------------------------
- * IMG_ARGB8565_INDEXQOI Flash 渲染器
- *
- * 与 RGB565 版本的差异：
- *   0x00..0x3F → 静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha）
- *   0xFF → 读 3 字节 [A][H][L]，更新 cur_alpha + RGB565
- *   0xFE → 读 2 字节 [H][L]，alpha 不变
- *   输出时 final_alpha = cur_alpha × opacity / 255
- *
- * V3 行首 op 只会是调色盘 op 或 0xFF 原始全量，两者都不依赖上文，
- * 每行 seek 后即自包含重建完整状态（包括 cur_alpha；调色盘全局有效）。
- * -------------------------------------------------------------------------- */
-#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-
-/**
- * @brief 渲染 ARGB8565_INDEXQOI 格式 Flash 图片到当前 PFB 切片。
- * @param p_lcd 当前 LCD 上下文。
- * @param obj 图片控件实例。
- * @param opacity 图片整体透明度（0~255）。
- */
-static void _flash_render_indexed_qoi_argb8565(we_lcd_t *p_lcd,
-                                               we_flash_img_obj_t *obj,
-                                               uint8_t opacity)
-{
-    /* 每次绘制时读取 14 字节 V3 索引头，省去结构体缓存字段 */
-    uint8_t  inner[14];
-    p_lcd->storage_read_cb(obj->flash_addr + 6U, inner, 14U);
-    uint8_t  head_size = inner[0];
-    uint16_t u16_rows  = ((uint16_t)inner[5] << 8) | inner[6];
-    uint8_t  pal_count = inner[13];
-
-    /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
-     * 0x0D 均不支持）；调色盘条目数上限 64，超出视为损坏流。 */
-    if (head_size != 0x0FU || pal_count > 64U)
-        return;
-
-    int16_t  x0    = obj->base.x;
-    int16_t  y0    = obj->base.y;
-    uint16_t img_w = (uint16_t)obj->base.w;
-    uint16_t img_h = (uint16_t)obj->base.h;
-    int16_t  x1    = x0 + (int16_t)img_w - 1;
-    int16_t  y1    = y0 + (int16_t)img_h - 1;
-
-    /* m16 不可能超过行数，超出视为损坏流 */
-    if (u16_rows > img_h)
-        return;
-
-    if ((x0 > (int16_t)p_lcd->pfb_area.x1) || (x1 < (int16_t)p_lcd->pfb_area.x0) ||
-        (y0 > (int16_t)p_lcd->pfb_y_end)   || (y1 < (int16_t)p_lcd->pfb_y_start))
-    {
-        return;
-    }
-
-    uint16_t ix_start = (x0 < (int16_t)p_lcd->pfb_area.x0) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_area.x0 - x0) : 0U;
-    uint16_t iy_start = (y0 < (int16_t)p_lcd->pfb_y_start) ?
-                        (uint16_t)((int16_t)p_lcd->pfb_y_start - y0) : 0U;
-
-    uint16_t draw_w = img_w - ix_start -
-                      ((x1 > (int16_t)p_lcd->pfb_area.x1) ?
-                       (uint16_t)(x1 - (int16_t)p_lcd->pfb_area.x1) : 0U);
-    uint16_t draw_h = img_h - iy_start -
-                      ((y1 > (int16_t)p_lcd->pfb_y_end) ?
-                       (uint16_t)(y1 - (int16_t)p_lcd->pfb_y_end) : 0U);
-
-    uint16_t clip_x_end  = ix_start + draw_w;
-    uint16_t clip_y_end  = iy_start + draw_h;
-    int16_t  base_dest_x = x0 - (int16_t)p_lcd->pfb_area.x0;
-    int16_t  base_dest_y = y0 - (int16_t)p_lcd->pfb_y_start;
-    uint16_t dst_stride  = p_lcd->pfb_width;
-
-    /* ---- payload 各区偏移（相对 6 字节通用头之后） ---- */
-    uint32_t idx_off = 14U;
-    uint32_t u32_off = idx_off + (uint32_t)u16_rows * 2U;
-    uint32_t pal_off = u32_off + ((uint32_t)(img_h - u16_rows)) * 4U;
-    uint32_t dat_off = pal_off + (uint32_t)pal_count * 3U;
-
-    /* ---- 静态调色盘一次读入栈缓存（≤64 项 × 3 字节 = 192B）：
-     * 命中调色盘 op 时直接查表，避免每次命中都发起一笔外挂读 ---- */
-    uint8_t pal[192];
-    if (pal_count > 0U)
-        p_lcd->storage_read_cb(obj->flash_addr + 6U + pal_off, pal, (uint32_t)pal_count * 3U);
-
-    /* 防御：与 RGB565 版本相同的保守流长上界，拦截损坏索引表 + 停止越界解码。 */
-    uint32_t max_pixels = (uint32_t)img_w * img_h;
-    uint32_t stream_max = (max_pixels << 2) + 16U;
-
-    flash_stream_t stream;
-    flash_stream_init(&stream, p_lcd->storage_read_cb,
-                      obj->flash_addr + 6U + dat_off);
-
-    /* ---- 行循环：逐可见行经行索引空降解码（RUN 不跨行、行自包含） ---- */
-    for (uint16_t cur_y = iy_start; cur_y < clip_y_end; cur_y++)
-    {
-        uint8_t  idx_buf[4];
-        uint32_t row_off;
-
-        if (cur_y < u16_rows)
-        {
-            p_lcd->storage_read_cb(obj->flash_addr + 6U + idx_off + (uint32_t)cur_y * 2U, idx_buf, 2U);
-            row_off = ((uint32_t)idx_buf[0] << 8) | idx_buf[1];
-        }
-        else
-        {
-            p_lcd->storage_read_cb(obj->flash_addr + 6U + u32_off +
-                                   ((uint32_t)(cur_y - u16_rows)) * 4U, idx_buf, 4U);
-            row_off = ((uint32_t)idx_buf[0] << 24) | ((uint32_t)idx_buf[1] << 16) |
-                      ((uint32_t)idx_buf[2] << 8)  | idx_buf[3];
-        }
-        if (row_off >= stream_max)
-            return; /* 损坏索引表 */
-
-flash_stream_seek(&stream, row_off);
-
-        colour_t *row_dst = p_lcd->pfb_gram +
-                            ((base_dest_y + cur_y) * dst_stride) + base_dest_x;
-        uint16_t cur_x = 0U;
-        uint8_t  flag;
-        uint8_t  r = 0, g = 0, b = 0;
-        uint8_t  cur_alpha   = 255U; /* 行首 op 必然重建 alpha，这里只是缺省值 */
-        uint16_t cur_pixel   = 0U;
-        uint8_t  final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-
-        while ((cur_x < clip_x_end) && (stream.cur_pos < stream_max))
-        {
-flag = flash_stream_get(&stream);
-
-            if (flag == 0xFFU)
-            {
-                /* 新像素：alpha + RGB565（3 字节） */
-cur_alpha = flash_stream_get(&stream);
-                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-uint8_t h = flash_stream_get(&stream);
-uint8_t l = flash_stream_get(&stream);
-                cur_pixel = ((uint16_t)h << 8) | l;
-                r = h >> 3;
-                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-                b = l & 0x1FU;
-            }
-            else if (flag == 0xFEU)
-            {
-                /* 新 RGB565，alpha 不变（2 字节） */
-uint8_t h = flash_stream_get(&stream);
-uint8_t l = flash_stream_get(&stream);
+                if (flag == 0xFFU && px_bytes == 3U)
+                    final_alpha = we_div255((uint32_t)flash_stream_get(&s) * opacity);
+                h = flash_stream_get(&s);
+                l = flash_stream_get(&s);
                 cur_pixel = ((uint16_t)h << 8) | l;
                 r = h >> 3;
                 g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
@@ -486,7 +308,7 @@ uint8_t l = flash_stream_get(&stream);
             else if ((flag & 0xC0U) == 0x80U)
             {
                 int8_t  vg = (int8_t)((flag & 0x3FU) - 32U);
-uint8_t nb = flash_stream_get(&stream);
+                uint8_t nb = flash_stream_get(&s);
                 r = (uint8_t)((r + vg - 8 + ((nb >> 4) & 0x0FU)) & 0x1FU);
                 g = (uint8_t)((g + vg)                            & 0x3FU);
                 b = (uint8_t)((b + vg - 8 + (nb & 0x0FU))        & 0x1FU);
@@ -494,46 +316,39 @@ uint8_t nb = flash_stream_get(&stream);
             }
             else if (flag < 0x40U)
             {
-                /* 0x00..0x3F：静态调色盘 op，条目 3 字节 [A][H][L]（含 Alpha） */
-                uint16_t pi;
-                uint8_t h;
-                uint8_t l;
+                /* 0x00..0x3F：静态调色盘 op，查缓存的调色盘（ARGB8565 条目先带 alpha） */
+                const uint8_t *e;
 
                 if (flag >= pal_count)
                     return; /* 超出条目数视为损坏流 */
-                pi = (uint16_t)flag * 3U;
-                cur_alpha = pal[pi];
-                final_alpha = we_div255((uint32_t)cur_alpha * opacity);
-                h = pal[pi + 1U];
-                l = pal[pi + 2U];
-                cur_pixel = ((uint16_t)h << 8) | l;
-                r = h >> 3;
-                g = (uint8_t)(((h & 0x07U) << 3) | (l >> 5));
-                b = l & 0x1FU;
+                e = &st->pal[(uint16_t)flag * px_bytes];
+                if (px_bytes == 3U)
+                    final_alpha = we_div255((uint32_t)(*e++) * opacity);
+                cur_pixel = ((uint16_t)e[0] << 8) | e[1];
+                r = e[0] >> 3;
+                g = (uint8_t)(((e[0] & 0x07U) << 3) | (e[1] >> 5));
+                b = e[1] & 0x1FU;
             }
-            else /* 0xC0..0xFD：RUN（不跨行） */
+            else /* 0xC0..0xFD：RUN（不跨行）：先跳过裁剪左缘以外的部分，再连续填到右缘 */
             {
-                uint8_t  run = (flag & 0x3FU) + 1U;
-colour_t fg  = we_color_from_rgb565(cur_pixel);
+                uint16_t end = (uint16_t)(cur_x + (flag & 0x3FU) + 1U);
 
-                while (run--)
+                if (end > clip_x_end)
+                    end = clip_x_end; /* 行内右缘截断：本行剩余像素不可见，填完即结束本行 */
+                if (end > ix_start)
                 {
-                    if (cur_x >= ix_start && cur_x < clip_x_end)
-                    {
-we_store_blended_color(row_dst + cur_x, fg, final_alpha);
-                    }
-                    cur_x++;
-                    if (cur_x >= clip_x_end)
-                        break; /* 行内右缘截断：本行剩余像素不可见 */
+                    colour_t fg = we_color_from_rgb565(cur_pixel);
+                    uint16_t x  = (cur_x > ix_start) ? cur_x : ix_start;
+
+                    for (; x < end; x++)
+                        we_store_blended_color(row_dst + x, fg, final_alpha);
                 }
+                cur_x = end;
                 continue;
             }
 
-            if (cur_x >= ix_start && cur_x < clip_x_end)
-            {
-colour_t fg = we_color_from_rgb565(cur_pixel);
-we_store_blended_color(row_dst + cur_x, fg, final_alpha);
-            }
+            if (cur_x >= ix_start)
+                we_store_blended_color(row_dst + cur_x, we_color_from_rgb565(cur_pixel), final_alpha);
             cur_x++;
         }
     }
@@ -547,41 +362,25 @@ we_store_blended_color(row_dst + cur_x, fg, final_alpha);
 /**
  * @brief 图片控件绘制回调：按资源格式选择对应 Flash 渲染路径。
  * @param ptr 回调透传的 we_flash_img_obj_t 指针。
+ * @note 格式在 init 时校验过，只会是已支持的格式。
  */
 static void _flash_img_draw_cb(void *ptr)
 {
     we_flash_img_obj_t *obj = (we_flash_img_obj_t *)ptr;
-
-    if (obj == NULL || obj->opacity == 0 || obj->base.lcd == NULL ||
-        obj->base.lcd->storage_read_cb == NULL)
-    {
-        return;
-    }
-
-    /* 容器透明度级联：入口算一次有效透明度，避免白读 flash */
+    /* 容器透明度级联：入口算一次有效透明度，<= 5 时什么也画不出，连外挂读取也省掉 */
     uint8_t eff_op = we_opa_apply(obj->base.lcd, obj->opacity);
-    if (eff_op == 0U)
-        return;
 
-    switch (obj->fmt)
-    {
-    case IMG_RGB565:
-_flash_render_rgb565(obj->base.lcd, obj, eff_op);
-        break;
+    if (eff_op <= 5U)
+        return;
 
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-    case IMG_RGB565_INDEXQOI:
-_flash_render_indexed_qoi_rgb565(obj->base.lcd, obj, eff_op);
-        break;
-
-    case IMG_ARGB8565_INDEXQOI:
-_flash_render_indexed_qoi_argb8565(obj->base.lcd, obj, eff_op);
-        break;
-#endif
-
-    default:
-        break;
+    if (obj->fmt != IMG_RGB565)
+    {
+        _flash_render_indexed_qoi(obj->base.lcd, obj, eff_op, (obj->fmt == IMG_ARGB8565_INDEXQOI) ? 3U : 2U);
+        return;
     }
+#endif
+    _flash_render_rgb565(obj->base.lcd, obj, eff_op);
 }
 
 /* --------------------------------------------------------------------------
@@ -591,12 +390,14 @@ _flash_render_indexed_qoi_argb8565(obj->base.lcd, obj, eff_op);
 /**
  * @brief 初始化外部 Flash 图片控件并加入 LCD 对象链表。
  * @param obj 待初始化的图片控件实例。
- * @param lcd 当前 LCD 上下文，需提供 storage_read_cb。
+ * @param lcd 当前 LCD 上下文，端口需提供 storage_read。
  * @param x 图片左上角 X 坐标。
  * @param y 图片左上角 Y 坐标。
  * @param flash_addr 图片资源头在外部 Flash 的地址。
  * @param opacity 图片整体透明度（0~255）。
  * @return 1 表示初始化成功，0 表示参数或资源头不合法。
+ * @note 索引 QOI 的 14 字节索引头与资源头一次读出并在此校验（只支持 V3 流），
+ *       绘制时不再重读。
  */
 uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
                                int16_t x, int16_t y,
@@ -604,43 +405,69 @@ uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
 {
     static const we_class_t _flash_img_class = {.draw_cb = _flash_img_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
-    uint8_t hdr[6]; /* 资源头：[res_type][format][w_H][w_L][h_H][h_L] */
+    uint8_t  hdr[6U + 14U]; /* 资源头 [res_type][format][w_H][w_L][h_H][h_L] + 索引 QOI 索引头 */
+    uint16_t img_w;
+    uint16_t img_h;
 
-    if (obj == NULL || lcd == NULL || lcd->storage_read_cb == NULL)
+    if (obj == NULL || lcd == NULL || we_gui_storage(lcd) == NULL)
     {
         return 0U;
     }
 
-    lcd->storage_read_cb(flash_addr, hdr, sizeof(hdr));
+#if (WE_CFG_ENABLE_INDEXED_QOI == 1) && (WE_FLASH_IMG_CACHE == 1)
+    /* 外挂内容可能已被改写：初始化任何外挂图时都清空读取缓存 */
+    _flash_qoi_state_reset(&s_qoi_state);
+#endif
+
+    we_gui_storage(lcd)(flash_addr, hdr, sizeof(hdr));
 
     if (hdr[0] != (uint8_t)FILE_TYPE_IMG)
     {
         return 0U;
     }
 
-    obj->fmt = (imgarry_type_t)hdr[1];
-
     /* 仅接受已支持的格式 */
-    if (obj->fmt != IMG_RGB565
+    if (hdr[1] != (uint8_t)IMG_RGB565
 #if (WE_CFG_ENABLE_INDEXED_QOI == 1)
-        && obj->fmt != IMG_RGB565_INDEXQOI
-        && obj->fmt != IMG_ARGB8565_INDEXQOI
+        && hdr[1] != (uint8_t)IMG_RGB565_INDEXQOI
+        && hdr[1] != (uint8_t)IMG_ARGB8565_INDEXQOI
 #endif
        )
     {
         return 0U;
     }
 
-    /* 防御：宽或高为 0 视为损坏资源/错误 flash 地址，拒绝初始化，
-     * 否则 INDEX-QOI 解码路径的 % img_w、/ img_w 会触发除零硬 fault。 */
-    uint16_t img_w = (uint16_t)(((uint16_t)hdr[2] << 8) | hdr[3]);
-    uint16_t img_h = (uint16_t)(((uint16_t)hdr[4] << 8) | hdr[5]);
+    /* 宽或高为 0 视为损坏资源 / 错误的 flash 地址 */
+    img_w = (uint16_t)(((uint16_t)hdr[2] << 8) | hdr[3]);
+    img_h = (uint16_t)(((uint16_t)hdr[4] << 8) | hdr[5]);
     if (img_w == 0U || img_h == 0U)
     {
         return 0U;
     }
 
+    obj->m16       = 0U;
+    obj->pal_count = 0U;
+#if (WE_CFG_ENABLE_INDEXED_QOI == 1)
+    if (hdr[1] != (uint8_t)IMG_RGB565)
+    {
+        const uint8_t *inner = &hdr[6];
+        uint16_t m16 = (uint16_t)(((uint16_t)inner[5] << 8) | inner[6]);
+
+        /* V3 索引头固定 14 字节，byte0=0x0F 兼作版本标识（V2 的 0x0E、V1 的
+         * 0x0D 均不支持）；调色盘条目数上限 64，m16 不超过行数，否则视为损坏流。
+         * 像素数上限保证解码的流长上界（4 字节/像素）不溢出 32 位 */
+        if ((inner[0] != 0x0FU) || (inner[13] > 64U) || (m16 > img_h) ||
+            ((uint32_t)img_w * img_h > ((0xFFFFFFFFUL - 16UL) >> 2)))
+        {
+            return 0U;
+        }
+        obj->m16       = m16;
+        obj->pal_count = inner[13];
+    }
+#endif
+
     /* 填充 we_obj_t 基类字段；w/h 复用存储图片宽高 */
+    obj->fmt           = hdr[1];
     obj->flash_addr    = flash_addr;
     obj->opacity       = opacity;
     obj->base.lcd      = lcd;
@@ -656,9 +483,7 @@ uint8_t we_flash_img_obj_init(we_flash_img_obj_t *obj, we_lcd_t *lcd,
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
-    {
-we_obj_invalidate((we_obj_t *)obj);
-    }
+        we_obj_invalidate((we_obj_t *)obj);
 
     return 1U;
 }
@@ -670,21 +495,8 @@ we_obj_invalidate((we_obj_t *)obj);
  */
 void we_flash_img_obj_set_opacity(we_flash_img_obj_t *obj, uint8_t opacity)
 {
-    if (obj == NULL)
+    if (obj == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
-we_obj_invalidate((we_obj_t *)obj);
-}
-
-/**
- * @brief 设置图片控件位置（封装 we_obj_set_pos）。
- * @param obj 图片控件实例。
- * @param x 新的左上角 X 坐标。
- * @param y 新的左上角 Y 坐标。
- */
-void we_flash_img_obj_set_pos(we_flash_img_obj_t *obj, int16_t x, int16_t y)
-{
-    if (obj == NULL)
-        return;
-we_obj_set_pos((we_obj_t *)obj, x, y);
+    we_obj_invalidate((we_obj_t *)obj);
 }

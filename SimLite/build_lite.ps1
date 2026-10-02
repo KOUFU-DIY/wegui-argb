@@ -4,7 +4,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File SimLite/build_lite.ps1            # 正式版（demo 由 main_lite.c 的 DEMO_ID 宏决定）
 #   powershell ... -File SimLite/build_lite.ps1 -Demo 25                                  # 不改源码临时覆盖 DEMO_ID（-DDEMO_ID=25）
 #   powershell ... -File SimLite/build_lite.ps1 -Run                                      # 构建后运行
-#   powershell ... -File SimLite/build_lite.ps1 -Dev [-Run -Demo 25]                      # 开发者版 wegui_lite_dev（运行时选 demo / --shot / --list）
+#   powershell ... -File SimLite/build_lite.ps1 -Dev [-Run -Demo 25]                      # 开发者版 wegui_lite_dev（需本地 SimLite/debug/，不随仓库发布）
 #   powershell ... -File SimLite/build_lite.ps1 -Compiler gcc                             # 强制 gcc
 #
 # 编译器：
@@ -27,6 +27,9 @@ New-Item -ItemType Directory -Force -Path $Build | Out-Null
 # 开发版：换用 debug/ 下的入口与注册表（运行时选 demo + --shot 抓帧自检）
 $sources = @()
 if ($Dev) {
+    if (-not (Test-Path "$Lite\debug\debug_main.c")) {
+        throw "开发者版源码 SimLite/debug/ 仅本地维护、不随仓库发布；请去掉 -Dev 构建正式版"
+    }
     $sources += Get-ChildItem "$Lite\*.c" | Where-Object Name -ne "main_lite.c"
     $sources += Get-ChildItem "$Lite\debug\*.c"
 } else {

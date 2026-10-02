@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_TOGGLE_H
 #define __WE_WIDGET_TOGGLE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
  * 置 0 单独裁剪开关的按键回调与可聚焦性，其余控件不受影响。 */
@@ -32,7 +32,7 @@
 /* --------------------------------------------------------------------------
  * 动画总步数（仅 WE_TOGGLE_USE_ANIM == 1 时有效）
  *
- * 中央动画引擎（we_anim_t 节点，每周期由 we_gui_task_handler 步进）
+ * 中央动画引擎（we_anim_t 节点，每帧由 we_gui_run 步进）
  * 每累计 WE_TOGGLE_ANIM_STEP_MS 毫秒推进 1 步，
  * 共推进 WE_TOGGLE_ANIM_STEPS 步后动画结束。
  * 以默认 16ms 步进为例：
@@ -133,7 +133,7 @@ typedef struct
 #if WE_TOGGLE_USE_ANIM
     uint8_t anim_step;   /* 当前动画步数：0=完全 OFF，WE_TOGGLE_ANIM_STEPS=完全 ON */
     uint16_t anim_acc_ms;/* 累计的未消费动画时间 */
-    we_anim_t anim;      /* 中央动画引擎节点（不占 GUI task 槽） */
+    we_anim_t anim;      /* 中央动画引擎节点（删除控件时由内核摘链） */
 #endif
 } we_toggle_obj_t;
 
@@ -189,7 +189,7 @@ void we_toggle_set_changed_cb(we_toggle_obj_t *obj, we_toggle_changed_cb_t cb);
  * @param obj 开关控件对象指针。
  * @return 无。
  */
-void we_toggle_obj_delete(we_toggle_obj_t *obj);
+static inline void we_toggle_obj_delete(we_toggle_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 /**
  * @brief 设置控件透明度并按需重绘。

@@ -4,7 +4,7 @@
 #include "Lcd_Port/stm32f030_lcd_dma_4spi_port.h"
 #endif
 
-extern volatile uint8_t  g_sys_tick;
+extern volatile uint32_t g_sys_ms;
 extern volatile uint32_t g_sys_delay;
 
 void NMI_Handler(void)
@@ -28,10 +28,7 @@ void PendSV_Handler(void)
 
 void SysTick_Handler(void)
 {
-    if (g_sys_tick < 255U)
-    {
-        g_sys_tick++;
-    }
+    g_sys_ms++; /* 系统毫秒计数，自然回绕 */
     if (g_sys_delay > 0U)
     {
         g_sys_delay--;

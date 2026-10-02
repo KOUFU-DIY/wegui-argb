@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_SEGDISP_H
 #define __WE_WIDGET_SEGDISP_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 段码数码管控件（segdisp）
@@ -54,7 +54,7 @@
  * 发生变化的单元格才标脏（时钟 "12:34"→"12:35" 只重绘末位）。
  *
  * 全程整数运算，零 malloc、零浮点；渲染只用 we_fill_rect（自带 PFB
- * 裁剪与容器透明度级联）。默认装饰性（不消费输入，事件穿透给背后控件）。
+ * 裁剪与容器透明度级联）。默认装饰性（event_cb 为 NULL，触摸落到背后的控件）。
  *
  * 当前限制：
  *   - 斜切边缘无抗锯齿（45° 硬边）；
@@ -262,13 +262,16 @@ void we_segdisp_set_opacity(we_segdisp_obj_t *obj, uint8_t opacity);
  * @param y 新的 Y 坐标。
  * @return 无。
  */
-void we_segdisp_set_pos(we_segdisp_obj_t *obj, int16_t x, int16_t y);
+static inline void we_segdisp_set_pos(we_segdisp_obj_t *obj, int16_t x, int16_t y)
+{
+    we_obj_set_pos((we_obj_t *)obj, x, y);
+}
 
 /**
- * @brief 删除控件：从对象链表摘除并清空基类状态（无动画节点，无需摘链）。
+ * @brief 删除控件：从对象链表摘除并清空基类状态。
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_segdisp_obj_delete(we_segdisp_obj_t *obj);
+static inline void we_segdisp_obj_delete(we_segdisp_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif /* __WE_WIDGET_SEGDISP_H */

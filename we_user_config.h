@@ -12,32 +12,33 @@
 #define DEEP_GRAY8  (3)  /* 8位灰度 */
 #define DEEP_RGB565 (4) /* RGB565 */
 #define DEEP_RGB888 (5) /* RGB888 */
-#define LCD_DEEP (DEEP_GRAY8)
+#define LCD_DEEP (DEEP_RGB565)
 
 /* 单色样式（MONO 优化） */
-#define WE_CFG_MONO_STYLE (1)
+#define WE_CFG_MONO_STYLE (0)
 
 /* -------------------------- GUI 输出屏幕宽高 -------------------------- */
-#define SCREEN_WIDTH  (128)
-#define SCREEN_HEIGHT (64)
+#define SCREEN_WIDTH  (240)
+#define SCREEN_HEIGHT (240)
 
 /* -------------------------- GUI 显存 -------------------------- */
-/* DMA 双 BUF 模式开关 */
-#define GRAM_DMA_BUFF_EN      (0)
+/* DMA 双缓冲开关：1 = 端口声明 flush 为异步（we_port_t.flush_async = 1）时，
+ * 内核把显存分成两半，一半交给 DMA 发送的同时渲染另一半；同步端口不受影响 */
+#define GRAM_DMA_BUFF_EN      (1)
 
 /* GUI显存（像素数）
- * 最小设置 1 行；DMA 模式建议至少 2 行；
+ * 最小设置 1 行；DMA 双缓冲至少 2 行（两半各 1 行）；
  * GRAY8 下行数须为 8 的倍数（页对齐），默认 8 行。 */
-#define USER_GRAM_NUM (SCREEN_WIDTH * 8)
+#define USER_GRAM_NUM (SCREEN_WIDTH * 2)
 
 /* -------------------------- GUI 显存 -------------------------- */
 /* 输出像素对齐 */
-//#define WE_LCD_FLUSH_ALIGN_X (1) //普通TFT设置参考
-//#define WE_LCD_FLUSH_ALIGN_Y (1)
+#define WE_LCD_FLUSH_ALIGN_X (1) //普通TFT设置参考
+#define WE_LCD_FLUSH_ALIGN_Y (1)
 //#define WE_LCD_FLUSH_ALIGN_X (2) //QSPI屏幕设置参考
 //#define WE_LCD_FLUSH_ALIGN_Y (2)
-#define WE_LCD_FLUSH_ALIGN_X (1) //普通OLED设置参考
-#define WE_LCD_FLUSH_ALIGN_Y (8)
+//#define WE_LCD_FLUSH_ALIGN_X (1) //普通OLED设置参考
+//#define WE_LCD_FLUSH_ALIGN_Y (8)
 //#define WE_LCD_FLUSH_ALIGN_X (2) //普通GRAY设置参考
 //#define WE_LCD_FLUSH_ALIGN_Y (2)
 
@@ -48,7 +49,7 @@
  * 2: 智能合并多脏矩形 */
 #define WE_CFG_DIRTY_STRATEGY (2)
 
-/* 多脏矩形模式下的数量上限，推荐 4~16 */
+/* 多脏矩形模式下的脏区数量上限，推荐 4~16 */
 #define WE_CFG_DIRTY_MAX_NUM (10)
 
 /* 脏矩形调试开关
@@ -80,15 +81,16 @@
  * 断言后的静默判空守卫始终保留，发布档行为不受影响 */
 // #define WE_ASSERT(expr) do { if (!(expr)) { for (;;); } } while (0)
 
-/* --------------------------- GUI 定时器配置 --------------------------- */
-/* 用户定时器已改为调用方持有的侵入式节点（we_gui_timer_t）：无槽位上限 */
+/* -------------------------- 调度节拍 -------------------------- */
+/* 帧节奏（毫秒，默认 0 = 每次 we_gui_run 有脏区就渲染）：
+ * 设 N 后两次渲染至少间隔 N 毫秒，主循环跑得比帧率快时省 CPU 与总线 */
+// #define WE_CFG_REFR_PERIOD_MS (0)
+
+/* 触摸采样间隔（毫秒，默认 0 = 每次 we_gui_run 都采样）：
+ * 触摸芯片走 I2C 等慢总线时可设 10~20 */
+// #define WE_CFG_INDEV_PERIOD_MS (0)
 
 /* -------------------------- 输入接口 -------------------------- */
-/* 输入接口(按键或触摸)开关
- * 0: 关闭，节省空间
- * 1: 打开 */
-#define WE_CFG_ENABLE_INPUT_PORT_BIND (1)
-
 /* 滑动手势识别阈值（像素）
  * 位移超过此值才判定为 swipe，而不是普通点击。 */
 #define WE_CFG_SWIPE_THRESHOLD (30)
@@ -101,16 +103,11 @@
  * 剔除——控件全部平铺、不在滚动容器里放交互控件的产品可省 ROM 与栈 */
 // #define WE_CFG_ENABLE_NESTED_INPUT (1)
 
-/* 顶层链 + 模态裁剪（默认 1）：置 0 后 attach_to_top 退化为 bring_to_front、
+/* 顶层链 + 模态裁剪（默认 1）：置 0 后 attach_to_top 退化为挂普通层链尾、
  * modal 三函数退化为空 stub——不用 msgbox/toast/dropdown 弹层语义的产品
  * 可整段裁掉（弹层控件仍可编译，只是失去保证置顶与吞键语义） */
 // #define WE_CFG_ENABLE_TOP_LAYER (1)
 
-/* ------------------------ 外部储存接口 ------------------------ */
-/* 外部储存接口开关
- * 0: 关闭，节省空间
- * 1: 打开 */
-#define WE_CFG_ENABLE_STORAGE_PORT_BIND (1)
 
 /* ----------------------- 聚焦与按键导航 ----------------------- */
 /* 全局聚焦 + 按键导航总开关
@@ -224,7 +221,7 @@
 
 /* ----------------------- label_ex 控件 ----------------------- */
 /* 单次绘制时栈缓存的字形数上限
- * 单字形约 16 字节栈；UTF-8 多字节字符算 1 字形；超出部分不会渲染。
+ * 单字形约 16 字节栈；只计首行有墨字形（空格不计，UTF-8 多字节字符算 1 字形）；超出部分不会渲染。
  * 取值建议：
  *   16 → 短数字/状态标签         (~256B 栈)
  *   32 → 默认，一般标题/计数器   (~512B 栈)
@@ -237,10 +234,23 @@
  * 块越大，读次数越少；块越小，RAM 占用越低。 */
 // #define WE_FLASH_IMG_CHUNK (128U)
 
+/* 索引 QOI 行索引预取窗口（字节）：一笔读取覆盖后续多行的索引项 */
+// #define WE_FLASH_IMG_IDX_WIN (64U)
+
+/* 索引 QOI 读取缓存
+ * 1: 头/调色盘/读取窗口放静态 RAM（约 400 字节），跨切片跨帧复用，读取次数最少
+ * 0: 不占静态 RAM，读取状态只在单次绘制内有效，RAM 紧张的板子用 */
+// #define WE_FLASH_IMG_CACHE (1)
+
 /* ---------------------- 外挂 flash 字体控件 ---------------------- */
 /* 单字形 scratch 缓冲上限（字节）
  * 默认按“整屏宽度、4bpp 单行”估算。 */
 // #define WE_FLASH_FONT_SCRATCH_MAX ((((SCREEN_WIDTH) * 4U) + 7U) >> 3U)
+
+/* 字形描述缓存条目数（0 = 关闭；打开时须为 2 的幂）
+ * 每条 20 字节 RAM，放在 face 里、同一 face 的文本对象共享；
+ * 命中时不读外挂存储，外挂读取慢而 RAM 有余量时打开（16~32 条）。 */
+// #define WE_FLASH_FONT_DESC_CACHE (0)
 
 /* ------------------------- msgbox 控件 ------------------------- */
 /* 消息框淡入/淡出动画总时长（毫秒） */
@@ -646,7 +656,7 @@
  *   2 像素对齐 —— 统一取两者并集（对彼此无害，代价仅是脏矩形略微扩边）。
  * - RGB565 / RGB888（TFT）：
  *   无对齐要求；DMA 端口可用双缓冲。
- * 对齐语义：脏矩形入库时（Core/dirty_driver.c 的 we_dirty_invalidate）把
+ * 对齐语义：脏矩形入库时（Core/we_dirty.c 的 we_dirty_invalidate）把
  * 矩形扩张到对齐边界——x0/y0 向下取整到对齐倍数，x1/y1（包含端点）向上
  * 取整到对齐倍数-1；扩出的边缘随本矩形整块重绘，set_addr 收到的窗口
  * 天然对齐。 */

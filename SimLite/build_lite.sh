@@ -3,7 +3,7 @@
 #   macOS: 系统 clang + Cocoa（xcode command line tools 即可）
 #   Linux: cc + libx11-dev
 # 用法: sh SimLite/build_lite.sh          正式版 wegui_lite（demo 由 main_lite.c 的 DEMO_ID 宏决定）
-#       sh SimLite/build_lite.sh --dev    开发者版 wegui_lite_dev（运行时选 demo / --shot / --list）
+#       sh SimLite/build_lite.sh --dev    开发者版 wegui_lite_dev（需本地 SimLite/debug/，不随仓库发布）
 set -e
 LITE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(dirname "$LITE")"
@@ -16,6 +16,10 @@ for a in "$@"; do
 done
 
 # 正式版：SimLite 顶层 .c；开发版：换用 debug/ 下的入口与注册表
+if [ "$DEV" = "1" ] && [ ! -f "$LITE/debug/debug_main.c" ]; then
+  echo "开发者版源码 SimLite/debug/ 仅本地维护、不随仓库发布；请去掉 --dev 构建正式版" >&2
+  exit 1
+fi
 if [ "$DEV" = "1" ]; then
   LITE_SRCS="$(find "$LITE" -maxdepth 1 -name '*.c' ! -name 'main_lite.c')
 $(find "$LITE/debug" -maxdepth 1 -name '*.c')"

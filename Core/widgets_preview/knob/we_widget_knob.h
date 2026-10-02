@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_KNOB_H
 #define __WE_WIDGET_KNOB_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 弧形旋钮滑块控件（knob）—— preview 孵化区实验控件

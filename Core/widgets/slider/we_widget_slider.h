@@ -1,7 +1,7 @@
 #ifndef WE_WIDGET_SLIDER_H
 #define WE_WIDGET_SLIDER_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -89,7 +89,7 @@ void we_slider_obj_init(we_slider_obj_t *obj, we_lcd_t *lcd,
  * @brief 删除滑条控件对象并从对象链表移除。
  * @param obj 滑条对象指针。
  */
-void we_slider_obj_delete(we_slider_obj_t *obj);
+static inline void we_slider_obj_delete(we_slider_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 /**
  * @brief 设置滑条当前值。

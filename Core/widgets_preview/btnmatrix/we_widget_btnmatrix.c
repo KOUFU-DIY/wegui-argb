@@ -1,5 +1,18 @@
 #include "we_widget_btnmatrix.h"
-#include "we_render.h"
+#include "wegui.h"
+
+/* 默认调色盘宏组：单色样式（WE_CFG_MONO_STYLE=1）切白边黑底高对比盘——
+ * 键面黑（绘制处补 1px 白描边）、按压反白（键名挖空为黑）、文字白；
+ * 彩色档保持原深蓝盘。 */
+#if (WE_CFG_MONO_STYLE == 1)
+#define _BM_DEF_BG       RGB888TODEV(0, 0, 0)
+#define _BM_DEF_BG_PRESS RGB888TODEV(255, 255, 255)
+#define _BM_DEF_TEXT     RGB888TODEV(255, 255, 255)
+#else
+#define _BM_DEF_BG       RGB888TODEV(58, 66, 82)
+#define _BM_DEF_BG_PRESS RGB888TODEV(64, 152, 231)
+#define _BM_DEF_TEXT     RGB888TODEV(239, 243, 250)
+#endif
 
 /* --------------------------------------------------------------------------
  * 内部辅助
@@ -137,6 +150,10 @@ static void _btnmatrix_draw_cb(void *ptr)
     we_lcd_t *lcd = obj->base.lcd;
     int32_t total = (int32_t)obj->rows * (int32_t)obj->cols;
     int32_t idx;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _bm_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t _bm_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj->opacity == 0U || obj->labels == NULL)
         return;
@@ -168,19 +185,33 @@ static void _btnmatrix_draw_cb(void *ptr)
             draw_r = (uint16_t)(cw / 2);
         if (draw_r > (uint16_t)(ch / 2))
             draw_r = (uint16_t)(ch / 2);
+#if (WE_CFG_MONO_STYLE == 1)
+        /* 单色样式：键面统一补 1px 白描边（黑键面与黑背景否则不可辨），
+         * 按压格 bg 为反白色，描边与填充连成实心白块 */
+        we_draw_round_rect_outline_fill(lcd, cx, cy, (uint16_t)cw, (uint16_t)ch,
+                                        draw_r, _bm_mono_fg, bg, obj->opacity);
+#else
         we_draw_round_rect_analytic_fill(lcd, cx, cy, (uint16_t)cw, (uint16_t)ch,
                                          draw_r, bg, obj->opacity);
+#endif
 
         /* 2. 键名文字（水平按测宽、垂直按有效像素区 bbox 居中） */
         label = obj->labels[idx];
         if (obj->font != NULL)
         {
+#if (WE_CFG_MONO_STYLE == 1)
+            /* 反白格挖空字：按压键名用黑字 */
+            colour_t tc = (obj->pressed && idx == (int32_t)obj->press_idx)
+                              ? _bm_mono_bg
+                              : obj->text_color;
+#else
+            colour_t tc = obj->text_color;
+#endif
             txt_w = we_get_text_width(obj->font, label);
             we_get_text_bbox(obj->font, label, &y_top, &y_bot);
             txt_x = (int16_t)(cx + cw / 2 - (int16_t)(txt_w / 2U));
             txt_y = (int16_t)(cy + ch / 2 - (y_top + y_bot) / 2);
-            we_draw_string(lcd, txt_x, txt_y, obj->font, label,
-                           obj->text_color, obj->opacity);
+            we_draw_string(lcd, txt_x, txt_y, obj->font, label, tc, obj->opacity);
         }
     }
 }
@@ -303,9 +334,9 @@ void we_btnmatrix_obj_init(we_btnmatrix_obj_t *obj, we_lcd_t *lcd,
     obj->rows = rows;
     obj->cols = cols;
 
-    obj->bg_color = RGB888TODEV(58, 66, 82);
-    obj->bg_press_color = RGB888TODEV(64, 152, 231);
-    obj->text_color = RGB888TODEV(239, 243, 250);
+    obj->bg_color = _BM_DEF_BG;
+    obj->bg_press_color = _BM_DEF_BG_PRESS;
+    obj->text_color = _BM_DEF_TEXT;
     if (font == NULL)
         return; /* 字体必传 */
     obj->font = font;

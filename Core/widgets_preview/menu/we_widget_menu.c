@@ -7,7 +7,7 @@ static const we_scroll_cfg_t _menu_scroll_cfg = {
     WE_MENU_INERTIA_DEN,      WE_MENU_REBOUND_PULL_DIV, WE_MENU_REBOUND_MAX_STEP,
     128,
 };
-#include "we_render.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------

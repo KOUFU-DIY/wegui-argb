@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_HOLD_BTN_H
 #define __WE_WIDGET_HOLD_BTN_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"

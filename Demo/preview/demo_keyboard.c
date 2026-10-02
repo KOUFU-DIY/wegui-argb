@@ -15,6 +15,8 @@
 #include "widgets_preview/textarea/we_widget_textarea.h"
 #include <string.h>
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /* 回显缓冲上限（含结尾 0），写满后 textarea 忽略后续追加 */
 #define KB_ECHO_BUF_MAX 64U
 
@@ -86,3 +88,74 @@ void we_keyboard_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &kb_fps_label, &kb_fps_timer,
                        &kb_last_frames, kb_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/* 小屏回显缓冲（label 直显，ASCII 单字节；满则整体左移丢最旧字符） */
+#define KB_ECHO_BUF_MAX 15U
+
+static we_label_obj_t    kb_echo_label;
+static we_keyboard_obj_t kb_pad;
+
+static char kb_echo_buf[KB_ECHO_BUF_MAX + 1U];
+
+/**
+ * @brief 键值回调：拼入回显缓冲（"\b" 退格，满则左移），刷新顶部 label
+ * @param kb 传入：触发回调的键盘对象指针
+ * @param key 传入：键面字符串（"\b"=退格，" "=空格）
+ * @return 无
+ */
+static void _kb_demo_key_cb(void *kb, const char *key)
+{
+    size_t len = strlen(kb_echo_buf);
+
+    (void)kb;
+    if (key[0] == '\b')
+    {
+        if (len > 0U)
+            kb_echo_buf[len - 1U] = '\0';
+    }
+    else
+    {
+        if (len >= KB_ECHO_BUF_MAX)
+        {
+            memmove(kb_echo_buf, kb_echo_buf + 1, len); /* 含结尾 0 一起前移 */
+            len--;
+        }
+        kb_echo_buf[len] = key[0];
+        kb_echo_buf[len + 1U] = '\0';
+    }
+    we_label_set_text(&kb_echo_label, kb_echo_buf[0] != '\0' ? kb_echo_buf : "_");
+}
+
+/**
+ * @brief 初始化 keyboard preview demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_keyboard_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(kb_echo_buf, 0, sizeof(kb_echo_buf));
+
+    /* 顶部回显 label（textarea 高度放不下，小屏用 label 直显键值流） */
+    we_label_obj_init(&kb_echo_label, lcd, 2, 0,
+                      "_", we_font_consolas_18, RGB888TODEV(255, 255, 255), 255);
+
+    /* 软键盘占满其余区域：4 行 x 20 份网格 */
+    we_keyboard_obj_init(&kb_pad, lcd, 0, 13, 128, 51, we_font_consolas_18);
+    we_keyboard_set_key_cb(&kb_pad, _kb_demo_key_cb);
+}
+
+/**
+ * @brief keyboard preview demo 周期更新（交互全部事件驱动）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_keyboard_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

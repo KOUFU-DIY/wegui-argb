@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_TABVIEW_H
 #define __WE_WIDGET_TABVIEW_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------

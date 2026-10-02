@@ -6,7 +6,17 @@
 static const we_scroll_cfg_t _table_scroll_cfg = {
     WE_TABLE_DRAG_THRESHOLD, 0, 1, 1, 1, 1, 128,
 };
-#include "we_render.h"
+#include "wegui.h"
+
+/* 单色样式：低透明网格/分隔线经阈值二值化后消失，一律全不透明绘制；
+ * 彩色档保持低透明淡线。 */
+#if (WE_CFG_MONO_STYLE == 1)
+#define _TB_GRID_OPA(obj) ((obj)->opacity)
+#define _TB_SEP_OPA(obj)  ((obj)->opacity)
+#else
+#define _TB_GRID_OPA(obj) we_opa_scale(WE_TABLE_GRID_OPA, (obj)->opacity)
+#define _TB_SEP_OPA(obj)  we_opa_scale(120U, (obj)->opacity)
+#endif
 
 /* --------------------------------------------------------------------------
  * table —— 表头固定 + 数据行滚动的简易表格（preview 孵化区）
@@ -175,10 +185,18 @@ static void _table_draw_scrollbar(we_table_obj_t *obj)
 
     thumb_y = (int16_t)(track_y0 + (data_h - thumb_h) * obj->scroll_px / max_scroll);
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：半透明滑块经二值化后消失，直接全不透明绘制 */
+    we_draw_round_rect_analytic_fill(obj->base.lcd, track_x, thumb_y,
+                                     (uint16_t)WE_TABLE_SB_WIDTH, (uint16_t)thumb_h,
+                                     (uint16_t)(WE_TABLE_SB_WIDTH / 2), obj->sb_color,
+                                     obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(obj->base.lcd, track_x, thumb_y,
                                      (uint16_t)WE_TABLE_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_TABLE_SB_WIDTH / 2), obj->sb_color,
                                      we_opa_scale(WE_TABLE_SB_OPA, obj->opacity));
+#endif
 }
 
 /* --------------------------------------------------------------------------
@@ -271,7 +289,7 @@ static void _table_draw_cb(void *ptr)
                 {
                     we_fill_rect(lcd, x0, (int16_t)(iy + rh - 1),
                                  (uint16_t)obj->base.w, 1U, obj->grid_color,
-                                 we_opa_scale(WE_TABLE_GRID_OPA, obj->opacity));
+                                 _TB_GRID_OPA(obj));
                 }
             }
         }
@@ -301,10 +319,10 @@ static void _table_draw_cb(void *ptr)
     for (c = 1U; c < obj->col_cnt; c++)
     {
         we_fill_rect(lcd, (int16_t)(x0 + obj->col_edge[c]), y0, 1U, (uint16_t)obj->base.h,
-                     obj->grid_color, we_opa_scale(WE_TABLE_GRID_OPA, obj->opacity));
+                     obj->grid_color, _TB_GRID_OPA(obj));
     }
     we_fill_rect(lcd, x0, (int16_t)(y0 + hdr_h - 1), (uint16_t)obj->base.w, 1U,
-                 obj->grid_color, we_opa_scale(120U, obj->opacity));
+                 obj->grid_color, _TB_SEP_OPA(obj));
 
     /* 5. 内容超高时叠加右缘常显滚动条 */
     _table_draw_scrollbar(obj);
@@ -477,12 +495,22 @@ void we_table_obj_init(we_table_obj_t *obj, we_lcd_t *lcd,
         obj->col_weight[i] = 1U; /* 默认全列等分 */
     _table_recalc_edges(obj);
 
+    /* 默认调色盘：单色样式切白边黑底盘（网格/分隔线全不透明在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->head_bg_color = RGB888TODEV(0, 0, 0);
+    obj->head_text_color = RGB888TODEV(255, 255, 255);
+    obj->cell_text_color = RGB888TODEV(255, 255, 255);
+    obj->grid_color = RGB888TODEV(255, 255, 255);
+    obj->zebra_color = RGB888TODEV(0, 0, 0); /* 单色无灰阶：斑马纹退化为无效果 */
+    obj->sb_color = RGB888TODEV(255, 255, 255);
+#else
     obj->head_bg_color = RGB888TODEV(48, 62, 86);
     obj->head_text_color = RGB888TODEV(236, 241, 248);
     obj->cell_text_color = RGB888TODEV(206, 214, 228);
     obj->grid_color = RGB888TODEV(220, 228, 242);
     obj->zebra_color = RGB888TODEV(30, 38, 52);
     obj->sb_color = RGB888TODEV(200, 210, 226);
+#endif
     obj->opacity = 255U;
 
     obj->scroll_px = 0;

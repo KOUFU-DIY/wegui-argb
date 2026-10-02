@@ -2,9 +2,9 @@
 #include "stm32f030_we_input_port.h"
 #include "simple_widget_demos.h"
 #include "preview_demos.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
-volatile uint8_t  g_sys_tick;
+volatile uint32_t g_sys_ms;
 volatile uint32_t g_sys_delay;
 
 void delay_ms(uint32_t ms)
@@ -17,7 +17,6 @@ void delay_ms(uint32_t ms)
 
 static void system_init(void)
 {
-    g_sys_tick = 0;
 		FLASH_PrefetchBufferCmd(ENABLE);
     SystemCoreClockUpdate();
     SysTick_Config(SystemCoreClock / 1000U);
@@ -26,22 +25,30 @@ static void system_init(void)
 static colour_t s_gram[USER_GRAM_NUM];
 we_lcd_t g_lcd;
 
+/* 端口描述：设窗 / 刷屏 / 触摸 / 外挂存储（本板无触摸、无外挂 flash） */
+static const we_port_t s_port = {
+    .set_addr = lcd_set_windows,
+#if (LCD_DEEP == DEEP_RGB565)
+    .flush = lcd_rgb565_port,
+#elif (LCD_DEEP == DEEP_RGB888)
+    .flush = lcd_rgb888_port,
+#endif
+    .touch_read = NULL,
+    .storage_read = NULL,
+    .flush_async = LCD_FLUSH_ASYNC,
+};
+
 int main(void)
 {
     static we_gui_timer_t demo_timer; /* demo 周期定时器节点（调用方持有） */
+    uint32_t t0;
     system_init();
 		 delay_ms(1000U);
     lcd_hw_init();
     lcd_bl_on();
     input_hw_init();
 
-#if (LCD_DEEP == DEEP_RGB565)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_windows, lcd_rgb565_port, we_input_port_read, NULL);
-#elif (LCD_DEEP == DEEP_RGB888)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM,
-                lcd_set_windows, lcd_rgb888_port, we_input_port_read, NULL);
-#endif
+    we_gui_init(&g_lcd, &s_port, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM);
 
     /* DEMO_ID（编译期宏切换，改这一行即可）；编号三目标统一，
      * 0 = showcase 仅模拟器（需 800x480，此处回退 label）：
@@ -257,16 +264,10 @@ int main(void)
     we_gui_timer_create(&g_lcd, &demo_timer, we_label_simple_demo_tick, 16U, 1U);
 #endif
 
-    g_sys_tick = 0;
+    t0 = g_sys_ms; /* GUI 时间轴从进入主循环时的 0 起算 */
     while (1)
     {
-        if (g_sys_tick >= 1U)
-        {
-            uint16_t ms = g_sys_tick;
-            g_sys_tick = 0;
-            we_gui_tick_inc(&g_lcd, ms);
-        }
-        we_gui_task_handler(&g_lcd);
+        (void)we_gui_run(&g_lcd, g_sys_ms - t0);
     }
 }
 

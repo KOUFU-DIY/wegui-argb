@@ -2,9 +2,8 @@
  * @file  we_widget_marquee.c
  * @brief 跑马灯标签控件（marquee）：固定窗口内循环滚动的单行文本
  *
- * 渲染：draw_cb 先按 group 的标准套路把 PFB 窗口收窄到自身矩形
- * （save/restore pfb_area / pfb_y_start / pfb_y_end / pfb_gram），
- * 再在偏移位置绘制 "文本 + 间隔 + 文本开头" 两段，越界部分被窗口裁掉。
+ * 渲染：内核调用 draw_cb 前已把绘制窗口收窄到自身矩形，
+ * 这里在偏移位置绘制 "文本 + 间隔 + 文本开头" 两段，越界部分被窗口裁掉。
  *
  * 滚动：单个中央动画节点（we_anim_t）推进，毫像素整数累计
  * frac_acc += elapsed_ms * speed，凑满 1000 前进 1px；
@@ -21,7 +20,7 @@
  */
 
 #include "we_widget_marquee.h"
-#include "we_render.h" /* we_store_blended_color / we_div255（字形混色用） */
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -140,121 +139,11 @@ static void _marquee_update_anim(we_marquee_obj_t *obj)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 读取 UTF-8 字符串下一个码点并推进游标（1/2/3 字节）。
- * @param pp 传入传出：解析位置；成功后移动到下一字符起始处。
- * @param out_code 传出：码点；非法单字节返回 0（后续字库查询自然失败跳过）。
- * @return 1 = 成功读取，0 = 字符串结束或多字节序列截断（调用方应停止）。
- * @note 与 we_font_text.c 的核心解码器同口径：4 字节及以上编码按
- *       非法单字节处理（code 置 0），截断序列直接终止绘制。
- */
-static uint8_t _marquee_utf8_next(const char **pp, uint16_t *out_code)
-{
-    const unsigned char *p = (const unsigned char *)*pp;
-    uint8_t c0;
-
-    if (*p == 0U)
-        return 0U;
-
-    c0 = *p++;
-    *out_code = 0U;
-
-    if (c0 < 0x80U)
-    {
-        *out_code = c0;
-    }
-    else if ((c0 & 0xE0U) == 0xC0U)
-    {
-        if (*p == 0U)
-            return 0U; /* 截断的双字节序列：停止 */
-        *out_code = (uint16_t)(((c0 & 0x1FU) << 6) | ((uint8_t)*p++ & 0x3FU));
-    }
-    else if ((c0 & 0xF0U) == 0xE0U)
-    {
-        if (p[0] == 0U || p[1] == 0U)
-            return 0U; /* 截断的三字节序列：停止 */
-        *out_code = (uint16_t)(((c0 & 0x0FU) << 12) |
-                               (((uint8_t)p[0] & 0x3FU) << 6) |
-                               ((uint8_t)p[1] & 0x3FU));
-        p += 2;
-    }
-
-    *pp = (const char *)p;
-    return 1U;
-}
-
-/**
- * @brief 将行对齐的字形 alpha 位图混合到当前 PFB（marquee 私有精简 blit）。
- * @param lcd GUI 屏幕上下文指针（PFB 窗口已收窄到控件矩形 ∩ 脏区带）。
- * @param x 字形有效像素区左上角 X（屏幕绝对坐标）。
- * @param y 字形有效像素区左上角 Y。
- * @param w 字形有效像素区宽（像素）。
- * @param h 字形有效像素区高（像素）。
- * @param src 字形位图首地址（按行对齐紧凑存放）。
- * @param row_stride 位图每行字节数。
- * @param bpp 位深（1/2/4/8）。
- * @param fg 前景色。
- * @param opacity 有效不透明度（已含容器级联，调用方保证 > 0）。
- * @return 无。
- * @note 与 we_font_text.c 行对齐 blit 同语义的紧凑实现：任意 bpp 共用
- *       一条位游标路径（游标按 bpp 递增，行内零乘法），alpha 展开用
- *       a_raw * (255 / ((1<<bpp)-1)) 单次乘法完成（255/85/17/1）。
- */
-static void _marquee_blit_glyph(we_lcd_t *lcd, int16_t x, int16_t y,
-                                uint16_t w, uint16_t h,
-                                const uint8_t *src, uint32_t row_stride,
-                                uint8_t bpp, colour_t fg, uint8_t opacity)
-{
-    int16_t x_end = (int16_t)(x + (int16_t)w - 1);
-    int16_t y_end = (int16_t)(y + (int16_t)h - 1);
-    int16_t cx0 = (x < (int16_t)lcd->pfb_area.x0) ? (int16_t)lcd->pfb_area.x0 : x;
-    int16_t cy0 = (y < (int16_t)lcd->pfb_y_start) ? (int16_t)lcd->pfb_y_start : y;
-    int16_t cx1 = (x_end > (int16_t)lcd->pfb_area.x1) ? (int16_t)lcd->pfb_area.x1 : x_end;
-    int16_t cy1 = (y_end > (int16_t)lcd->pfb_y_end) ? (int16_t)lcd->pfb_y_end : y_end;
-    uint8_t a_mask;
-    uint8_t a_mult;
-    int16_t py;
-
-    if (cx0 > cx1 || cy0 > cy1)
-        return;
-
-    a_mask = (uint8_t)((1U << bpp) - 1U);
-    a_mult = (uint8_t)(255U / a_mask); /* 1/2/4/8 bpp → 255/85/17/1 */
-
-    for (py = cy0; py <= cy1; py++)
-    {
-        const uint8_t *src_row = src + (uint32_t)(py - y) * row_stride;
-        uint32_t bit_pos = (uint32_t)(cx0 - x) * bpp;
-        colour_t *dst = lcd->pfb_gram +
-                        (py - (int16_t)lcd->pfb_y_start) * lcd->pfb_width +
-                        (cx0 - (int16_t)lcd->pfb_area.x0);
-        int16_t px;
-
-        for (px = cx0; px <= cx1; px++, dst++)
-        {
-            uint8_t a_raw = (uint8_t)((src_row[bit_pos >> 3] >>
-                                       (8U - bpp - (bit_pos & 7U))) & a_mask);
-
-            bit_pos += bpp;
-            if (a_raw == 0U)
-                continue;
-            {
-                uint32_t alpha = (uint32_t)a_raw * a_mult;
-
-                if (opacity != 255U)
-                    alpha = we_div255(alpha * opacity);
-                we_store_blended_color(dst, fg, (uint8_t)alpha);
-            }
-        }
-    }
-}
-
-/**
  * @brief 从 start_x 起窗口化绘制一段单行文本。
  * @param obj 控件对象指针。
- * @param lcd GUI 屏幕上下文指针（PFB 窗口已收窄）。
+ * @param lcd GUI 屏幕上下文指针（绘制窗口 = 控件矩形 ∩ 当前切片）。
  * @param start_x 本段文本光标起点 X（屏幕绝对坐标，可为窗口外负偏移）。
  * @param text_y 文本行顶 Y（字形按 y_ofs 相对此基准落位）。
- * @param opacity 有效不透明度（已含容器级联，> 0）。
  * @return 无。
  * @note 快进阶段：有效像素区右缘（cursor + x_ofs + box_w）未进窗口左缘的字形
  *       只做解码 + adv_w 游标累加，不取位图、不扫像素；绘制阶段逐字形
@@ -263,16 +152,16 @@ static void _marquee_blit_glyph(we_lcd_t *lcd, int16_t x, int16_t y,
  *       时快进范围自动进一步收窄。遇 '\n' 即止（单行截断语义）。
  */
 static void _marquee_draw_segment(const we_marquee_obj_t *obj, we_lcd_t *lcd,
-                                  int16_t start_x, int16_t text_y, uint8_t opacity)
+                                  int16_t start_x, int16_t text_y)
 {
     const char *p = obj->text;
     int16_t cursor_x = start_x;
-    int16_t win_x0 = (int16_t)lcd->pfb_area.x0;
-    int16_t win_x1 = (int16_t)lcd->pfb_area.x1;
+    int16_t win_x0 = lcd->clip.x0;
+    int16_t win_x1 = lcd->clip.x1;
     we_glyph_info_t info;
     uint16_t code;
 
-    while (cursor_x <= win_x1 && _marquee_utf8_next(&p, &code) != 0U)
+    while (cursor_x <= win_x1 && we_utf8_next(&p, &code) != 0U)
     {
         if (code == (uint16_t)'\n')
             break; /* 只画第一行：与 we_get_text_width 测宽口径一致 */
@@ -289,10 +178,10 @@ static void _marquee_draw_segment(const we_marquee_obj_t *obj, we_lcd_t *lcd,
 
             if (we_font_get_bitmap_info(obj->font, &info, &bitmap, &bpp, &row_stride) != 0U)
             {
-                _marquee_blit_glyph(lcd, (int16_t)(cursor_x + info.x_ofs),
-                                    (int16_t)(text_y + info.y_ofs),
-                                    info.box_w, info.box_h,
-                                    bitmap, row_stride, bpp, obj->color, opacity);
+                we_draw_alpha_mask(lcd, (int16_t)(cursor_x + info.x_ofs),
+                                   (int16_t)(text_y + info.y_ofs),
+                                   info.box_w, info.box_h,
+                                   bitmap, row_stride, bpp, obj->color, obj->opacity);
             }
         }
         cursor_x = (int16_t)(cursor_x + (int16_t)info.adv_w);
@@ -304,7 +193,7 @@ static void _marquee_draw_segment(const we_marquee_obj_t *obj, we_lcd_t *lcd,
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件绘制回调：收窄 PFB 窗口到自身矩形后窗口化绘制一段或两段文本。
+ * @brief 控件绘制回调：在自身矩形（内核已收窄的窗口）内绘制一段或两段文本。
  * @param ptr 回调透传对象指针。
  * @return 无。
  */
@@ -312,46 +201,30 @@ static void _marquee_draw_cb(void *ptr)
 {
     we_marquee_obj_t *obj = (we_marquee_obj_t *)ptr;
     we_lcd_t *lcd = obj->base.lcd;
-    uint8_t opacity;
+    int16_t text_y;
 
     if (obj->text == NULL || obj->font == NULL || obj->opacity == 0U)
         return;
-    opacity = we_opa_apply(lcd, obj->opacity); /* 容器透明度级联：入口消费一次 */
-    if (opacity == 0U)
-        return;
+    if (we_opa_apply(lcd, obj->opacity) == 0U)
+        return; /* 容器整体透明：什么都不画 */
 
+    text_y = (int16_t)(obj->base.y + WE_MARQUEE_PAD_Y);
+    if (obj->text_w <= (uint16_t)obj->base.w)
     {
-        /* group 同款 PFB 窗口收窄：窗口外的字形像素被自动裁掉 */
-        we_pfb_clip_t sv;
+        /* 文本装得下：静止左对齐（对照态，不滚动） */
+        _marquee_draw_segment(obj, lcd, obj->base.x, text_y);
+    }
+    else
+    {
+        /* 循环滚动："文本 + 间隔 + 文本开头" 两段，形成无缝循环 */
+        int16_t seg_x = (int16_t)(obj->base.x - obj->offset);
 
-        we_pfb_clip_save(lcd, &sv);
-        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                           (int16_t)(obj->base.x + obj->base.w - 1),
-                           (int16_t)(obj->base.y + obj->base.h - 1)))
-        {
-            int16_t text_y = (int16_t)(obj->base.y + WE_MARQUEE_PAD_Y);
-
-            if (obj->text_w <= (uint16_t)obj->base.w)
-            {
-                /* 文本装得下：静止左对齐（对照态，不滚动） */
-                _marquee_draw_segment(obj, lcd, obj->base.x, text_y, opacity);
-            }
-            else
-            {
-                /* 循环滚动："文本 + 间隔 + 文本开头" 两段，形成无缝循环 */
-                int16_t seg_x = (int16_t)(obj->base.x - obj->offset);
-
-                _marquee_draw_segment(obj, lcd, seg_x, text_y, opacity);
-                _marquee_draw_segment(obj, lcd,
-                                      (int16_t)(seg_x + (int16_t)obj->text_w + WE_MARQUEE_GAP),
-                                      text_y, opacity);
-            }
-        }
-
-        we_pfb_clip_restore(lcd, &sv);
+        _marquee_draw_segment(obj, lcd, seg_x, text_y);
+        _marquee_draw_segment(obj, lcd,
+                              (int16_t)(seg_x + (int16_t)obj->text_w + WE_MARQUEE_GAP),
+                              text_y);
     }
 }
-
 /* --------------------------------------------------------------------------
  * 生命周期与 setter
  * -------------------------------------------------------------------------- */
@@ -526,19 +399,4 @@ void we_marquee_set_opacity(we_marquee_obj_t *obj, uint8_t opacity)
     obj->opacity = opacity;
     _marquee_update_anim(obj); /* 0 → 停滚动省周期；>0 → 需要时恢复 */
     we_obj_invalidate((we_obj_t *)obj);
-}
-
-/**
- * @brief 删除控件：先摘除滚动动画节点再从对象链表移除。
- * @param obj 控件对象指针。
- * @return 无。
- */
-void we_marquee_obj_delete(we_marquee_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL)
-        return;
-
-    we_anim_stop(obj->base.lcd, &obj->anim); /* 动画节点归控件所有，删除前必须摘链 */
-    obj->scrolling = 0U;
-    we_obj_delete((we_obj_t *)obj);
 }

@@ -16,24 +16,36 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 布局（280x240 基准） */
-#define HB_BTN_SIZE 120
-#define HB_BTN_X    ((280 - HB_BTN_SIZE) / 2)
-#define HB_BTN_Y    64
-
-static we_label_obj_t hb_title;
-static we_label_obj_t hb_fps_label;
+/* 长按钮/RESET/状态回显与回调为大小屏共享；标题/FPS 仅大屏版有 */
 static we_label_obj_t hb_status_label; /* 顶部状态回显 */
 static we_hold_btn_obj_t hb_btn;
 static we_btn_obj_t hb_reset_btn;
 
-static uint32_t hb_fps_timer;
-static uint32_t hb_last_frames;
-static char hb_fps_buf[16];
 static char hb_status_buf[24];
 
 static uint8_t hb_last_state; /* 0=idle 1=charging 2=triggered */
 static int16_t hb_last_pct;   /* 上次显示的充能百分比 */
+
+#if !WE_DEMO_SMALL_SCREEN
+/* 布局（280x240 基准） */
+#define HB_BTN_SIZE 120
+#define HB_BTN_X    ((280 - HB_BTN_SIZE) / 2)
+#define HB_BTN_Y    64
+#define HB_CHG_FMT  "charging %d%%"
+
+static we_label_obj_t hb_title;
+static we_label_obj_t hb_fps_label;
+
+static uint32_t hb_fps_timer;
+static uint32_t hb_last_frames;
+static char hb_fps_buf[16];
+#else
+/* 布局（128x64）：左 48px 长按钮，右状态回显 + RESET */
+#define HB_BTN_SIZE 48
+#define HB_BTN_X    8
+#define HB_BTN_Y    8
+#define HB_CHG_FMT  "chg %d%%" /* 右列宽度有限，用短格式 */
+#endif
 
 /**
  * @brief 刷新顶部状态 label（文字 + 颜色）。
@@ -50,7 +62,7 @@ static void hb_show_status(uint8_t state, int16_t pct)
     }
     else if (state == 1U)
     {
-        sprintf(hb_status_buf, "charging %d%%", (int)pct);
+        sprintf(hb_status_buf, HB_CHG_FMT, (int)pct);
         we_label_set_color(&hb_status_label, RGB888TODEV(86, 205, 255));
     }
     else
@@ -93,6 +105,8 @@ static uint8_t hb_on_reset(void *obj, we_event_t event, we_indev_data_t *data)
     }
     return 1U;
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 hold_btn demo
@@ -164,3 +178,64 @@ void we_hold_btn_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &hb_fps_label, &hb_fps_timer,
                        &hb_last_frames, hb_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 hold_btn demo（128x64 布局：左长按钮 + 右状态与 RESET）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_hold_btn_preview_demo_init(we_lcd_t *lcd)
+{
+    hb_last_state = 0U;
+    hb_last_pct = -1;
+    memset(hb_status_buf, 0, sizeof(hb_status_buf));
+
+    /* 右侧状态回显：初始 idle */
+    sprintf(hb_status_buf, "idle");
+    we_label_obj_init(&hb_status_label, lcd, 62, 10,
+                      hb_status_buf, we_font_consolas_18,
+                      RGB888TODEV(150, 158, 170), 255);
+
+    /* 左侧长按钮：默认 1200ms 充满 */
+    we_hold_btn_obj_init(&hb_btn, lcd, HB_BTN_X, HB_BTN_Y, HB_BTN_SIZE, "HOLD", we_font_consolas_18);
+    we_hold_btn_set_triggered_cb(&hb_btn, hb_on_triggered);
+
+    /* 右下 RESET 小按钮 */
+    we_btn_obj_init(&hb_reset_btn, lcd, 62, 38, 58, 18,
+                    "RESET", we_font_consolas_18, hb_on_reset);
+}
+
+/**
+ * @brief hold_btn demo 周期更新（128x64：轮询充能进度刷新状态）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_hold_btn_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint8_t state;
+    int16_t pct;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    if (we_hold_btn_is_triggered(&hb_btn))
+        state = 2U;
+    else if (we_hold_btn_get_progress(&hb_btn) > 0U)
+        state = 1U;
+    else
+        state = 0U;
+
+    pct = (int16_t)(((uint32_t)we_hold_btn_get_progress(&hb_btn) * 100U) >> 8);
+
+    if (state != hb_last_state || (state == 1U && pct != hb_last_pct))
+    {
+        hb_last_state = state;
+        hb_last_pct = pct;
+        hb_show_status(state, pct);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

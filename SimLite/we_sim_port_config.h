@@ -83,7 +83,5 @@ void lcd_gray8_port(uint8_t *gram, uint32_t pix_size);
 
 
 
-/* GDI 模拟器的 flush 是同步内存拷贝，无异步发送，双缓冲无收益。 */
-#define WE_PORT_FLUSH_ASYNC (0)
 
 #endif

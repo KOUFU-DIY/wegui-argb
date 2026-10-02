@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_CHART_BAR_H
 #define __WE_WIDGET_CHART_BAR_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"

@@ -26,7 +26,7 @@
 #define _SH1108     (12) //页式单色OLED 160x128 (SEG160)
 #define _SH1115     (13) //页式单色OLED 128x64
 #define _SSD1327   (14) //灰度OLED 128x128 16级灰度(需 GRAY8 方案 + ALIGN_X=2)
-#define LCD_IC        _SSD1306
+#define LCD_IC        _ST7789V3
 
 /* ------------------------ 2.选择屏幕类型(自动) ------------------------ */
 #if (LCD_IC == _SSD1306) || (LCD_IC == _SSD1309) || (LCD_IC == _SSD1312) || (LCD_IC == _SSD1315) ||(LCD_IC == _SH1106) || (LCD_IC == _SH1107) || (LCD_IC == _SH1108) || (LCD_IC == _SH1115)
@@ -51,7 +51,7 @@
 #define _HARD_4SPI (3)
 #define _DMA_4SPI  (4)
 #define _SOFT_IIC    (5)
-#define LCD_PORT _SOFT_IIC
+#define LCD_PORT _HARD_4SPI
 
 /* ------------------------ 3.2设置SPI接口速率 ------------------------ */
 /* 注意：RCC_HCLK_Divx 是全局 APB2 分频（影响 GPIO/USART1/ADC 等所有
@@ -69,7 +69,7 @@
 #endif
 
 /* ------------------------ 4.设置偏移显示 ------------------------ */
-#define SCREEN_X_OFFSET (0)//屏幕X方向偏移 默认0
+#define SCREEN_X_OFFSET (20)//屏幕X方向偏移 默认0（240x280 面板横放：可见区从控制器第 20 列起）
 #define SCREEN_Y_OFFSET (0)//屏幕Y方向偏移 默认0
 
 /* ------------------------ 5.设置外挂储存接口 ------------------------ */
@@ -211,9 +211,9 @@
 #warning ("No screen ic init!")
 #endif
 
-/* 端口刷屏是否真异步（DMA 后台发送、flush 立即返回）。
- * 只有真异步端口才值得启用 GRAM 双缓冲（GRAM_DMA_BUFF_EN）；
- * 阻塞端口下双缓冲只会把可用 PFB 白白砍半、flush 次数翻倍。 */
-#define WE_PORT_FLUSH_ASYNC ((LCD_PORT == _DMA_4SPI) ? 1 : 0)
+/* 端口刷屏是否异步（DMA 后台发送、flush 立即返回），填入 main.c 端口描述的 flush_async。
+ * 只有 DMA 端口的 RGB565 刷屏在 GRAM_DMA_BUFF_EN = 1 时不等发送完成就返回
+ * （内核随之把显存分两半交替使用）；其余刷屏函数都是发完才返回。 */
+#define LCD_FLUSH_ASYNC (((LCD_PORT == _DMA_4SPI) && (GRAM_DMA_BUFF_EN == 1) && (LCD_DEEP == DEEP_RGB565)) ? 1U : 0U)
 
 #endif

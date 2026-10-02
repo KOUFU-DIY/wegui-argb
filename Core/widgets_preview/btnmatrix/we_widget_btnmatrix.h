@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_BTNMATRIX_H
 #define __WE_WIDGET_BTNMATRIX_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 按键矩阵控件（btnmatrix）—— preview 孵化区实验控件

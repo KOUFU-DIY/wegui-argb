@@ -1,19 +1,19 @@
 #ifndef __WE_WIDGET_MARQUEE_H
 #define __WE_WIDGET_MARQUEE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 跑马灯标签控件（marquee）
  *
  * 一条固定宽度的单行文本框：
  *   - 文本宽 <= 控件宽：静止左对齐显示，不滚动、不占动画链；
- *   - 文本宽 >  控件宽：循环滚动。draw_cb 先把 PFB 窗口收窄到自身矩形
- *     （group 同款套路），再按偏移绘制 "文本 + 间隔 + 文本开头" 两段，
+ *   - 文本宽 >  控件宽：循环滚动。在自身矩形（内核收窄的绘制窗口）内
+ *     按偏移绘制 "文本 + 间隔 + 文本开头" 两段，
  *     超出部分被窗口自动裁掉；offset 到达 文本宽+间隔 后回零，
  *     并在接缝处停留 pause_ms 再继续。
  *
- * 滚动由单个中央动画节点推进（we_anim_t，不占 GUI timer 槽）：
+ * 滚动由单个中央动画节点推进（we_anim_t）：
  *   毫像素整数累计 frac_acc += elapsed_ms * speed（int32），
  *   每凑满 1000 前进 1px，无浮点、无累计漂移。
  *
@@ -24,7 +24,7 @@
  *
  * 实现要点（做法详见 widget.md）：
  *   - 自建窗口化字形绘制循环（we_font_get_glyph_info +
- *     we_font_get_bitmap_info + 行对齐 alpha blit），不走 we_draw_string
+ *     we_font_get_bitmap_info + we_draw_alpha_mask），不走 we_draw_string
  *     全量遍历：窗口左侧完全裁掉的字形按 adv_w 游标快进跳过（零像素访问、
  *     零位图取址），越过窗口右缘立即 break，逐帧成本只与可见字形数相关；
  *   - 单行截断语义明确：绘制与测宽同口径，遇 '\n' 即止（只显示第一行）；
@@ -155,10 +155,13 @@ void we_marquee_set_color(we_marquee_obj_t *obj, colour_t color);
 void we_marquee_set_opacity(we_marquee_obj_t *obj, uint8_t opacity);
 
 /**
- * @brief 删除控件：先摘除滚动动画节点（we_anim_stop）再从对象链表移除。
+ * @brief 删除控件并从对象链表移除（滚动动画节点由内核随对象一并回收）。
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_marquee_obj_delete(we_marquee_obj_t *obj);
+static inline void we_marquee_obj_delete(we_marquee_obj_t *obj)
+{
+    we_obj_delete((we_obj_t *)obj);
+}
 
 #endif /* __WE_WIDGET_MARQUEE_H */

@@ -1,5 +1,5 @@
 #include "we_widget_label.h"
-#include "we_font_text.h"
+#include "wegui.h"
 
 // =========================================================
 // 内部核心对接桩
@@ -9,11 +9,16 @@
  * @brief 计算文本的包围盒尺寸（按换行分段统计）。
  * @param font 字体资源指针。
  * @param text UTF-8 文本字符串。
- * @param out_w 输出文本最大行宽（像素）。
+ * @param out_w 输出文本最大行宽（像素，计入字形向右伸出的墨迹）。
  * @param out_h 输出文本总高度（像素）。
  */
 static void _label_get_text_bbox(const unsigned char *font, const char *text, int16_t *out_w, int16_t *out_h)
 {
+    uint16_t line_height;
+    int16_t max_w = 0;
+    int16_t lines = 1;
+    const char *p = text;
+
     if (font == NULL || text == NULL)
     {
         *out_w = 0;
@@ -21,20 +26,14 @@ static void _label_get_text_bbox(const unsigned char *font, const char *text, in
         return;
     }
 
-    uint16_t line_height = we_font_get_line_height(font);
-    int16_t max_w = 0;
-    int16_t lines = 1;
-    const char *p = text;
+    line_height = we_font_get_line_height(font);
 
-    // 逐行测宽，寻找最长的一行
+    // 逐行测宽，寻找最长的一行（墨迹伸出步进的字形按墨迹算，包围盒不裁掉它）
     while (*p)
     {
-        // 调用字库测宽函数 we_get_text_width 测量当前行（到 \n 前）的像素宽
-        uint16_t current_line_w = we_get_text_width(font, p);
-        if (current_line_w > max_w)
-        {
-            max_w = current_line_w;
-        }
+        uint16_t current_line_w = we_get_text_ink_width(font, p);
+        if ((int16_t)current_line_w > max_w)
+            max_w = (int16_t)current_line_w;
 
         // 推进指针到下一行
         while (*p && *p != '\n')
@@ -47,46 +46,7 @@ static void _label_get_text_bbox(const unsigned char *font, const char *text, in
     }
 
     *out_w = max_w;
-    *out_h = lines * line_height;
-}
-
-/**
- * @brief 使控件当前包围盒区域失效，触发重绘。
- * @param obj 文本控件对象指针。
- */
-static void _label_invalidate_obj_bbox(we_label_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL || obj->opacity == 0)
-        return;
-
-    we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h);
-}
-
-/**
- * @brief 按指定文本尺寸使对应区域失效。
- * @param obj 文本控件对象指针。
- * @param text 用于计算失效区域尺寸的文本。
- */
-static void _label_invalidate_text_bbox(we_label_obj_t *obj, const char *text)
-{
-    int16_t w = 0;
-    int16_t h = 0;
-
-    if (obj == NULL || obj->base.lcd == NULL || obj->font == NULL || text == NULL || obj->opacity == 0)
-        return;
-
-    _label_get_text_bbox(obj->font, text, &w, &h);
-    we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
-}
-
-/**
- * @brief _label_invalidate_text_bbox 的薄封装别名：按 text 计算尺寸后标脏。
- * @param obj 文本控件对象指针。
- * @param text 用于计算失效区域尺寸的文本。
- */
-static void _label_invalidate_text(we_label_obj_t *obj, const char *text)
-{
-    _label_invalidate_text_bbox(obj, text);
+    *out_h = (int16_t)(lines * line_height);
 }
 
 /**
@@ -125,9 +85,10 @@ void we_label_obj_init(we_label_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
         return;
 
     int16_t w = 0, h = 0;
-_label_get_text_bbox(font, text, &w, &h);
+    _label_get_text_bbox(font, text, &w, &h);
 
     obj->base.lcd = lcd;
+    obj->base.parent = NULL;
     obj->base.x = x;
     obj->base.y = y;
     obj->base.w = w;
@@ -166,19 +127,16 @@ void we_label_set_text(we_label_obj_t *obj, const char *new_text)
 
     _label_get_text_bbox(obj->font, new_text, &new_w, &new_h);
 
+    /* 包围盒就是文字框：先标旧框，换文字与尺寸后再标新框 */
     if (obj->opacity > 0)
-    {
-        _label_invalidate_obj_bbox(obj);
-    }
+        we_obj_invalidate((we_obj_t *)obj);
 
     obj->text = new_text;
     obj->base.w = new_w;
     obj->base.h = new_h;
 
     if (obj->opacity > 0)
-    {
-        _label_invalidate_text_bbox(obj, obj->text);
-    }
+        we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -189,16 +147,8 @@ void we_label_set_text(we_label_obj_t *obj, const char *new_text)
  */
 void we_label_set_color(we_label_obj_t *obj, colour_t new_color)
 {
-    if (obj == NULL || obj->base.lcd == NULL)
+    if (obj == NULL || obj->base.lcd == NULL || we_colour_eq(obj->color, new_color))
         return;
-#if (LCD_DEEP == DEEP_RGB565)
-    if (obj->color.dat16 == new_color.dat16)
-        return;
-#elif (LCD_DEEP == DEEP_RGB888)
-    if (obj->color.rgb.r == new_color.rgb.r && obj->color.rgb.g == new_color.rgb.g &&
-        obj->color.rgb.b == new_color.rgb.b)
-        return;
-#endif
 
     obj->color = new_color;
     if (obj->opacity > 0)
@@ -220,11 +170,6 @@ void we_label_set_opacity(we_label_obj_t *obj, uint8_t opacity)
     if (obj->opacity == opacity)
         return;
 
-    if (obj->opacity > 0)
-        _label_invalidate_text(obj, obj->text);
-
     obj->opacity = opacity;
-
-    if (obj->opacity > 0)
-        _label_invalidate_text(obj, obj->text);
+    we_obj_invalidate((we_obj_t *)obj); /* 包围盒不变，标一次即可 */
 }

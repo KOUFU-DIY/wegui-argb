@@ -21,19 +21,23 @@
 #define AF_H   48
 #define AF_CNT 4
 
-static we_label_obj_t   af_title;
-static we_label_obj_t   af_note;
-static we_label_obj_t   af_fps;
+/* 帧缓冲/双实例/状态标签为大小屏共享；标题/说明/FPS 仅大屏版有 */
 static we_label_obj_t   af_state_lbl;
 static we_animimg_obj_t af_loop;      /* 左：持续循环 */
 static we_animimg_obj_t af_toggle;    /* 右：start/stop 定时切换 */
 
+static uint32_t af_toggle_acc;        /* start/stop 切换累计毫秒 */
+static uint8_t  af_running;           /* 右侧实例当前是否播放 */
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t af_title;
+static we_label_obj_t af_note;
+static we_label_obj_t af_fps;
+
 static uint32_t af_fps_timer;
 static uint32_t af_last_frames;
 static char     af_fps_buf[16];
-
-static uint32_t af_toggle_acc;        /* start/stop 切换累计毫秒 */
-static uint8_t  af_running;           /* 右侧实例当前是否播放 */
+#endif
 
 /* 帧像素静态缓冲（4 帧 48×48 RGB565，本机字节序，调用方持有） */
 static uint16_t af_buf[AF_CNT][AF_W * AF_H];
@@ -103,6 +107,8 @@ static void _af_gen_frames(void)
         }
     }
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 animimg preview demo 场景
@@ -180,3 +186,66 @@ void we_animimg_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &af_fps, &af_fps_timer,
                        &af_last_frames, af_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 animimg preview demo（128x64 布局：双 48px 实例并排）
+ * @param lcd GUI 运行时上下文
+ * @return 无
+ */
+void we_animimg_preview_demo_init(we_lcd_t *lcd)
+{
+    af_toggle_acc = 0U;
+    af_running    = 1U;
+
+    _af_gen_frames();
+
+    /* 左：120ms 持续循环 */
+    we_animimg_obj_init(&af_loop, lcd, 12, 4, AF_W, AF_H);
+    we_animimg_set_frames(&af_loop, af_frames, AF_CNT, 120U);
+    we_animimg_start(&af_loop);
+
+    /* 右：共享同一组帧，60ms 更快节奏，由 tick 定时 start/stop */
+    we_animimg_obj_init(&af_toggle, lcd, 68, 4, AF_W, AF_H);
+    we_animimg_set_frames(&af_toggle, af_frames, AF_CNT, 60U);
+    we_animimg_start(&af_toggle);
+
+    we_label_obj_init(&af_state_lbl, lcd, 68, 52,
+                      "RUN", we_font_consolas_18,
+                      RGB888TODEV(126, 231, 150), 255);
+}
+
+/**
+ * @brief animimg preview demo 周期更新（128x64：右实例定时启停）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ * @return 无
+ */
+void we_animimg_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    /* 右侧实例每 2s 自动 start/stop 切换（停播时定格当前帧） */
+    af_toggle_acc += ms_tick;
+    if (af_toggle_acc >= 2000U)
+    {
+        af_toggle_acc = 0U;
+        af_running ^= 1U;
+        if (af_running)
+        {
+            we_animimg_start(&af_toggle);
+            we_label_set_text(&af_state_lbl, "RUN");
+            we_label_set_color(&af_state_lbl, RGB888TODEV(126, 231, 150));
+        }
+        else
+        {
+            we_animimg_stop(&af_toggle);
+            we_label_set_text(&af_state_lbl, "STOP");
+            we_label_set_color(&af_state_lbl, RGB888TODEV(255, 128, 118));
+        }
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

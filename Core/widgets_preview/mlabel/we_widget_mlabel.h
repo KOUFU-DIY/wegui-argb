@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_MLABEL_H
 #define __WE_WIDGET_MLABEL_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 多行文本标签控件（mlabel）—— preview 孵化区实验控件

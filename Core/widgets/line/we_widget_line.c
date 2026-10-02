@@ -9,7 +9,7 @@
  */
 
 #include "we_widget_line.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -18,7 +18,16 @@ static void    _line_draw_cb(void *ptr);
 static uint8_t _line_event_cb(void *ptr, we_event_t event, we_indev_data_t *data);
 static void    _line_set_pos_cb(void *ptr, int16_t x, int16_t y);
 
+/* 没有用户回调时用 event_cb 为 NULL 的类：命中测试跳过它，触摸落到背后的控件
+ * （包围盒命中，斜线的包围盒可能很大，不能让它挡住下面的控件） */
 static const we_class_t _line_class = {
+    .draw_cb    = _line_draw_cb,
+    .event_cb   = NULL,
+    .set_pos_cb = _line_set_pos_cb
+};
+
+/* 设了用户回调后换成这个类，全部事件交给用户回调 */
+static const we_class_t _line_class_cb = {
     .draw_cb    = _line_draw_cb,
     .event_cb   = _line_event_cb,
     .set_pos_cb = _line_set_pos_cb
@@ -30,7 +39,8 @@ static const we_class_t _line_class = {
 
 /**
  * @brief 按端点与线宽重算包围盒（base.x/y/w/h）。
- * @note 外扩 半线宽 + 2px，覆盖 AA 羽化与圆头 cap（半径=线宽/2）。
+ * @note 左/上外扩 半线宽+2px，右/下外扩 半线宽+1px（宽高 = 跨度 + 2×外扩），
+ *       覆盖圆头与 AA 羽化。
  */
 static void _line_recompute_bbox(we_line_obj_t *o)
 {
@@ -48,10 +58,13 @@ static void _line_recompute_bbox(we_line_obj_t *o)
 
 /**
  * @brief 更新端点：先标脏旧包围盒，再改端点+重算盒，再标脏新包围盒。
+ * @note 端点没变（慢速/缓动动画常见）直接返回，不重绘。
  */
 static void _line_apply_points(we_line_obj_t *o, int16_t x0, int16_t y0,
                                int16_t x1, int16_t y1)
 {
+    if (x0 == o->x0 && y0 == o->y0 && x1 == o->x1 && y1 == o->y1)
+        return;
     we_obj_invalidate((we_obj_t *)o);   /* 旧包围盒 */
     o->x0 = x0;
     o->y0 = y0;
@@ -62,10 +75,12 @@ static void _line_apply_points(we_line_obj_t *o, int16_t x0, int16_t y0,
 }
 
 /**
- * @brief 更新颜色并标脏（包围盒不变）。
+ * @brief 更新颜色并标脏（包围盒不变；颜色没变直接返回）。
  */
 static void _line_apply_color(we_line_obj_t *o, colour_t c)
 {
+    if (we_colour_eq(o->color, c))
+        return;
     o->color = c;
     we_obj_invalidate((we_obj_t *)o);
 }
@@ -75,42 +90,30 @@ static void _line_apply_color(we_line_obj_t *o, colour_t c)
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 控件绘制回调：画线身 + 可选圆头。
+ * @brief 控件绘制回调：圆头走单遍胶囊填充（线身+圆头一次成形，半透明下不叠色）；
+ *        平头无端帽叠加，直接用 Wu 抗锯齿线。
  */
 static void _line_draw_cb(void *ptr)
 {
     we_line_obj_t *o = (we_line_obj_t *)ptr;
-    we_lcd_t *lcd;
 
-    if (o == NULL || o->opacity == 0U)
-        return;
-    lcd = o->base.lcd;
-    if (lcd == NULL || o->width == 0U)
+    if (o->opacity == 0U || o->width == 0U)
         return;
 
-    /* 圆头走单遍胶囊填充（线身+圆头一次成形，半透明下不叠色）；
-     * 平头无端帽叠加，直接用现成 Wu 抗锯齿线即可。 */
     if (o->cap == (uint8_t)WE_LINE_CAP_ROUND)
-        we_draw_line_round(lcd, o->x0, o->y0, o->x1, o->y1, o->width, o->color, o->opacity);
+        we_draw_line_round(o->base.lcd, o->x0, o->y0, o->x1, o->y1, o->width, o->color, o->opacity);
     else
-        we_draw_line(lcd, o->x0, o->y0, o->x1, o->y1, o->width, o->color, o->opacity);
+        we_draw_line(o->base.lcd, o->x0, o->y0, o->x1, o->y1, o->width, o->color, o->opacity);
 }
 
 /**
- * @brief 控件事件回调：有自定义回调则接管，否则装饰性穿透。
+ * @brief 控件事件回调（仅 _line_class_cb 使用）：全部事件交给用户回调。
  */
 static uint8_t _line_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
     we_line_obj_t *o = (we_line_obj_t *)ptr;
 
-    if (o == NULL)
-        return 0U;
-    if (o->user_event_cb != NULL)
-        return o->user_event_cb(ptr, event, data);
-
-    (void)event;
-    (void)data;
-    return 0U; /* 默认装饰性，不消费事件，让其穿透给背后控件 */
+    return (o->user_event_cb != NULL) ? o->user_event_cb(ptr, event, data) : 0U;
 }
 
 /**
@@ -120,8 +123,6 @@ static void _line_set_pos_cb(void *ptr, int16_t x, int16_t y)
 {
     we_line_obj_t *o = (we_line_obj_t *)ptr;
 
-    if (o == NULL)
-        return;
     we_line_move(o, (int16_t)(x - o->base.x), (int16_t)(y - o->base.y));
 }
 
@@ -137,7 +138,6 @@ static void _line_set_pos_cb(void *ptr, int16_t x, int16_t y)
 static uint8_t _line_advance(we_line_obj_t *o, we_anim_t *node, uint16_t *t,
                              uint16_t ms, uint16_t elapsed_ms, uint16_t *eased)
 {
-    uint32_t delta;
     uint16_t e;
 
     if (*t >= 256U)
@@ -146,18 +146,7 @@ static uint8_t _line_advance(we_line_obj_t *o, we_anim_t *node, uint16_t *t,
         return 0U;
     }
 
-    if (ms == 0U)
-    {
-        *t = 256U;
-    }
-    else
-    {
-        delta = (uint32_t)elapsed_ms * 256U / (uint32_t)ms;
-        if (delta == 0U)
-            delta = 1U;
-        *t = ((uint32_t)*t + delta >= 256U) ? 256U : (uint16_t)(*t + delta);
-    }
-
+    *t = we_motion_advance(*t, ms, elapsed_ms);
     e = o->ease ? o->ease(*t) : *t;
     if (e > 256U)
         e = 256U;
@@ -172,7 +161,7 @@ static void _line_anim_geo_step(we_line_obj_t *o, uint16_t elapsed_ms)
 {
     uint16_t e;
 
-    if (o == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (!_line_advance(o, &o->anim_geo, &o->geo_t, o->geo_ms, elapsed_ms, &e))
         return;
@@ -200,7 +189,7 @@ static void _line_anim_col_step(we_line_obj_t *o, uint16_t elapsed_ms)
     uint16_t e;
     uint8_t  a;
 
-    if (o == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (!_line_advance(o, &o->anim_col, &o->col_t, o->col_ms, elapsed_ms, &e))
         return;
@@ -223,14 +212,19 @@ static void _line_anim_col_step_cb(void *owner, uint16_t elapsed_ms)
 static void _line_anim_opa_step(we_line_obj_t *o, uint16_t elapsed_ms)
 {
     uint16_t e;
+    uint8_t  a;
 
-    if (o == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
     if (!_line_advance(o, &o->anim_opa, &o->opa_t, o->opa_ms, elapsed_ms, &e))
         return;
 
-    o->opacity = (uint8_t)we_lerp(o->opa_from, o->opa_to, e);
-    we_obj_invalidate((we_obj_t *)o);
+    a = (uint8_t)we_lerp(o->opa_from, o->opa_to, e);
+    if (a != o->opacity)
+    {
+        o->opacity = a;
+        we_obj_invalidate((we_obj_t *)o);
+    }
 
     if (o->opa_t >= 256U)
         we_anim_stop(o->base.lcd, &o->anim_opa);
@@ -311,7 +305,7 @@ void we_line_set_points(we_line_obj_t *obj, int16_t x0, int16_t y0,
 
 void we_line_set_width(we_line_obj_t *obj, uint8_t width)
 {
-    if (obj == NULL || width == 0U)
+    if (obj == NULL || width == 0U || obj->width == width)
         return;
     we_obj_invalidate((we_obj_t *)obj);
     obj->width = width;
@@ -321,7 +315,7 @@ void we_line_set_width(we_line_obj_t *obj, uint8_t width)
 
 void we_line_set_cap(we_line_obj_t *obj, we_line_cap_t cap)
 {
-    if (obj == NULL)
+    if (obj == NULL || obj->cap == (uint8_t)cap)
         return;
     obj->cap = (uint8_t)cap;
     we_obj_invalidate((we_obj_t *)obj);
@@ -336,7 +330,7 @@ void we_line_set_color(we_line_obj_t *obj, colour_t color)
 
 void we_line_set_opacity(we_line_obj_t *obj, uint8_t opacity)
 {
-    if (obj == NULL)
+    if (obj == NULL || obj->opacity == opacity)
         return;
     obj->opacity = opacity;
     we_obj_invalidate((we_obj_t *)obj);
@@ -344,17 +338,34 @@ void we_line_set_opacity(we_line_obj_t *obj, uint8_t opacity)
 
 void we_line_move(we_line_obj_t *obj, int16_t dx, int16_t dy)
 {
-    if (obj == NULL)
+    if (obj == NULL || (dx == 0 && dy == 0))
         return;
+#if WE_LINE_USE_ANIM
+    /* 端点动画进行中：起止点一起平移，否则下一帧插值会把线拉回原处
+     * （容器滚动/移动子控件都走这里） */
+    if (obj->geo_t < 256U)
+    {
+        uint8_t i;
+
+        for (i = 0U; i < 4U; i += 2U)
+        {
+            obj->g_from[i]     = (int16_t)(obj->g_from[i] + dx);
+            obj->g_to[i]       = (int16_t)(obj->g_to[i] + dx);
+            obj->g_from[i + 1] = (int16_t)(obj->g_from[i + 1] + dy);
+            obj->g_to[i + 1]   = (int16_t)(obj->g_to[i + 1] + dy);
+        }
+    }
+#endif
     _line_apply_points(obj, (int16_t)(obj->x0 + dx), (int16_t)(obj->y0 + dy),
                        (int16_t)(obj->x1 + dx), (int16_t)(obj->y1 + dy));
 }
 
 void we_line_set_event_cb(we_line_obj_t *obj, we_line_event_cb_t cb)
 {
-    if (obj == NULL)
+    if (obj == NULL || obj->base.class_p == NULL)
         return;
     obj->user_event_cb = cb;
+    obj->base.class_p = (cb != NULL) ? &_line_class_cb : &_line_class;
 }
 
 #if WE_LINE_USE_ANIM
@@ -446,15 +457,3 @@ void we_line_anim_opacity(we_line_obj_t *obj, uint8_t target, uint16_t dur_ms,
 }
 
 #endif /* WE_LINE_USE_ANIM */
-
-void we_line_obj_delete(we_line_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-#if WE_LINE_USE_ANIM
-    we_anim_stop(obj->base.lcd, &obj->anim_geo);
-    we_anim_stop(obj->base.lcd, &obj->anim_col);
-    we_anim_stop(obj->base.lcd, &obj->anim_opa);
-#endif
-    we_obj_delete((we_obj_t *)obj);
-}

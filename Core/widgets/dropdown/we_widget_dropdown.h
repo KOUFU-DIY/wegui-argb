@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_DROPDOWN_H
 #define __WE_WIDGET_DROPDOWN_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_scroll.h"
 
 /* 本控件聚焦/按键支持开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。
@@ -20,7 +20,7 @@
  *   - 闭合态只显示当前选中项 + 箭头；
  *   - 展开态由内嵌的顶层模态对象绘制选项列表，
  *     不会被 group / scroll_panel / slideshow 等父容器裁剪；
- *   - 同一时刻全屏只允许一个模态弹层（由 driver 的 modal_obj 互斥保证）。
+ *   - 同一时刻全屏只允许一个模态弹层：打开新的模态弹层会先收起当前列表。
  *
  * 选项数组由调用者持有（通常是 const 静态数组），控件只保存指针，
  * 不复制文本，省 RAM。
@@ -46,7 +46,6 @@
 #define WE_DROPDOWN_SB_IDLE_ALPHA 40U
 #endif
 
-/* 单个选项 */
 /* 展开列表越界过冲上限（像素）：拖拽最多超出边界的距离（list 同款橡皮筋） */
 #ifndef WE_DROPDOWN_OVERSCROLL_LIMIT
 #define WE_DROPDOWN_OVERSCROLL_LIMIT 24
@@ -62,6 +61,7 @@
 #define WE_DROPDOWN_REBOUND_MAX_STEP 24
 #endif
 
+/* 单个选项 */
 typedef struct
 {
     const char *text;  /* 选项显示文本（UTF-8） */
@@ -84,10 +84,9 @@ typedef struct we_dropdown_obj_t
     const we_dropdown_option_t *options;
     const unsigned char *font;
     we_dropdown_changed_cb_t changed_cb;
-    we_scroll_t sc;             /* 滚动物理状态机（无惯性档：拖拽跟手+过冲回弹；
-                                 * 持久位置在 scroll_px，会话/步进时载入并写回） */
-    int32_t scroll_px;          /* popup 内容向上滚动的像素偏移（无级，0=顶部对齐） */
-    we_anim_t sb_anim;          /* 淡出动画节点（不占 GUI task 槽，收敛即摘链） */
+    we_scroll_t sc;             /* 滚动物理状态机（无惯性档：拖拽跟手+过冲回弹）；
+                                 * sc.pos = popup 内容向上滚动的像素（无级，0=顶部对齐） */
+    we_anim_t sb_anim;          /* 滚动条淡出动画节点（收敛即摘链） */
     we_anim_t rb_anim;          /* 回弹动画节点（收敛即摘链，list 同款口径） */
     we_obj_t overlay;           /* 展开列表内嵌弹层对象：展开时挂 LCD 顶层链并声明模态，
                                  * 收起时摘链；几何即弹层区域 */
@@ -124,7 +123,7 @@ void we_dropdown_obj_init(we_dropdown_obj_t *obj, we_lcd_t *lcd,
                           const unsigned char *font);
 
 /**
- * @brief 绑定选项数组（控件只保存指针，不复制内容）。
+ * @brief 绑定选项数组（控件只保存指针，不复制内容；展开中先收起列表）。
  * @param obj 目标控件对象指针。
  * @param options 选项数组指针，需在控件生命周期内保持有效。
  * @param option_cnt 选项个数。
@@ -165,7 +164,7 @@ int32_t we_dropdown_get_value(const we_dropdown_obj_t *obj);
 void we_dropdown_set_changed_cb(we_dropdown_obj_t *obj, we_dropdown_changed_cb_t cb);
 
 /**
- * @brief 展开下拉列表（占用唯一 popup slot）。
+ * @brief 展开下拉列表（顶层模态弹层）。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
@@ -186,7 +185,7 @@ void we_dropdown_close(we_dropdown_obj_t *obj);
 void we_dropdown_toggle(we_dropdown_obj_t *obj);
 
 /**
- * @brief 设置 popup 最多同时可见的选项数量。
+ * @brief 设置 popup 最多同时可见的选项数量（展开中先收起列表）。
  * @param obj 目标控件对象指针。
  * @param count 可见项数量（至少 1）。
  * @return 无。
@@ -194,7 +193,7 @@ void we_dropdown_toggle(we_dropdown_obj_t *obj);
 void we_dropdown_set_max_visible_items(we_dropdown_obj_t *obj, uint8_t count);
 
 /**
- * @brief 设置列表项高度。
+ * @brief 设置列表项高度（展开中先收起列表）。
  * @param obj 目标控件对象指针。
  * @param item_h 单项高度（像素）。
  * @return 无。
@@ -202,7 +201,16 @@ void we_dropdown_set_max_visible_items(we_dropdown_obj_t *obj, uint8_t count);
 void we_dropdown_set_item_height(we_dropdown_obj_t *obj, uint16_t item_h);
 
 /**
- * @brief 删除下拉控件（如展开则先关闭 popup）。
+ * @brief 启用/禁用：禁用后不响应触摸与按键、拒绝聚焦，文字改用禁用色；
+ *        展开中禁用会先收起列表。
+ * @param obj 目标控件对象指针。
+ * @param enabled 非 0 启用，0 禁用。
+ * @return 无。
+ */
+void we_dropdown_set_enabled(we_dropdown_obj_t *obj, uint8_t enabled);
+
+/**
+ * @brief 删除下拉控件（展开时由删除回调先收起列表；直接 we_obj_delete 或删除父容器同样安全）。
  * @param obj 目标控件对象指针。
  * @return 无。
  */

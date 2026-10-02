@@ -7,9 +7,9 @@
  *   - gui_fb：GUI 分辨率 ARGB 帧缓冲，LCD flush 端口写这里；
  *   - win_buf：放大 LITE_SCALE 倍的窗口缓冲，lite_present() 最近邻放大
  *     后交给 fenster 贴窗；--shot 自检模式不开窗，直接导出 gui_fb；
- *   - 输入：fenster 只给按键/鼠标"状态"，端口逐帧 diff 出边沿——鼠标
- *     映射触摸（按下/拖动/抬起），键盘映射语义键（方向/Tab/OK/BACK，
- *     OK 双沿；方向与 Tab 带长按自动重复），WASD 两相注入模拟滑动。
+ *   - 输入：鼠标状态直接作为触摸电平上报（按下/抬起的边沿由内核判定）；
+ *     fenster 只给按键"状态"，端口逐帧 diff 出边沿后映射语义键（方向/Tab/
+ *     OK/BACK，OK 双沿；方向与 Tab 带长按自动重复）；WASD 两相注入模拟滑动。
  */
 
 #include "lite_port.h"
@@ -48,10 +48,8 @@ static struct
 } current_addr;
 static uint32_t pixel_offset = 0;
 
-/* 触摸（鼠标）待上报槽 */
-static we_indev_data_t g_pending_input;
-static uint8_t g_has_pending_input = 0;
-static int g_prev_mouse = 0;
+/* 触摸（鼠标）当前电平：lite_handle_events 每帧更新，内核经 lite_touch_read 采样 */
+static we_touch_data_t g_touch;
 
 void lite_set_headless(int on) { g_headless = on; }
 
@@ -275,28 +273,14 @@ const uint32_t *lite_fb(void) { return gui_fb; }
 
 void input_hw_init(void)
 {
-    memset(&g_pending_input, 0, sizeof(g_pending_input));
-    g_pending_input.state = WE_TOUCH_STATE_NONE;
-    g_has_pending_input = 0;
-    g_prev_mouse = 0;
+    memset(&g_touch, 0, sizeof(g_touch));
 }
 
-void we_input_port_read(we_indev_data_t *data)
+void lite_touch_read(we_touch_data_t *data)
 {
     if (data == NULL)
         return;
-
-    if (g_has_pending_input)
-    {
-        *data = g_pending_input;
-        g_has_pending_input = 0;
-    }
-    else
-    {
-        data->x = 0;
-        data->y = 0;
-        data->state = WE_TOUCH_STATE_NONE;
-    }
+    *data = g_touch;
 }
 
 /* fenster 统一键码（三平台一致）：方向 17..20、Enter=10、Tab=9、Esc=27、
@@ -332,23 +316,25 @@ int lite_handle_events(we_lcd_t *lcd)
 {
     int mouse_down;
     int16_t mx, my;
+    uint8_t swipe_release = 0U;
 
     if (g_quit)
         return 0;
     if (g_headless || !g_window_open)
         return 1;
 
-    /* WASD 滑动第二相：上一帧发了 PRESSED，本帧补 RELEASED */
+    /* WASD 滑动第二相：上一帧报了按下，本帧在滑动终点报松开
+     * （中间没有按住帧，内核按快扫判定 SWIPE） */
     if (g_key_swipe_phase == 1)
     {
-        g_pending_input.state = WE_TOUCH_STATE_RELEASED;
-        g_pending_input.x = g_key_release_x;
-        g_pending_input.y = g_key_release_y;
-        g_has_pending_input = 1;
+        g_touch.pressed = 0U;
+        g_touch.x = g_key_release_x;
+        g_touch.y = g_key_release_y;
         g_key_swipe_phase = 0;
+        swipe_release = 1U;
     }
 
-    /* ---- 鼠标 -> 触摸（坐标除以放大倍数并钳到屏内） ---- */
+    /* ---- 鼠标 -> 触摸电平（坐标除以放大倍数并钳到屏内） ---- */
     mouse_down = g_f.mouse & 1;
     mx = (int16_t)(g_f.x / LITE_SCALE);
     my = (int16_t)(g_f.y / LITE_SCALE);
@@ -361,28 +347,12 @@ int lite_handle_events(we_lcd_t *lcd)
     if (my >= SCREEN_HEIGHT)
         my = SCREEN_HEIGHT - 1;
 
-    if (mouse_down && !g_prev_mouse)
+    if (!swipe_release)
     {
-        g_pending_input.state = WE_TOUCH_STATE_PRESSED;
-        g_pending_input.x = mx;
-        g_pending_input.y = my;
-        g_has_pending_input = 1;
+        g_touch.pressed = (uint8_t)(mouse_down ? 1U : 0U);
+        g_touch.x = mx;
+        g_touch.y = my;
     }
-    else if (!mouse_down && g_prev_mouse)
-    {
-        g_pending_input.state = WE_TOUCH_STATE_RELEASED;
-        g_pending_input.x = mx;
-        g_pending_input.y = my;
-        g_has_pending_input = 1;
-    }
-    else if (mouse_down)
-    {
-        g_pending_input.state = WE_TOUCH_STATE_STAY;
-        g_pending_input.x = mx;
-        g_pending_input.y = my;
-        g_has_pending_input = 1;
-    }
-    g_prev_mouse = mouse_down;
 
 #if (WE_CFG_ENABLE_KEY_INPUT == 1)
     /* ---- 键盘 -> 语义键（按状态 diff 出边沿） ---- */
@@ -475,10 +445,9 @@ int lite_handle_events(we_lcd_t *lcd)
 
         if (valid)
         {
-            g_pending_input.state = WE_TOUCH_STATE_PRESSED;
-            g_pending_input.x = cx;
-            g_pending_input.y = cy;
-            g_has_pending_input = 1;
+            g_touch.pressed = 1U;
+            g_touch.x = cx;
+            g_touch.y = cy;
             g_key_release_x = rx;
             g_key_release_y = ry;
             g_key_swipe_phase = 1;

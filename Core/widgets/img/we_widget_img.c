@@ -1,12 +1,12 @@
 #include "we_widget_img.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 图片控件绘制回调
  *
  * 图片格式分发统一由渲染层的 we_img_render_auto / we_img_format_supported
- * 负责（we_render.c），img 与 imgbtn 等所有图片控件共用同一份分发表：
- * - 支持哪些格式、当前工程裁掉了哪些，只看 we_render.c 一处
+ * 负责（we_image.c），img 与 imgbtn 等所有图片控件共用同一份分发表：
+ * - 支持哪些格式、当前工程裁掉了哪些，只看 we_image.c 一处
  * - 控件层只做"init 阶段拦下不支持的资源、绘制时把图和参数递进去"
  * -------------------------------------------------------------------------- */
 
@@ -19,10 +19,9 @@ static void _img_draw_cb(void *ptr)
 {
     we_img_obj_t *obj = (we_img_obj_t *)ptr;
 
-    if (obj == NULL || obj->opacity == 0 || obj->img_src == NULL || obj->base.lcd == NULL)
-    {
+    /* 容器级联后 <= 5 时什么也画不出，连解码也省掉（图片与 LCD 在 init 时已校验） */
+    if (we_opa_apply(obj->base.lcd, obj->opacity) <= 5U)
         return;
-    }
 
     /* 格式分发由渲染层统一负责（we_img_render_auto），控件只提供
      * "画哪张图 + 前景色 + 透明度"；前景色仅 A1/A2/A4/A8 会用到。 */
@@ -50,6 +49,7 @@ void we_img_obj_init(we_img_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y, con
     }
 
     obj->base.lcd = lcd;
+    obj->base.parent = NULL;
     obj->base.x = x;
     obj->base.y = y;
     obj->base.w = IMG_DAT_WIDTH(img);

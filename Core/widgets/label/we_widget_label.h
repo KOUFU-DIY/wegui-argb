@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_LABEL_H
 #define __WE_WIDGET_LABEL_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 // ---------------------------------------------------------
 // 文本控件结构体
@@ -10,7 +10,7 @@ typedef struct
 {
     we_obj_t base;             // 必须在首位！包含 lcd, x, y, w, h
     const char *text;          // UTF-8 字符串指针
-    const unsigned char *font; // V7.x 字库裸数组指针
+    const unsigned char *font; // 字库数组指针（font2c 生成）
     colour_t color;            // 文字前景色
     uint8_t opacity;           // 文字透明度 (0~255)
 } we_label_obj_t;
@@ -70,7 +70,7 @@ void we_label_set_opacity(we_label_obj_t *obj, uint8_t opacity);
  */
 static inline void we_label_obj_set_pos(we_label_obj_t *obj, int16_t x, int16_t y)
 {
-we_obj_set_pos((we_obj_t *)obj, x, y);
+    we_obj_set_pos((we_obj_t *)obj, x, y);
 }
 
 /**

@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_COLORWHEEL_H
 #define __WE_WIDGET_COLORWHEEL_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * HSV 色轮控件（colorwheel）—— preview 孵化区实验控件

@@ -1,5 +1,5 @@
 #include "demo_common.h"
-#include "we_font_text.h"
+#include "wegui.h"
 
 #include <stdio.h>
 

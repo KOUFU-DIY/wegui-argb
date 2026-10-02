@@ -14,7 +14,7 @@ void PendSV_Handler(void);
 void SysTick_Handler(void);
 void DMA1_Channel4_5_IRQHandler(void);
 
-extern volatile uint8_t  g_sys_tick;
+extern volatile uint32_t g_sys_ms; /* 系统毫秒计数 (SysTick 每 1ms 自增, 自然回绕) */
 extern volatile uint32_t g_sys_delay;
 
 #ifdef __cplusplus

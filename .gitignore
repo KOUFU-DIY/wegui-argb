@@ -8,6 +8,9 @@ tool/4.STM32F103_ex_flash_download/Objects/
 tool/4.STM32F103_ex_flash_download/Listings/
 build_out.txt
 
+# GD32E230 目标暂不入库（老王 GD32E230C8 带屏板，整目录忽略）
+GD32E230/
+
 # AD14N 目标暂不入库（整目录忽略；下面的产物细则保留，供将来入库时恢复使用）
 AD14N/
 
@@ -61,4 +64,10 @@ build_log.txt
 # SimLite build output and local TCC toolchain
 SimLite/build/
 SimLite/tcc/
+
+# SimLite 开发者工具仅本地维护、不随仓库发布（运行时选台 / 基准哈希回归 / GIF 录制；
+# 公开仓库只保留与硬件同构的移植模板入口 main_lite.c，避免使用者误判入口）
+SimLite/debug/
+SimLite/autotest.ps1
+SimLite/autotest/
 

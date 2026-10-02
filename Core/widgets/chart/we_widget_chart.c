@@ -1,5 +1,5 @@
 #include "we_widget_chart.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 波形绘制算法说明
@@ -49,6 +49,23 @@ static __inline uint16_t _chart_visible_count(const we_chart_obj_t *obj, int16_t
 }
 
 /**
+ * @brief 环形缓冲索引加偏移（比较回绕，不做取模）。
+ * @param obj 目标控件对象指针。
+ * @param idx 起始索引（< data_cap）。
+ * @param ofs 偏移（<= data_cap）。
+ * @return (idx + ofs) 回绕到 [0, data_cap) 的索引。
+ * @note 两数之和小于 2*data_cap，减一次即可；M0 没有除法指令，取模要调库函数。
+ */
+static __inline uint16_t _chart_ring_add(const we_chart_obj_t *obj, uint16_t idx, uint16_t ofs)
+{
+    uint32_t r = (uint32_t)idx + ofs;
+
+    if (r >= obj->data_cap)
+        r -= obj->data_cap;
+    return (uint16_t)r;
+}
+
+/**
  * @brief 计算可见窗口在环形缓冲中的起始索引。
  * @param obj 目标控件对象指针。
  * @param visible_count 可见列数。
@@ -57,23 +74,11 @@ static __inline uint16_t _chart_visible_count(const we_chart_obj_t *obj, int16_t
  */
 static __inline uint16_t _chart_visible_start_idx(const we_chart_obj_t *obj, uint16_t visible_count, int16_t bw)
 {
-    uint16_t base = (uint16_t)((obj->data_head + (uint32_t)obj->data_cap - obj->data_count) % obj->data_cap);
+    uint16_t base = _chart_ring_add(obj, obj->data_head, (uint16_t)(obj->data_cap - obj->data_count));
     uint16_t skip = (obj->data_count > (uint16_t)bw) ? (uint16_t)(obj->data_count - (uint16_t)bw) : 0U;
     if (visible_count == 0U)
         return base;
-    return (uint16_t)((base + skip) % obj->data_cap);
-}
-
-/**
- * @brief 将可见列偏移转换为环形缓冲索引。
- * @param obj 目标控件对象指针。
- * @param idx0 可见窗口在环形缓冲中的起始索引。
- * @param col_idx 相对可见窗口的列偏移。
- * @return (idx0 + col_idx) % data_cap。
- */
-static __inline uint16_t _chart_value_at_visible(const we_chart_obj_t *obj, uint16_t idx0, uint16_t col_idx)
-{
-    return (uint16_t)((idx0 + col_idx) % obj->data_cap);
+    return _chart_ring_add(obj, base, skip);
 }
 
 /**
@@ -178,18 +183,6 @@ static __inline int32_t _get_sy_at(const we_chart_obj_t *obj, uint16_t ri,
 }
 
 /**
- * @brief 计算脏区并发起局部重绘请求。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-static void _chart_invalidate_full(we_chart_obj_t *obj)
-{
-    if (!obj)
-        return;
-    we_obj_invalidate((we_obj_t *)obj);
-}
-
-/**
  * @brief 累积两点连线在当前列的垂直覆盖区间。
  * @param y0 起始 Y 坐标。
  * @param y1 结束 Y 坐标。
@@ -228,10 +221,11 @@ static void _chart_accum_span(int32_t *y0, int32_t *y1,
 }
 
 /**
- * @brief 向控件数据队列推入一个新采样点。
+ * @brief push 前标脏：新旧两帧波形在每个列块上的联合包络。
  * @param obj 目标控件对象指针。
- * @param new_value 待写入的新值。
+ * @param new_value 即将写入 data_head 的新值（此刻该槽还是被覆盖的旧值）。
  * @return 无。
+ * @note 新旧两帧各用一个环形游标逐列 +1、比较回绕，整趟不做取模。
  */
 static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
 {
@@ -241,8 +235,8 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
     int16_t bh;
     uint16_t old_count;
     uint16_t new_count;
-    uint16_t old_idx0;
-    uint16_t new_idx0;
+    uint16_t ri_old;
+    uint16_t ri_new;
     int32_t old_sc_start;
     int32_t new_sc_start;
     int32_t stroke;
@@ -250,12 +244,12 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
     int32_t col_start;
     int32_t count_delta;
 
-    if (!obj || !obj->data || obj->opacity == 0U)
+    if (obj->opacity == 0U)
         return;
 
 #if (WE_CFG_CHART_DIRTY_MODE == 0)
     (void)new_value;
-    _chart_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj);
     return;
 #else
     bx = obj->base.x;
@@ -270,10 +264,10 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
     if (new_count > (uint16_t)bw)
         new_count = (uint16_t)bw;
 
-    old_idx0 = _chart_visible_start_idx(obj, old_count, bw);
-    new_idx0 = (new_count > 0U)
-                 ? (uint16_t)(((obj->data_head + 1U) + (uint32_t)obj->data_cap - new_count) % obj->data_cap)
-                 : obj->data_head;
+    ri_old = _chart_visible_start_idx(obj, old_count, bw);
+    ri_new = (new_count > 0U)
+               ? _chart_ring_add(obj, _chart_ring_add(obj, obj->data_head, 1U), (uint16_t)(obj->data_cap - new_count))
+               : obj->data_head;
     old_sc_start = (int32_t)bw - (int32_t)old_count;
     new_sc_start = (int32_t)bw - (int32_t)new_count;
     count_delta = (int32_t)new_count - (int32_t)old_count;
@@ -285,7 +279,6 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
         int32_t col_end = col_start + block_w - 1;
         int32_t y0 = (int32_t)(by + bh - 1);
         int32_t y1 = (int32_t)by;
-        uint8_t has_span = 0U;
 
         if (col_end >= (int32_t)new_count)
             col_end = (int32_t)new_count - 1;
@@ -293,31 +286,27 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
         for (int32_t col = col_start; col <= col_end; col++)
         {
             int32_t old_col = col - count_delta;
+            uint16_t ri_new_next = _chart_ring_add(obj, ri_new, 1U);
 
+            /* 旧帧：本列（及下一列）在旧可见窗口里的样本 */
             if (old_col >= 0 && old_col < (int32_t)old_count)
             {
-                uint16_t ri_old_a = _chart_value_at_visible(obj, old_idx0, (uint16_t)old_col);
-                uint16_t ri_old_b = (old_col + 1 < (int32_t)old_count)
-                                      ? _chart_value_at_visible(obj, old_idx0, (uint16_t)(old_col + 1))
-                                      : ri_old_a;
-                _chart_accum_span(&y0, &y1, obj->data[ri_old_a], obj->data[ri_old_b], by, bh, stroke);
-                has_span = 1U;
+                uint16_t ri_old_b = (old_col + 1 < (int32_t)old_count) ? _chart_ring_add(obj, ri_old, 1U) : ri_old;
+                _chart_accum_span(&y0, &y1, obj->data[ri_old], obj->data[ri_old_b], by, bh, stroke);
+                ri_old = _chart_ring_add(obj, ri_old, 1U);
             }
 
-            if (col < (int32_t)new_count)
+            /* 新帧：data_head 槽读作即将写入的新值 */
             {
-                uint16_t ri_new_a = _chart_value_at_visible(obj, new_idx0, (uint16_t)col);
-                uint16_t ri_new_b = (col + 1 < (int32_t)new_count)
-                                      ? _chart_value_at_visible(obj, new_idx0, (uint16_t)(col + 1))
-                                      : ri_new_a;
-                int32_t new_a = (ri_new_a == obj->data_head) ? new_value : obj->data[ri_new_a];
+                uint16_t ri_new_b = (col + 1 < (int32_t)new_count) ? ri_new_next : ri_new;
+                int32_t new_a = (ri_new == obj->data_head) ? new_value : obj->data[ri_new];
                 int32_t new_b = (ri_new_b == obj->data_head) ? new_value : obj->data[ri_new_b];
                 _chart_accum_span(&y0, &y1, new_a, new_b, by, bh, stroke);
-                has_span = 1U;
             }
+            ri_new = ri_new_next;
         }
 
-        if (has_span && y0 <= y1)
+        if (y0 <= y1)
         {
             int16_t rx = (int16_t)(bx + new_sc_start + col_start);
             int16_t rw = (int16_t)(col_end - col_start + 1);
@@ -336,259 +325,32 @@ static void _chart_invalidate_push(we_chart_obj_t *obj, int16_t new_value)
 }
 
 /**
- * @brief 在当前 PFB 裁剪区内绘制一条竖向网格线（带裁剪与淡入混色）。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x 网格线所在的 X 坐标。
- * @param y0 网格线起始 Y 坐标。
- * @param y1 网格线结束 Y 坐标。
- * @param color 网格线颜色值。
- * @param alpha 混色 alpha（>=250 时直接覆盖，否则随整体透明度混色）。
- * @return 无。
- */
-static void _chart_draw_grid_vline(we_lcd_t *lcd, int16_t x, int16_t y0, int16_t y1, colour_t color, uint8_t alpha)
-{
-    int16_t draw_y0;
-    int16_t draw_y1;
-    colour_t *dst;
-
-    if (!lcd)
-        return;
-    if (x < (int16_t)lcd->pfb_area.x0 || x > (int16_t)lcd->pfb_area.x1)
-        return;
-    if (y1 < (int16_t)lcd->pfb_y_start || y0 > (int16_t)lcd->pfb_y_end)
-        return;
-
-    draw_y0 = (y0 < (int16_t)lcd->pfb_y_start) ? (int16_t)lcd->pfb_y_start : y0;
-    draw_y1 = (y1 > (int16_t)lcd->pfb_y_end) ? (int16_t)lcd->pfb_y_end : y1;
-    dst = lcd->pfb_gram + (uint16_t)(draw_y0 - (int16_t)lcd->pfb_y_start) * lcd->pfb_width +
-          (uint16_t)(x - (int16_t)lcd->pfb_area.x0);
-
-    if (alpha >= 250U)
-    {
-        for (int16_t y = draw_y0; y <= draw_y1; y++)
-        {
-            *dst = color;
-            dst += lcd->pfb_width;
-        }
-    }
-    else /* 容器淡入淡出期：网格随整体透明度混色 */
-    {
-        for (int16_t y = draw_y0; y <= draw_y1; y++)
-        {
-            *dst = we_colour_blend(color, *dst, alpha);
-            dst += lcd->pfb_width;
-        }
-    }
-}
-
-/**
- * @brief 在当前 PFB 裁剪区内绘制一条横向网格线（带裁剪与淡入混色）。
- * @param lcd GUI 运行时 LCD 上下文指针。
- * @param x0 网格线起始 X 坐标。
- * @param x1 网格线结束 X 坐标。
- * @param y 网格线所在的 Y 坐标。
- * @param color 网格线颜色值。
- * @param alpha 混色 alpha（>=250 时直接覆盖，否则随整体透明度混色）。
- * @return 无。
- */
-static void _chart_draw_grid_hline(we_lcd_t *lcd, int16_t x0, int16_t x1, int16_t y, colour_t color, uint8_t alpha)
-{
-    int16_t draw_x0;
-    int16_t draw_x1;
-    colour_t *dst;
-
-    if (!lcd)
-        return;
-    if (y < (int16_t)lcd->pfb_y_start || y > (int16_t)lcd->pfb_y_end)
-        return;
-    if (x1 < (int16_t)lcd->pfb_area.x0 || x0 > (int16_t)lcd->pfb_area.x1)
-        return;
-
-    draw_x0 = (x0 < (int16_t)lcd->pfb_area.x0) ? (int16_t)lcd->pfb_area.x0 : x0;
-    draw_x1 = (x1 > (int16_t)lcd->pfb_area.x1) ? (int16_t)lcd->pfb_area.x1 : x1;
-    dst = lcd->pfb_gram + (uint16_t)(y - (int16_t)lcd->pfb_y_start) * lcd->pfb_width +
-          (uint16_t)(draw_x0 - (int16_t)lcd->pfb_area.x0);
-
-    if (alpha >= 250U)
-    {
-        for (int16_t x = draw_x0; x <= draw_x1; x++)
-        {
-            *dst++ = color;
-        }
-    }
-    else /* 容器淡入淡出期：网格随整体透明度混色 */
-    {
-        for (int16_t x = draw_x0; x <= draw_x1; x++)
-        {
-            *dst = we_colour_blend(color, *dst, alpha);
-            dst++;
-        }
-    }
-}
-
-/**
- * @brief 按预计算偏移绘制全部行/列网格线。
- * @param lcd GUI 运行时 LCD 上下文指针。
+ * @brief 按预计算偏移绘制全部行/列网格线（1px 宽的矩形填充）。
  * @param obj 目标控件对象指针（提供预计算的网格分割点偏移）。
- * @param bx 绘制区域起始 X 坐标。
- * @param by 绘制区域起始 Y 坐标。
- * @param bw 绘制区域宽度（像素）。
- * @param bh 绘制区域高度（像素）。
- * @param alpha 网格线混色 alpha（随整体透明度淡入淡出）。
  * @return 无。
+ * @note 传控件自身透明度，容器级联由 we_fill_rect 入口统一乘一次。
  */
-static void _chart_draw_grid(we_lcd_t *lcd, const we_chart_obj_t *obj,
-                             int16_t bx, int16_t by, int16_t bw, int16_t bh, uint8_t alpha)
+static void _chart_draw_grid(const we_chart_obj_t *obj)
 {
 #if (WE_CHART_GRID_COLS > 1) || (WE_CHART_GRID_ROWS > 1)
+    we_lcd_t *lcd = obj->base.lcd;
     colour_t gc = RGB888TODEV(WE_CHART_GRID_R, WE_CHART_GRID_G, WE_CHART_GRID_B);
 #else
     (void)obj;
-    (void)bw;
-    (void)bh;
-    (void)alpha;
 #endif
 
-    /* 分割点在 init 时已预计算（见 we_chart_obj_init），
-     * 这里只做加法；网格每个 PFB 带都重绘，省掉的是每帧
-     * (COLS+ROWS)×带数 次软件除法。 */
+    /* 分割点在 init 时已预计算（见 we_chart_obj_init），这里只做加法 */
 #if (WE_CHART_GRID_COLS > 1)
     for (uint8_t c = 1U; c < (uint8_t)WE_CHART_GRID_COLS; c++)
-    {
-        int16_t gx = (int16_t)(bx + obj->grid_dx[c - 1U]);
-        _chart_draw_grid_vline(lcd, gx, by, (int16_t)(by + bh - 1), gc, alpha);
-    }
+        we_fill_rect(lcd, (int16_t)(obj->base.x + obj->grid_dx[c - 1U]), obj->base.y,
+                     1U, (uint16_t)obj->base.h, gc, obj->opacity);
 #endif
 
 #if (WE_CHART_GRID_ROWS > 1)
     for (uint8_t r = 1U; r < (uint8_t)WE_CHART_GRID_ROWS; r++)
-    {
-        int16_t gy = (int16_t)(by + obj->grid_dy[r - 1U]);
-        _chart_draw_grid_hline(lcd, bx, (int16_t)(bx + bw - 1), gy, gc, alpha);
-    }
+        we_fill_rect(lcd, obj->base.x, (int16_t)(obj->base.y + obj->grid_dy[r - 1U]),
+                     (uint16_t)obj->base.w, 1U, gc, obj->opacity);
 #endif
-}
-
-/**
- * @brief 在当前列内绘制波形主体（实心覆盖区间，按 a_solid 混色）。
- * @param obj 目标控件对象指针。
- * @param cb 当前列在 PFB 中的基地址（colour_t*）。
- * @param pfb_w PFB 行跨度（像素）。
- * @param pfb_y0 PFB 起始 Y 坐标。
- * @param clip_y0 本次绘制裁剪起始 Y。
- * @param clip_y1 本次绘制裁剪结束 Y。
- * @param span_top 波形主体顶部 Y。
- * @param span_bot 波形主体底部 Y。
- * @param color 目标颜色值。
- * @param a_solid 主体像素覆盖 alpha 值。
- * @return 无。
- */
-static void _chart_draw_wave_body(we_chart_obj_t *obj,
-                                  colour_t *cb,
-                                  uint16_t pfb_w,
-                                  int16_t pfb_y0,
-                                  int32_t clip_y0,
-                                  int32_t clip_y1,
-                                  int32_t span_top,
-                                  int32_t span_bot,
-                                  colour_t color,
-                                  uint8_t a_solid)
-{
-    if (a_solid <= 5U)
-        return;
-
-    {
-        int32_t   y0  = (span_top < clip_y0) ? clip_y0 : span_top;
-        int32_t   y1  = (span_bot > clip_y1) ? clip_y1 : span_bot;
-        /* 起点乘法只算一次，循环里改成 += pfb_w 步进，省掉每行的一次乘法。 */
-        colour_t *dst = cb + (uint16_t)(y0 - pfb_y0) * pfb_w;
-        for (int32_t y = y0; y <= y1; y++)
-        {
-            *dst = (a_solid >= 250U) ? color : we_colour_blend(color, *dst, a_solid);
-            dst += pfb_w;
-        }
-    }
-}
-
-/**
- * @brief 在波形主体上下各绘制柔边（按层级递减 alpha 混色）。
- * @param obj 目标控件对象指针。
- * @param cb 当前列在 PFB 中的基地址（colour_t*）。
- * @param pfb_w PFB 行跨度（像素）。
- * @param pfb_y0 PFB 起始 Y 坐标。
- * @param clip_y0 本次绘制裁剪起始 Y。
- * @param clip_y1 本次绘制裁剪结束 Y。
- * @param span_top 波形主体顶部 Y。
- * @param span_bot 波形主体底部 Y。
- * @param color 目标颜色值。
- * @param opacity 不透明度（0~255）。
- * @return 无。
- */
-static void _chart_draw_wave_feather(we_chart_obj_t *obj,
-                                     colour_t *cb,
-                                     uint16_t pfb_w,
-                                     int16_t pfb_y0,
-                                     int32_t clip_y0,
-                                     int32_t clip_y1,
-                                     int32_t span_top,
-                                     int32_t span_bot,
-                                     colour_t color,
-                                     uint8_t opacity)
-{
-    uint8_t aa_h = _chart_get_aa_height();
-
-    (void)obj;
-    if (aa_h == 0U)
-        return;
-
-    for (uint8_t edge = 0U; edge < aa_h; edge++)
-    {
-        uint8_t a_edge = _chart_get_aa_alpha(aa_h, edge, opacity);
-        int32_t y_top = span_top - 1 - (int32_t)edge;
-        int32_t y_bot = span_bot + 1 + (int32_t)edge;
-
-        if (a_edge > 0U && y_top >= clip_y0 && y_top <= clip_y1)
-        {
-            colour_t *dst = cb + (uint16_t)(y_top - pfb_y0) * pfb_w;
-            *dst = we_colour_blend(color, *dst, a_edge);
-        }
-        if (a_edge > 0U && y_bot >= clip_y0 && y_bot <= clip_y1)
-        {
-            colour_t *dst = cb + (uint16_t)(y_bot - pfb_y0) * pfb_w;
-            *dst = we_colour_blend(color, *dst, a_edge);
-        }
-    }
-}
-
-/**
- * @brief 绘制单列波形：先画主体再画上下柔边。
- * @param obj 目标控件对象指针。
- * @param cb 当前列在 PFB 中的基地址（colour_t*）。
- * @param pfb_w PFB 行跨度（像素）。
- * @param pfb_y0 PFB 起始 Y 坐标。
- * @param clip_y0 本次绘制裁剪起始 Y。
- * @param clip_y1 本次绘制裁剪结束 Y。
- * @param span_top 波形主体顶部 Y。
- * @param span_bot 波形主体底部 Y。
- * @param color 目标颜色值。
- * @param a_solid 主体像素覆盖 alpha 值。
- * @param opacity 不透明度（0~255）。
- * @return 无。
- */
-static void _chart_draw_wave_col(we_chart_obj_t *obj,
-                                 colour_t *cb,
-                                 uint16_t pfb_w,
-                                 int16_t pfb_y0,
-                                 int32_t clip_y0,
-                                 int32_t clip_y1,
-                                 int32_t span_top,
-                                 int32_t span_bot,
-                                 colour_t color,
-                                 uint8_t a_solid,
-                                 uint8_t opacity)
-{
-    _chart_draw_wave_body(obj, cb, pfb_w, pfb_y0, clip_y0, clip_y1, span_top, span_bot, color, a_solid);
-    _chart_draw_wave_feather(obj, cb, pfb_w, pfb_y0, clip_y0, clip_y1, span_top, span_bot, color, opacity);
 }
 
 /* --------------------------------------------------------------------------
@@ -603,8 +365,8 @@ static void _chart_draw_wave_col(we_chart_obj_t *obj,
  *   这样相邻两列的填充区间首尾相接，左右两侧都不出现间隙，彻底消除
  *   "左侧锯齿"（ARM-2D 算法每列硬顶边缘的问题）。
  *
- *   边缘 AA：固定 1px，alpha = 128（50%），不依赖斜率，无突变。
- *
+ *   边缘 AA：主体上下各 WE_CHART_AA_MAX 层，alpha 按离主体的层数递减
+ *   （线性或二次，编译期查表），不依赖斜率，无突变。
  * -------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------
@@ -615,6 +377,8 @@ static void _chart_draw_wave_col(we_chart_obj_t *obj,
  * @brief 控件绘制回调，向当前 PFB 输出可视内容。
  * @param ptr 回调透传对象指针。
  * @return 无。
+ * @note 内核调用前已把窗口收窄到本控件包围盒内。每个切片只处理波形
+ *       （含柔边）与窗口行范围相交的列，其余列只推进游标。
  */
 static void _chart_draw_cb(void *ptr)
 {
@@ -624,76 +388,57 @@ static void _chart_draw_cb(void *ptr)
     int16_t  by = obj->base.y;
     int16_t  bw = obj->base.w;
     int16_t  bh = obj->base.h;
+    uint8_t  opacity = we_opa_apply(p_lcd, obj->opacity); /* 容器透明度级联 */
 
-    if (!p_lcd || bw <= 0 || bh <= 0 || !obj->data)
+    if (opacity == 0U)
+        return;
+
+    _chart_draw_grid(obj);
+
+    uint16_t draw_cnt = _chart_visible_count(obj, bw);
+    if (draw_cnt < 2U)
         return;
 
     colour_t *pfb_gram = p_lcd->pfb_gram;
     uint16_t  pfb_w    = p_lcd->pfb_width;
-    int16_t   pfb_x0   = p_lcd->pfb_area.x0;
-    int16_t   pfb_x1   = p_lcd->pfb_area.x1;
-    int16_t   pfb_y0   = p_lcd->pfb_y_start;
-    int16_t   pfb_y1   = p_lcd->pfb_y_end;
+    int16_t   pfb_x0   = p_lcd->clip.x0;
+    int32_t   clip_y0  = p_lcd->clip.y0;
+    int32_t   clip_y1  = p_lcd->clip.y1;
     colour_t  color    = obj->line_color;
-    uint8_t   opacity  = we_opa_apply(p_lcd, obj->opacity); /* 容器透明度级联 */
-
-    _chart_draw_grid(p_lcd, obj, bx, by, bw, bh, opacity);
-
-    uint16_t draw_cnt = (obj->data_count < (uint16_t)bw)
-                        ? obj->data_count : (uint16_t)bw;
-    if (draw_cnt < 2U)
-        return;
-
-    /* 环形缓冲起始索引 */
-    uint16_t idx0;
-    {
-        uint16_t base = (uint16_t)((obj->data_head + (uint32_t)obj->data_cap
-                                    - obj->data_count) % obj->data_cap);
-        uint16_t skip = (obj->data_count > (uint16_t)bw)
-                        ? (uint16_t)(obj->data_count - (uint16_t)bw) : 0U;
-        idx0 = (uint16_t)((base + skip) % obj->data_cap);
-    }
-
-    int32_t stroke      = (int32_t)obj->stroke;
-    int32_t half_stroke = stroke >> 1;
-
-    /* Y 裁剪区间（PFB 带 ∩ 控件） */
-    int32_t clip_y0 = (pfb_y0 > (int32_t)by)            ? pfb_y0 : (int32_t)by;
-    int32_t clip_y1 = (pfb_y1 < (int32_t)(by + bh - 1)) ? pfb_y1 : (int32_t)(by + bh - 1);
+    int32_t   stroke      = (int32_t)obj->stroke;
+    int32_t   half_stroke = stroke >> 1;
+    uint8_t   aa_h        = _chart_get_aa_height();
 
     /* 数据不满时右对齐 */
     int32_t sc_start = (int32_t)bw - (int32_t)draw_cnt;
 
-    /* 全实心 alpha（考虑 opacity） */
+    /* 全实心 alpha（考虑 opacity）；<=5 时主体不可见 */
     uint8_t a_solid = (uint8_t)(((uint16_t)255U * opacity) >> 8);
 
-    /* D: 把 sc 循环的合法区间预先收敛到 PFB X 范围内，
-     *    省掉每列两次 sx 比较与 continue。 */
-    int32_t sc_lo = sc_start;
-    int32_t sc_hi = (int32_t)bw - 1;
-    {
-        int32_t sc_x_lo = (int32_t)pfb_x0 - (int32_t)bx;
-        int32_t sc_x_hi = (int32_t)pfb_x1 - (int32_t)bx;
-        if (sc_x_lo > sc_lo) sc_lo = sc_x_lo;
-        if (sc_x_hi < sc_hi) sc_hi = sc_x_hi;
-    }
-    if (sc_lo > sc_hi) return;
+    /* 各层柔边 alpha 每次绘制只查一次表 */
+#if (WE_CHART_AA_MAX > 0)
+    uint8_t a_edge[WE_CHART_AA_MAX];
+    for (uint8_t e = 0U; e < aa_h; e++)
+        a_edge[e] = _chart_get_aa_alpha(aa_h, e, opacity);
+#endif
 
-    /* A: 主循环里 y_cur 沿用上一轮的 y_nxt，每列只取一次采样。
-     *    环形索引改用游标 +1 与比较回绕维护：入口仅一次 % 归一化，
-     *    列循环内零取模/零除法（M0 无硬件除法，且本循环每个 PFB 带
-     *    都会完整执行，逐列 % 是被放大的真实热点）。 */
-    int32_t col_idx  = sc_lo - sc_start;
-    uint16_t ri_cur  = _chart_value_at_visible(obj, idx0, (uint16_t)col_idx);
-    int32_t y_cur    = _get_sy_at(obj, ri_cur, by, bh);
+    /* 列循环只跑窗口内的列（窗口右缘不会超出控件） */
+    int32_t sc_lo = sc_start;
+    int32_t sc_hi = (int32_t)p_lcd->clip.x1 - (int32_t)bx;
+    if ((int32_t)pfb_x0 - (int32_t)bx > sc_lo)
+        sc_lo = (int32_t)pfb_x0 - (int32_t)bx;
+    if (sc_lo > sc_hi)
+        return;
+
+    /* y_cur 沿用上一轮的 y_nxt，每列只取一次采样；环形索引用游标 +1 与比较回绕维护 */
+    int32_t  col_idx = sc_lo - sc_start;
+    uint16_t ri_cur  = _chart_ring_add(obj, _chart_visible_start_idx(obj, draw_cnt, bw), (uint16_t)col_idx);
+    int32_t  y_cur   = _get_sy_at(obj, ri_cur, by, bh);
 
     for (int32_t sc = sc_lo; sc <= sc_hi; sc++)
     {
-        int16_t sx       = (int16_t)(bx + sc);
         int32_t col_next = col_idx + 1;
-        uint16_t ri_next = (uint16_t)(ri_cur + 1U);
-        if (ri_next >= obj->data_cap)
-            ri_next = 0U;
+        uint16_t ri_next = _chart_ring_add(obj, ri_cur, 1U);
         int32_t y_nxt    = (col_next < (int32_t)draw_cnt)
                            ? _get_sy_at(obj, ri_next, by, bh)
                            : y_cur;
@@ -706,10 +451,45 @@ static void _chart_draw_cb(void *ptr)
         int32_t span_top = (iCurTop < iNxtTop) ? iCurTop : iNxtTop;
         int32_t span_bot = ((iCurTop > iNxtTop) ? iCurTop : iNxtTop) + stroke - 1;
 
-        colour_t *cb = pfb_gram + (uint16_t)(sx - pfb_x0);
+        /* 主体 [top, bot] 连同上下柔边 [top-aa, bot+aa] 与窗口行范围相交才画 */
+        if (span_bot + (int32_t)aa_h >= clip_y0 && span_top - (int32_t)aa_h <= clip_y1)
+        {
+            colour_t *cb = pfb_gram + (uint16_t)((int16_t)(bx + sc) - pfb_x0);
 
-        _chart_draw_wave_col(obj, cb, pfb_w, pfb_y0, clip_y0, clip_y1,
-                             span_top, span_bot, color, a_solid, opacity);
+            if (a_solid > 5U)
+            {
+                int32_t   y0  = (span_top < clip_y0) ? clip_y0 : span_top;
+                int32_t   y1  = (span_bot > clip_y1) ? clip_y1 : span_bot;
+                colour_t *dst = cb + (uint16_t)(y0 - clip_y0) * pfb_w;
+
+                for (int32_t y = y0; y <= y1; y++)
+                {
+                    *dst = (a_solid >= 250U) ? color : we_colour_blend(color, *dst, a_solid);
+                    dst += pfb_w;
+                }
+            }
+
+#if (WE_CHART_AA_MAX > 0)
+            for (uint8_t e = 0U; e < aa_h; e++)
+            {
+                int32_t y_top = span_top - 1 - (int32_t)e;
+                int32_t y_bot = span_bot + 1 + (int32_t)e;
+
+                if (a_edge[e] == 0U)
+                    continue;
+                if (y_top >= clip_y0 && y_top <= clip_y1)
+                {
+                    colour_t *dst = cb + (uint16_t)(y_top - clip_y0) * pfb_w;
+                    *dst = we_colour_blend(color, *dst, a_edge[e]);
+                }
+                if (y_bot >= clip_y0 && y_bot <= clip_y1)
+                {
+                    colour_t *dst = cb + (uint16_t)(y_bot - clip_y0) * pfb_w;
+                    *dst = we_colour_blend(color, *dst, a_edge[e]);
+                }
+            }
+#endif
+        }
 
         /* 滑动一格：本轮的 y_nxt / ri_next 即下一轮的 y_cur / ri_cur。 */
         y_cur   = y_nxt;
@@ -789,6 +569,7 @@ void we_chart_obj_init(we_chart_obj_t *obj, we_lcd_t *lcd,
 void we_chart_push(we_chart_obj_t *obj, int16_t value)
 {
     if (!obj || !obj->data) return;
+    /* 先按新旧两帧标脏，再写入 */
     _chart_invalidate_push(obj, value);
     obj->data[obj->data_head] = value;
     obj->data_head++;
@@ -805,7 +586,7 @@ void we_chart_push(we_chart_obj_t *obj, int16_t value)
 void we_chart_clear(we_chart_obj_t *obj)
 {
     if (!obj) return;
-    if (obj->opacity > 0U) _chart_invalidate_full(obj);
+    if (obj->opacity > 0U) we_obj_invalidate((we_obj_t *)obj);
     obj->data_head  = 0U;
     obj->data_count = 0U;
 }
@@ -818,9 +599,9 @@ void we_chart_clear(we_chart_obj_t *obj)
  */
 void we_chart_set_color(we_chart_obj_t *obj, colour_t color)
 {
-    if (!obj) return;
+    if (!obj || we_colour_eq(obj->line_color, color)) return;
     obj->line_color = color;
-    if (obj->opacity > 0U) _chart_invalidate_full((we_chart_obj_t *)obj);
+    if (obj->opacity > 0U) we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -832,7 +613,6 @@ void we_chart_set_color(we_chart_obj_t *obj, colour_t color)
 void we_chart_set_opacity(we_chart_obj_t *obj, uint8_t opacity)
 {
     if (!obj || obj->opacity == opacity) return;
-    if (obj->opacity > 0U) _chart_invalidate_full(obj);
     obj->opacity = opacity;
-    if (obj->opacity > 0U) _chart_invalidate_full(obj);
+    we_obj_invalidate((we_obj_t *)obj); /* 包围盒不变，标一次即可 */
 }

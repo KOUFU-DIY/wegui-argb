@@ -6,7 +6,7 @@
  * 这里默认不使用 while(1)：
  * 1. 因为很多项目本来就不启用外挂存储
  * 2. 所以“没有外部存储”不应被视为错误
- * 3. 默认行为是：初始化为空实现，读取返回失败
+ * 3. 默认行为是：初始化为空实现，读取按擦除态填 0xFF
  * -------------------------------------------------------------------------- */
 
 /**
@@ -20,20 +20,23 @@ void storage_hw_init(void)
 }
 
 /**
- * @brief 从外部存储按地址读取数据。
- * @param buf 读取结果缓冲区。
+ * @brief 从外部存储按地址读取数据（填进端口描述 we_port_t 的 storage_read）。
  * @param addr 外部存储起始地址。
+ * @param buf 读取结果缓冲区。
  * @param len 读取字节长度。
- * @return 读取结果，1 表示成功，0 表示失败。
+ * @return 无。
  */
-uint8_t we_storage_port_read(uint8_t *buf, uint32_t addr, uint32_t len)
+void we_storage_port_read(uint32_t addr, uint8_t buf[], uint32_t len)
 {
-    (void)addr;
-    (void)buf;
-    (void)len;
+    uint32_t i;
 
-    /* 默认返回失败：
+    (void)addr;
+
+    /* 默认按擦除态填 0xFF（与未烧录的外挂 flash 读出一致）：
      * 1. 表示当前模板没有接任何真实外部存储
      * 2. 真正移植时，请在这里补 SPI Flash / EEPROM / 其他介质读取逻辑 */
-    return 0;
+    for (i = 0U; i < len; i++)
+    {
+        buf[i] = 0xFFU;
+    }
 }

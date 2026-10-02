@@ -977,24 +977,59 @@
           <GroupName>we_core</GroupName>
           <Files>
             <File>
-              <FileName>dirty_driver.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\dirty_driver.c</FilePath>
-            </File>
-            <File>
               <FileName>res_img.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\tool\2.img2c\output\c\res_img.c</FilePath>
             </File>
             <File>
-              <FileName>we_font_text.c</FileName>
+              <FileName>we_core.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_font_text.c</FilePath>
+              <FilePath>..\..\Core\we_core.c</FilePath>
             </File>
             <File>
-              <FileName>we_gui_driver.c</FileName>
+              <FileName>we_obj.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Core\we_gui_driver.c</FilePath>
+              <FilePath>..\..\Core\we_obj.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_tick.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_tick.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_input.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_input.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_focus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_focus.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_refresh.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_refresh.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_dirty.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_dirty.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_draw.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_draw.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_image.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_image.c</FilePath>
+            </File>
+            <File>
+              <FileName>we_text.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\we_text.c</FilePath>
             </File>
             <File>
               <FileName>we_motion.c</FileName>
@@ -1005,11 +1040,6 @@
               <FileName>we_scroll.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\components\we_scroll.c</FilePath>
-            </File>
-            <File>
-              <FileName>we_render.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Core\we_render.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -1,82 +1,35 @@
 #include "we_widget_group.h"
-#include "we_render.h"
+#include "wegui.h"
 /**
- * @brief 按位移整体平移全部子控件（容器移动/滚动时调用）。
- * @param obj 目标控件对象指针。
- * @param dx X 方向位移（像素）。
- * @param dy Y 方向位移（像素）。
- * @return 无。
- * @note 子控件绝对坐标是唯一事实源：局部坐标 = 子绝对 - 容器绝对，
- *       按需推导，无槽位表、子控件数量无上限。
- */
-static void _group_move_children(we_group_obj_t *obj, int16_t dx, int16_t dy)
-{
-    we_obj_t *child = obj->children_head;
-
-    while (child != NULL)
-    {
-        we_obj_set_pos(child, (int16_t)(child->x + dx), (int16_t)(child->y + dy));
-        child = child->next;
-    }
-}
-
-/**
- * @brief 控件绘制回调，向当前 PFB 输出可视内容。
- * @param ptr 回调透传对象指针。
+ * @brief 控件绘制回调：画背景（子控件由内核按 content_cb 递归绘制）。
+ * @param ptr 回调透传对象指针（前缀为 we_group_obj_t）。
  * @return 无。
  */
-static void _group_draw_cb(void *ptr)
+void we_group_draw_cb(void *ptr)
 {
     we_group_obj_t *obj = (we_group_obj_t *)ptr;
-    we_lcd_t *lcd = obj->base.lcd;
 
     if (obj->opacity == 0)
         return;
 
-we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
-                                     (uint16_t)obj->base.w, (uint16_t)obj->base.h,
-                                     0U, obj->bg_color, obj->opacity);
-
-    {
-        we_pfb_clip_t sv;
-        uint8_t old_scale = lcd->opa_scale;
-
-        /* 子控件透明度级联：把本容器 opacity 乘进全局乘子（嵌套自动链乘） */
-        lcd->opa_scale = we_opa_apply(lcd, obj->opacity);
-        we_pfb_clip_save(lcd, &sv);
-        if (we_pfb_clip_to(lcd, &sv, obj->base.x, obj->base.y,
-                           (int16_t)(obj->base.x + obj->base.w - 1),
-                           (int16_t)(obj->base.y + obj->base.h - 1)))
-        {
-            we_obj_t *child = obj->children_head;
-
-            while (child != NULL)
-            {
-                if (child->class_p && child->class_p->draw_cb &&
-                    (child->x + child->w > lcd->pfb_area.x0) && (child->x <= lcd->pfb_area.x1) &&
-                    (child->y + child->h > lcd->pfb_y_start) && (child->y <= lcd->pfb_y_end))
-                {
-                    child->class_p->draw_cb(child);
-                }
-                child = child->next;
-            }
-        }
-
-        lcd->opa_scale = old_scale;
-        we_pfb_clip_restore(lcd, &sv);
-    }
+    we_fill_rect(obj->base.lcd, obj->base.x, obj->base.y,
+                 (uint16_t)obj->base.w, (uint16_t)obj->base.h, obj->bg_color, obj->opacity);
 }
 
-/* --------------------------------------------------------------------------
- * 命中转发：核心输入分发只扫顶层链表，不递归 children_head。
- * group 通过自身 event_cb 把触摸事件转发给命中的子控件，
- * 否则放进裸 group 的交互控件（btn/checkbox/...）永远收不到输入。
- * 子控件存绝对坐标，直接矩形命中即可；后挂的子控件层级更高，取最后命中者。
- * -------------------------------------------------------------------------- */
-
+/**
+ * @brief 子控件区：整个包围盒，透明度随本容器级联（0 = 子树不画不命中）。
+ * @param ptr 回调透传对象指针（前缀为 we_group_obj_t）。
+ * @param area 子控件区（默认已是包围盒，这里不改）。
+ * @return 子控件级联透明度。
+ */
+uint8_t we_group_content_cb(void *ptr, we_rect_t *area)
+{
+    (void)area;
+    return ((we_group_obj_t *)ptr)->opacity;
+}
 
 /**
- * @brief 组容器事件回调：按压时锁定子控件，后续事件按序转发。
+ * @brief 组容器事件回调：只应答命中查询（子控件的命中与派发由内核完成）。
  * @param ptr 回调透传对象指针。
  * @param event 输入事件类型。
  * @param data 输入设备事件数据指针。
@@ -97,7 +50,7 @@ static uint8_t _group_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
 
 /**
  * @brief 容器移动回调：平移外框的同时按局部坐标同步全部子控件。
- * @param ptr 回调透传对象指针。
+ * @param ptr 回调透传对象指针（前缀为 we_group_obj_t）。
  * @param new_x 新的左上角 X 坐标。
  * @param new_y 新的左上角 Y 坐标。
  * @return 无。
@@ -108,12 +61,12 @@ static uint8_t _group_event_cb(void *ptr, we_event_t event, we_indev_data_t *dat
  *       标脏策略（精细模式）：背景是纯色直角填充（radius 恒为 0），小步
  *       平移时新旧框重叠区里背景混色结果逐像素不变（半透明亦然：底层内容
  *       未动），因此只标新旧框各自扣掉重叠区的曝光 L 条带；子控件的旧/新
- *       足迹由 relayout 里逐子 we_obj_set_pos 自行标脏（越出父容器新框的
- *       部分恰落在旧框曝光条带内，逐层归纳无遗漏）。跳越无重叠或完全透明
- *       时回退整框旧+新标脏。若未来 group 背景引入圆角/渐变/贴图，重叠区
- *       不再平移不变，本优化必须退化为整框标脏。
+ *       足迹由逐子 we_obj_set_pos 自行标脏（越出父容器新框的部分恰落在
+ *       旧框曝光条带内，逐层归纳无遗漏）。跳越无重叠或完全透明时回退
+ *       整框旧+新标脏。若未来 group 背景引入圆角/渐变/贴图，重叠区不再
+ *       平移不变，本优化必须退化为整框标脏。
  */
-static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
+void we_group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
 {
     we_group_obj_t *obj = (we_group_obj_t *)ptr;
     int16_t old_x = obj->base.x;
@@ -131,7 +84,7 @@ static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
                                        ov_x, ov_y, ov_w, ov_h);
         obj->base.x = new_x;
         obj->base.y = new_y;
-        _group_move_children(obj, (int16_t)(new_x - old_x), (int16_t)(new_y - old_y));
+        we_group_shift_children(obj, (int16_t)(new_x - old_x), (int16_t)(new_y - old_y), 0U);
         we_obj_invalidate_area_exclude((we_obj_t *)obj, new_x, new_y, w, h,
                                        ov_x, ov_y, ov_w, ov_h);
         return;
@@ -140,12 +93,12 @@ static void _group_set_pos_cb(void *ptr, int16_t new_x, int16_t new_y)
     we_obj_invalidate((we_obj_t *)obj);
     obj->base.x = new_x;
     obj->base.y = new_y;
-    _group_move_children(obj, (int16_t)(new_x - old_x), (int16_t)(new_y - old_y));
+    we_group_shift_children(obj, (int16_t)(new_x - old_x), (int16_t)(new_y - old_y), 0U);
     we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 初始化组容器对象（清空子控件槽、挂载到 LCD 链表）。
+ * @brief 初始化组容器对象（子控件链表置空、挂载到 LCD 链表）。
  * @param obj 目标控件对象指针。
  * @param lcd GUI 运行时 LCD 上下文指针。
  * @param x 目标区域左上角 X 坐标。
@@ -160,9 +113,10 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
                        colour_t bg_color, uint8_t opacity)
 {
     static const we_class_t _group_class = {
-        .draw_cb = _group_draw_cb,
+        .draw_cb = we_group_draw_cb,
         .event_cb = _group_event_cb,
-        .set_pos_cb = _group_set_pos_cb,
+        .set_pos_cb = we_group_set_pos_cb,
+        .content_cb = we_group_content_cb,
         /* 结构位：前缀为 we_child_owner_t，删除/改挂走 children_head。
          * 行为位：焦点管理器据此支持 OK 进入 / BACK 退出，
          * 且仅当子树内存在可聚焦控件时本容器才会成为焦点停靠点。 */
@@ -187,20 +141,7 @@ void we_group_obj_init(we_group_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t y,
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
 
     if (opacity > 0U)
-we_obj_invalidate((we_obj_t *)obj);
-}
-
-/**
- * @brief 删除组容器：子控件由 we_obj_delete 的 CHILD_OWNER 后序递归一并删除。
- * @param obj 目标控件对象指针。
- * @return 无。
- */
-void we_group_obj_delete(we_group_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL)
-        return;
-
-    we_obj_delete((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
@@ -220,22 +161,27 @@ void we_group_add_child(we_group_obj_t *obj, we_obj_t *child)
     if (child->parent == (we_obj_t *)obj)
         return; /* 已挂载 */
 
+    /* 先按旧父容器标脏旧位置：改挂之后再标会被裁到新父容器范围内，旧处留残影 */
+    we_obj_invalidate(child);
     we_obj_set_parent(child, (we_obj_t *)obj);
     /* 默认落在组左上角（局部 0,0）；子控件数量无上限 */
     we_obj_set_pos(child, obj->base.x, obj->base.y);
 }
 
 /**
- * @brief 从组中移除子控件（去链挂回顶层语义由调用方决定，绝对坐标保持不变）。
+ * @brief 从组中移除子控件：擦掉它在屏上的像素并摘链（绝对坐标保持不变）。
  * @param obj 目标控件对象指针。
  * @param child 目标子控件对象指针。
  * @return 无。
+ * @note 摘下的控件不再绘制；要继续显示，由调用方用 we_obj_attach_to_lcd /
+ *       we_group_add_child 等重新挂回。
  */
 void we_group_remove_child(we_group_obj_t *obj, we_obj_t *child)
 {
     if (obj == NULL || child == NULL || child->parent != (we_obj_t *)obj)
         return;
 
+    we_obj_invalidate(child);
     we_obj_detach(child);
 }
 
@@ -278,7 +224,7 @@ void we_group_shift_children(we_group_obj_t *obj, int16_t dx, int16_t dy, uint8_
     child = obj->children_head;
     while (child != NULL)
     {
-we_obj_set_pos(child, child->x + dx, child->y + dy);
+        we_obj_set_pos(child, (int16_t)(child->x + dx), (int16_t)(child->y + dy));
         if (send_scrolled_event && child->class_p && child->class_p->event_cb)
             child->class_p->event_cb(child, WE_EVENT_SCROLLED, &scroll_data);
         child = child->next;
@@ -296,9 +242,7 @@ void we_group_set_opacity(we_group_obj_t *obj, uint8_t opacity)
     if (obj == NULL || obj->opacity == opacity)
         return;
 
-    if (obj->opacity > 0U)
-we_obj_invalidate((we_obj_t *)obj);
+    /* 包围盒不变，标一次即可（从 0 变亮或变到 0 都要重画这块） */
     obj->opacity = opacity;
-    if (obj->opacity > 0U)
-we_obj_invalidate((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }

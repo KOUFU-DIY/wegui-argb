@@ -1,7 +1,7 @@
 #ifndef DEMO_COMMON_H
 #define DEMO_COMMON_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "widgets/label/we_widget_label.h"
 
 /**

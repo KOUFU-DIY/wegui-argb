@@ -10,7 +10,7 @@
  */
 
 #include "we_widget_statusbar.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 图标几何常量（图标高统一 12px，垂直居中于底条）
@@ -257,9 +257,16 @@ void we_statusbar_obj_init(we_statusbar_obj_t *obj, we_lcd_t *lcd,
     obj->signal_level = 4;
 
     {
+        /* 默认调色盘：单色样式切白图标黑底盘（低电色无灰阶，同白） */
+#if (WE_CFG_MONO_STYLE == 1)
+        colour_t bg  = RGB888_CONST(0, 0, 0);
+        colour_t fg  = RGB888_CONST(255, 255, 255);
+        colour_t low = RGB888_CONST(255, 255, 255);
+#else
         colour_t bg  = RGB888_CONST(24, 30, 42);    /* 深蓝灰底 */
         colour_t fg  = RGB888_CONST(230, 236, 245); /* 近白前景 */
         colour_t low = RGB888_CONST(240, 90, 60);   /* 橙红低电 */
+#endif
         obj->bg_color  = bg;
         obj->fg_color  = fg;
         obj->low_color = low;

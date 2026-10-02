@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_QRCODE_H
 #define __WE_WIDGET_QRCODE_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "we_qr_encoder.h"
 
 #ifdef __cplusplus

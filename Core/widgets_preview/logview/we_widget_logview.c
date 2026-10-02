@@ -7,7 +7,7 @@
 static const we_scroll_cfg_t _lv_scroll_cfg = {
     WE_LOGVIEW_DRAG_THRESHOLD, 0, 1, 1, 1, 1, 128,
 };
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * logview —— 滚动日志窗（preview 孵化区）
@@ -128,11 +128,19 @@ static void _lv_draw_scrollbar(we_logview_obj_t *obj)
     thumb_y = (int16_t)(track_y0 +
               (int32_t)(track_h - thumb_h) * (max_scroll - obj->scroll_px) / max_scroll);
 
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：半透明滑块经二值化后消失，直接全不透明绘制 */
+    we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y,
+                                     (uint16_t)WE_LOGVIEW_SB_WIDTH, (uint16_t)thumb_h,
+                                     (uint16_t)(WE_LOGVIEW_SB_WIDTH / 2),
+                                     obj->sb_color, obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(lcd, track_x, thumb_y,
                                      (uint16_t)WE_LOGVIEW_SB_WIDTH, (uint16_t)thumb_h,
                                      (uint16_t)(WE_LOGVIEW_SB_WIDTH / 2),
                                      obj->sb_color,
                                      we_opa_scale(WE_LOGVIEW_SB_OPA, obj->opacity));
+#endif
 }
 
 /**
@@ -153,9 +161,17 @@ static void _lv_draw_cb(void *ptr)
         return;
 
     /* 1. 深色圆角面板背景 */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底面板补 1px 白描边（否则与黑背景不可辨） */
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    obj->radius, obj->text_color, obj->bg_color,
+                                    obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      obj->radius, obj->bg_color, obj->opacity);
+#endif
 
     if (obj->used == 0U || obj->line_buf == NULL || obj->row_h == 0U)
         return;
@@ -374,9 +390,16 @@ void we_logview_obj_init(we_logview_obj_t *obj, we_lcd_t *lcd,
     obj->follow = 1U;
     obj->opacity = 255U;
 
+    /* 默认调色盘：单色样式切白边黑底盘（面板描边在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->bg_color = RGB888TODEV(0, 0, 0);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+    obj->sb_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bg_color = RGB888TODEV(22, 27, 36);       /* 深色终端底 */
     obj->text_color = RGB888TODEV(178, 218, 190);  /* 淡绿日志字 */
     obj->sb_color = RGB888TODEV(200, 210, 226);
+#endif
 
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);

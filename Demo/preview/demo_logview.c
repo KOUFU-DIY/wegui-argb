@@ -22,6 +22,15 @@
 /* 模拟日志产出周期（毫秒） */
 #define LG_PUSH_MS 400U
 
+/* 日志流状态与行存储为大小屏共享；标题/FPS/提示仅大屏版有 */
+static we_logview_obj_t lg_view;
+
+static uint32_t lg_acc_ms;             /* push 节拍累积器 */
+static uint16_t lg_seq;                /* 日志递增序号 */
+static char lg_msg_buf[32];            /* 单条日志组装缓冲 */
+static char lg_line_buf[LG_LINE_CNT * LG_LINE_LEN]; /* 控件行存储（扁平二维） */
+
+#if !WE_DEMO_SMALL_SCREEN
 /* 布局（280x240 基准） */
 #define LG_PANEL_X 20
 #define LG_PANEL_Y 64
@@ -31,17 +40,12 @@
 static we_label_obj_t lg_title;
 static we_label_obj_t lg_fps_label;
 static we_label_obj_t lg_hint_label;   /* 顶部跟随状态提示 */
-static we_logview_obj_t lg_view;
 
 static uint32_t lg_fps_timer;
 static uint32_t lg_last_frames;
 static char lg_fps_buf[16];
-
-static uint32_t lg_acc_ms;             /* push 节拍累积器 */
-static uint16_t lg_seq;                /* 日志递增序号 */
 static uint8_t lg_last_follow;         /* 上次显示的跟随状态 */
-static char lg_msg_buf[32];            /* 单条日志组装缓冲 */
-static char lg_line_buf[LG_LINE_CNT * LG_LINE_LEN]; /* 控件行存储（扁平二维） */
+#endif
 
 /* 循环日志模板（配合递增序号模拟真实日志流） */
 static const char *const lg_tpl[8] = {
@@ -54,6 +58,8 @@ static const char *const lg_tpl[8] = {
     "uart rx 24B",
     "task wd feed",
 };
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 logview demo
@@ -133,3 +139,46 @@ void we_logview_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &lg_fps_label, &lg_fps_timer,
                        &lg_last_frames, lg_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 logview demo（128x64 布局）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_logview_preview_demo_init(we_lcd_t *lcd)
+{
+    lg_acc_ms = 0U;
+    lg_seq = 0U;
+    memset(lg_msg_buf, 0, sizeof(lg_msg_buf));
+    memset(lg_line_buf, 0, sizeof(lg_line_buf));
+
+    /* 日志窗占满全屏：拖拽查历史自动暂停跟随，拖回底部恢复 */
+    we_logview_obj_init(&lg_view, lcd, 0, 0, 128, 64,
+                        lg_line_buf, LG_LINE_LEN, LG_LINE_CNT, we_font_consolas_18);
+}
+
+/**
+ * @brief logview demo 周期更新：每 400ms push 一条模拟日志
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_logview_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    lg_acc_ms += ms_tick;
+    while (lg_acc_ms >= LG_PUSH_MS)
+    {
+        lg_acc_ms -= LG_PUSH_MS;
+        sprintf(lg_msg_buf, "[%03u] %s",
+                (unsigned)(lg_seq % 1000U), lg_tpl[lg_seq % 8U]);
+        lg_seq++;
+        we_logview_push(&lg_view, lg_msg_buf);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

@@ -14,7 +14,7 @@
  */
 
 #include "we_widget_imgbtn.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调声明
@@ -53,6 +53,30 @@ static uint8_t _imgbtn_src_ok(const uint8_t *img_normal, const uint8_t *img_pres
         return 0U;
     }
     return 1U;
+}
+
+/**
+ * @brief 控件宽高：两张图资源头里的较大者（按压态图更大时不被包围盒裁掉）。
+ * @param img_normal 常态图资源指针。
+ * @param img_pressed 按压态图资源指针（允许 NULL）。
+ * @param out_w 传出：宽。
+ * @param out_h 传出：高。
+ * @return 无。
+ */
+static void _imgbtn_size(const uint8_t *img_normal, const uint8_t *img_pressed, int16_t *out_w, int16_t *out_h)
+{
+    int16_t w = (int16_t)IMG_DAT_WIDTH(img_normal);
+    int16_t h = (int16_t)IMG_DAT_HEIGHT(img_normal);
+
+    if (img_pressed != NULL)
+    {
+        if ((int16_t)IMG_DAT_WIDTH(img_pressed) > w)
+            w = (int16_t)IMG_DAT_WIDTH(img_pressed);
+        if ((int16_t)IMG_DAT_HEIGHT(img_pressed) > h)
+            h = (int16_t)IMG_DAT_HEIGHT(img_pressed);
+    }
+    *out_w = w;
+    *out_h = h;
 }
 
 /**
@@ -101,10 +125,9 @@ static void _imgbtn_draw_cb(void *ptr)
     uint8_t dim_self; /* 需要"自变暗"：按压中且没有专门的按压态图 */
     uint8_t has_alpha;
 
-    if (o == NULL || o->opacity == 0U)
-        return;
     lcd = o->base.lcd;
-    if (lcd == NULL)
+    /* 容器级联后 <= 5 时什么也画不出（图与叠黑都一样），连解码也省掉 */
+    if (we_opa_apply(lcd, o->opacity) <= 5U)
         return;
 
     img = (o->pressed && o->img_pressed != NULL) ? o->img_pressed : o->img_normal;
@@ -254,8 +277,7 @@ void we_imgbtn_obj_init(we_imgbtn_obj_t *obj, we_lcd_t *lcd, int16_t x, int16_t 
     obj->base.next    = NULL;
     obj->base.x       = x;
     obj->base.y       = y;
-    obj->base.w       = (int16_t)IMG_DAT_WIDTH(img_normal);   /* 宽高取自资源头 */
-    obj->base.h       = (int16_t)IMG_DAT_HEIGHT(img_normal);
+    _imgbtn_size(img_normal, img_pressed, &obj->base.w, &obj->base.h); /* 宽高取自资源头 */
 
     obj->img_normal  = img_normal;
     obj->img_pressed = img_pressed;
@@ -290,9 +312,13 @@ void we_imgbtn_set_imgs(we_imgbtn_obj_t *obj, const uint8_t *img_normal,
     obj->img_pressed  = img_pressed;
     obj->base.class_p = &_imgbtn_class; /* init 曾因格式不符置空时在此恢复可用 */
 
-    /* 2. 尺寸随常态图更新：尺寸真变了时，新旧区域与光标环的标脏都归内核；
+    /* 2. 尺寸随新图更新：尺寸真变了时，新旧区域与光标环的标脏都归内核；
      *    尺寸没变则直接返回，不产生多余脏矩形。 */
-    we_obj_set_size((we_obj_t *)obj,
-                    (int16_t)IMG_DAT_WIDTH(img_normal),
-                    (int16_t)IMG_DAT_HEIGHT(img_normal));
+    {
+        int16_t w;
+        int16_t h;
+
+        _imgbtn_size(img_normal, img_pressed, &w, &h);
+        we_obj_set_size((we_obj_t *)obj, w, h);
+    }
 }

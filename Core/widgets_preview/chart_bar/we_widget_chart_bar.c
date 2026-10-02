@@ -1,5 +1,5 @@
 #include "we_widget_chart_bar.h"
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------------
@@ -15,10 +15,16 @@
  * 与 spectrum 控件同一套等分策略，全部整数运算。
  * -------------------------------------------------------------------------- */
 
-/* 横向网格线透明度（低透明，不喧宾夺主） */
+/* 横向网格线透明度（低透明，不喧宾夺主）；单色样式下半透明线经阈值
+ * 二值化后消失，一律全不透明 */
+#if (WE_CFG_MONO_STYLE == 1)
+#define WE_CHART_BAR_GRID_ALPHA 255U
+#define WE_CHART_BAR_BASE_ALPHA 255U
+#else
 #define WE_CHART_BAR_GRID_ALPHA 70U
 /* 底部基线透明度（比网格醒目，仍留一点底色透出） */
 #define WE_CHART_BAR_BASE_ALPHA 200U
+#endif
 
 /**
  * @brief 计算柱高可用量程（总高扣除底部 1px 基线）。
@@ -173,8 +179,14 @@ void we_chart_bar_obj_init(we_chart_bar_obj_t *obj, we_lcd_t *lcd,
     obj->grid_rows = 0U;
     memset(obj->values, 0, sizeof(obj->values));
 
+    /* 默认调色盘：单色样式切白柱白线黑底盘 */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->bar_color = RGB888TODEV(255, 255, 255);
+    obj->grid_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bar_color = RGB888TODEV(86, 196, 244);  /* 青蓝柱色 */
     obj->grid_color = RGB888TODEV(96, 104, 118); /* 暗灰网格/基线色 */
+#endif
 
     we_obj_attach_to_lcd(lcd, (we_obj_t *)obj);
     we_obj_invalidate((we_obj_t *)obj);

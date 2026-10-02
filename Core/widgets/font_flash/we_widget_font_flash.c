@@ -1,6 +1,6 @@
 
 #include "we_widget_font_flash.h"
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------------
@@ -42,248 +42,52 @@ typedef struct
 } _flash_glyph_t;
 
 /* --------------------------------------------------------------------------
- * UTF-8 解码：支持 1~4 字节，非法序列返回 0
+ * 码点 -> 字形描述
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 从 UTF-8 字符串读取下一个码点并推进指针。
- * @param pp 输入输出参数，指向当前解析位置；成功后移动到下一个字符起始处。
- * @return 成功返回 Unicode 码点，遇到字符串结尾或非法序列返回 0。
- */
-static uint32_t _utf8_decode_next(const char **pp)
-{
-    const unsigned char *p = (const unsigned char *)*pp;
-    uint32_t code = 0;
-    uint8_t c0;
-
-    if (*p == 0U)
-        return 0U;
-
-    c0 = *p++;
-    if (c0 < 0x80U)
-    {
-        code = c0;
-    }
-    else if ((c0 & 0xE0U) == 0xC0U)
-    {
-        if ((p[0] & 0xC0U) == 0x80U)
-        {
-            code = (uint32_t)(((c0 & 0x1FU) << 6) | (p[0] & 0x3FU));
-            p += 1;
-        }
-    }
-    else if ((c0 & 0xF0U) == 0xE0U)
-    {
-        if ((p[0] & 0xC0U) == 0x80U && (p[1] & 0xC0U) == 0x80U)
-        {
-            code = (uint32_t)(((c0 & 0x0FU) << 12) | ((p[0] & 0x3FU) << 6) | (p[1] & 0x3FU));
-            p += 2;
-        }
-    }
-    else if ((c0 & 0xF8U) == 0xF0U)
-    {
-        if ((p[0] & 0xC0U) == 0x80U && (p[1] & 0xC0U) == 0x80U && (p[2] & 0xC0U) == 0x80U)
-        {
-            code = (uint32_t)(((c0 & 0x07U) << 18) | ((p[0] & 0x3FU) << 12) |
-                              ((p[1] & 0x3FU) << 6)  | (p[2] & 0x3FU));
-            p += 3;
-        }
-    }
-
-    *pp = (const char *)p;
-    return code;
-}
-
-/* --------------------------------------------------------------------------
- * 码点 -> 字形索引
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 将 Unicode 码点映射到字体字形索引。
+ * @brief 查码点对应的字形并读出其描述项。
  * @param face 已初始化的字体面对象。
  * @param code 待查询的 Unicode 码点。
- * @param out_index 输出字形索引（相对 glyph 描述表）。
- * @return 1 表示找到字形，0 表示该码点未收录或输入无效。
+ * @param out 传出：字形描述（宽高、偏移、位图偏移等）。
+ * @return 1 表示找到字形，0 表示该码点未收录。
+ * @note 字形序号与描述表范围在 face 初始化时已校验过，这里不再逐字检查。
+ *       打开 WE_FLASH_FONT_DESC_CACHE 时先查 face 内的直接映射缓存，命中不读外挂。
  */
-static uint8_t _lookup_glyph_index(const we_flash_font_face_t *face,
-                                   uint32_t code, uint32_t *out_index)
+static uint8_t _get_glyph(we_flash_font_face_t *face, uint16_t code, _flash_glyph_t *out)
 {
-    uint16_t i;
-    uint32_t glyph_cursor = 0U;
-
-    if (face == NULL || out_index == NULL)
-        return 0U;
-
-    for (i = 0; i < face->range_count; ++i)
-    {
-        const font_range_t *r = &face->ranges[i];
-        uint32_t range_len = r->end - r->start + 1U;
-
-        if (code >= r->start && code <= r->end)
-        {
-            *out_index = glyph_cursor + (code - r->start);
-            return 1U;
-        }
-        glyph_cursor += range_len;
-    }
-
-    if (face->sparse_count > 0U && face->sparse_codes != NULL)
-    {
-        int32_t lo = 0;
-        int32_t hi = (int32_t)face->sparse_count - 1;
-        while (lo <= hi)
-        {
-            int32_t mid = lo + ((hi - lo) >> 1);
-            uint32_t v = face->sparse_codes[mid];
-            if (v == code)
-            {
-                *out_index = face->range_total + (uint32_t)mid;
-                return 1U;
-            }
-            if (v < code)
-                lo = mid + 1;
-            else
-                hi = mid - 1;
-        }
-    }
-
-    return 0U;
-}
-
-/* --------------------------------------------------------------------------
- * 从外部 blob 读取单个字形描述符（14B）
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 从外部 blob 读取并解析单个字形描述项。
- * @param face 已初始化的字体面对象。
- * @param glyph_index 待读取的字形索引。
- * @param out 输出字形描述结构（宽高、偏移、位图偏移等）。
- * @return 1 表示读取解析成功，0 表示越界或依赖回调缺失。
- */
-static uint8_t _load_glyph_desc(const we_flash_font_face_t *face,
-                                uint32_t glyph_index, _flash_glyph_t *out)
-{
-    uint8_t buf[WE_FLASH_FONT_GLYPH_DESC_SIZE];
-    uint32_t offset;
+    uint32_t index;
     uint32_t addr;
+#if (WE_FLASH_FONT_DESC_CACHE > 0)
+    we_flash_font_desc_slot_t *slot;
+    const uint8_t *buf;
+#else
+    uint8_t buf[WE_FLASH_FONT_GLYPH_DESC_SIZE];
+#endif
 
-    if (face == NULL || out == NULL || face->lcd == NULL || face->lcd->storage_read_cb == NULL)
+    if (!we_font_code_to_index(face->ranges, face->range_count, face->sparse_codes, face->sparse_count, code, &index))
         return 0U;
-    if (glyph_index >= face->glyph_count)
-        return 0U;
 
-    offset = face->glyph_desc_offset + glyph_index * WE_FLASH_FONT_GLYPH_DESC_SIZE;
-    if (offset + WE_FLASH_FONT_GLYPH_DESC_SIZE > face->bitmap_data_offset)
-        return 0U;
-
-    addr = face->blob_addr + offset;
-    face->lcd->storage_read_cb(addr, buf, sizeof(buf));
-
-out->adv_w         = _read_u16_be(&buf[0]);
-out->box_w         = _read_u16_be(&buf[2]);
-out->box_h         = _read_u16_be(&buf[4]);
-    out->x_ofs         = (int16_t)_read_u16_be(&buf[6]);
-    out->y_ofs         = (int16_t)_read_u16_be(&buf[8]);
-out->bitmap_offset = _read_u32_be(&buf[10]);
-    return 1U;
-}
-
-/* --------------------------------------------------------------------------
- * 直接绘制“按行字节对齐”的 alpha 点阵
- * -------------------------------------------------------------------------- */
-
-/**
- * @brief 将行对齐的 alpha 位图混合到当前 PFB。
- * @param lcd 当前 LCD 上下文（提供 PFB 区域与像素缓冲）。
- * @param x 位图目标左上角 X 坐标。
- * @param y 位图目标左上角 Y 坐标。
- * @param w 位图宽度（像素）。
- * @param h 位图高度（像素）。
- * @param src_data 源 alpha 位图起始地址（按行紧凑存放）。
- * @param row_stride 源位图每行字节数。
- * @param bpp 源 alpha 位图位深（1/2/4/8）。
- * @param fg_color 前景色。
- * @param opacity 额外整体透明度（0~255）。
- */
-static void _draw_alpha_mask_row_aligned(we_lcd_t *lcd,
-                                         int16_t x, int16_t y,
-                                         uint16_t w, uint16_t h,
-                                         const uint8_t *src_data,
-                                         uint32_t row_stride,
-                                         uint8_t bpp,
-                                         colour_t fg_color,
-                                         uint8_t opacity)
-{
-    int16_t draw_x_end;
-    int16_t draw_y_end;
-    int16_t clip_x_start;
-    int16_t clip_y_start;
-    int16_t clip_x_end;
-    int16_t clip_y_end;
-    uint8_t alpha_mask;
-    colour_t *gram;
-    uint16_t pfb_stride;
-    int16_t py;
-
-    if (lcd == NULL || w == 0U || h == 0U || src_data == NULL)
-        return;
-    opacity = we_opa_apply(lcd, opacity); /* 容器透明度级联 */
-    if (opacity == 0U)
-        return;
-
-    draw_x_end = x + (int16_t)w - 1;
-    draw_y_end = y + (int16_t)h - 1;
-
-    clip_x_start = (x < (int16_t)lcd->pfb_area.x0) ? (int16_t)lcd->pfb_area.x0 : x;
-    clip_y_start = (y < (int16_t)lcd->pfb_y_start) ? (int16_t)lcd->pfb_y_start : y;
-    clip_x_end   = (draw_x_end > (int16_t)lcd->pfb_area.x1) ? (int16_t)lcd->pfb_area.x1 : draw_x_end;
-    clip_y_end   = (draw_y_end > (int16_t)lcd->pfb_y_end) ? (int16_t)lcd->pfb_y_end : draw_y_end;
-
-    if (clip_x_start > clip_x_end || clip_y_start > clip_y_end)
-        return;
-
-    alpha_mask = (uint8_t)((1U << bpp) - 1U);
-    gram       = (colour_t *)lcd->pfb_gram;
-    pfb_stride = lcd->pfb_width;
-
-    for (py = clip_y_start; py <= clip_y_end; py++)
+    addr = face->blob_addr + WE_FLASH_FONT_BLOB_HEADER_SIZE + index * WE_FLASH_FONT_GLYPH_DESC_SIZE;
+#if (WE_FLASH_FONT_DESC_CACHE > 0)
+    slot = &face->desc_cache[index & (WE_FLASH_FONT_DESC_CACHE - 1U)];
+    if (slot->index != index)
     {
-        int16_t mask_y = py - y;
-        const uint8_t *src_row = src_data + (uint32_t)mask_y * row_stride;
-        colour_t *dst = gram + ((py - (int16_t)lcd->pfb_y_start) * pfb_stride) +
-                        (clip_x_start - (int16_t)lcd->pfb_area.x0);
-        int16_t px;
-
-        for (px = clip_x_start; px <= clip_x_end; px++)
-        {
-            int16_t mask_x = px - x;
-            uint32_t bit_pos = (uint32_t)mask_x * bpp;
-            uint32_t byte_idx = bit_pos >> 3U;
-            uint8_t shift = (uint8_t)(8U - bpp - (bit_pos & 7U));
-            uint8_t a_raw = (uint8_t)((src_row[byte_idx] >> shift) & alpha_mask);
-
-            if (a_raw > 0U)
-            {
-                uint32_t alpha;
-
-                if (bpp == 8U)
-                    alpha = a_raw;
-                else if (bpp == 4U)
-                    alpha = (uint32_t)((a_raw << 4U) | a_raw);
-                else if (bpp == 2U)
-                    alpha = (uint32_t)a_raw * 85U;
-                else
-                    alpha = 255U;
-
-                if (opacity != 255U)
-                    alpha = (alpha * opacity) >> 8U;
-
-we_store_blended_color(dst, fg_color, (uint8_t)alpha);
-            }
-            dst++;
-        }
+        we_gui_storage(face->lcd)(addr, slot->desc, WE_FLASH_FONT_GLYPH_DESC_SIZE);
+        slot->index = index;
     }
+    buf = slot->desc;
+#else
+    we_gui_storage(face->lcd)(addr, buf, WE_FLASH_FONT_GLYPH_DESC_SIZE);
+#endif
+
+    out->adv_w = _read_u16_be(&buf[0]);
+    out->box_w = _read_u16_be(&buf[2]);
+    out->box_h = _read_u16_be(&buf[4]);
+    out->x_ofs = (int16_t)_read_u16_be(&buf[6]);
+    out->y_ofs = (int16_t)_read_u16_be(&buf[8]);
+    out->bitmap_offset = _read_u32_be(&buf[10]);
+    return 1U;
 }
 
 /* --------------------------------------------------------------------------
@@ -291,70 +95,64 @@ we_store_blended_color(dst, fg_color, (uint8_t)alpha);
  * -------------------------------------------------------------------------- */
 
 /**
- * @brief 从外部存储分块读取字形位图并绘制到 PFB。
+ * @brief 从外部存储读取字形落在当前切片内的那几行并绘制到 PFB。
  * @param face 字体面对象（含 storage 回调与 scratch 缓冲）。
+ * @param line_top 本行行框顶边 Y（字形伸到它上方的行不画）。
  * @param draw_x 字形绘制左上角 X 坐标（已包含 x_ofs）。
  * @param draw_y 字形绘制左上角 Y 坐标（已包含 y_ofs）。
  * @param g 字形描述（宽高、位图偏移等）。
  * @param color 字形绘制颜色。
- * @param opacity 字形整体透明度（0~255）。
- * @return 1 表示读取并绘制成功，0 表示参数无效或读区间越界。
+ * @param opacity 控件透明度（绘制原语入口再乘容器级联）。
  */
-static uint8_t _stream_draw_glyph(we_flash_font_face_t *face,
-                                  int16_t draw_x,
-                                  int16_t draw_y,
-                                  const _flash_glyph_t *g,
-                                  colour_t color,
-                                  uint8_t opacity)
+static void _stream_draw_glyph(we_flash_font_face_t *face, int16_t line_top,
+                               int16_t draw_x, int16_t draw_y,
+                               const _flash_glyph_t *g, colour_t color, uint8_t opacity)
 {
+    we_lcd_t *lcd = face->lcd;
     uint32_t row_stride;
     uint16_t rows_per_chunk;
-    uint16_t row0;
+    int16_t row0;
+    int16_t row_end;
 
-    if (face == NULL || g == NULL || face->glyph_buf == NULL || face->glyph_buf_size == 0U)
-        return 0U;
     if (g->box_w == 0U || g->box_h == 0U)
-        return 0U;
+        return;
+    if (draw_x > (int16_t)lcd->clip.x1 || draw_x + (int16_t)g->box_w - 1 < (int16_t)lcd->clip.x0)
+        return;
+
+    /* 只读落在切片内的那几行：小切片下不必整字读出再丢弃 */
+    row0 = (int16_t)(WE_MAX(line_top, (int16_t)lcd->clip.y0) - draw_y);
+    if (row0 < 0)
+        row0 = 0;
+    row_end = (int16_t)((int16_t)lcd->clip.y1 - draw_y);
+    if (row_end > (int16_t)g->box_h - 1)
+        row_end = (int16_t)g->box_h - 1;
+    if (row0 > row_end)
+        return;
 
     row_stride = ((uint32_t)g->box_w * face->bpp + 7U) >> 3U;
     if (row_stride == 0U || row_stride > face->glyph_buf_size)
-        return 0U;
+        return;
+    /* 通常一次就能读完（切片只有几行），装不下时才按缓冲容量分块 */
+    rows_per_chunk = (uint16_t)(row_end - row0 + 1);
+    if ((uint32_t)rows_per_chunk * row_stride > face->glyph_buf_size)
+        rows_per_chunk = (uint16_t)(face->glyph_buf_size / row_stride);
 
-    rows_per_chunk = (uint16_t)(face->glyph_buf_size / row_stride);
-    if (rows_per_chunk == 0U)
-        return 0U;
-
-    for (row0 = 0U; row0 < g->box_h; row0 = (uint16_t)(row0 + rows_per_chunk))
+    while (row0 <= row_end)
     {
-        uint16_t chunk_rows = rows_per_chunk;
-        uint32_t chunk_size;
+        uint16_t chunk_rows = (uint16_t)(row_end - row0 + 1);
         uint32_t offset;
-        uint32_t addr;
 
-        if ((uint16_t)(row0 + chunk_rows) > g->box_h)
-            chunk_rows = (uint16_t)(g->box_h - row0);
-
-        chunk_size = row_stride * (uint32_t)chunk_rows;
+        if (chunk_rows > rows_per_chunk)
+            chunk_rows = rows_per_chunk;
         offset = face->bitmap_data_offset + g->bitmap_offset + (uint32_t)row0 * row_stride;
-        if (offset + chunk_size > face->blob_size)
-            return 0U;
+        if (offset + row_stride * chunk_rows > face->blob_size)
+            return;
 
-        addr = face->blob_addr + offset;
-        face->lcd->storage_read_cb(addr, face->glyph_buf, chunk_size);
-
-        _draw_alpha_mask_row_aligned(face->lcd,
-                                     draw_x,
-                                     (int16_t)(draw_y + (int16_t)row0),
-                                     g->box_w,
-                                     chunk_rows,
-                                     face->glyph_buf,
-                                     row_stride,
-                                     face->bpp,
-                                     color,
-                                     opacity);
+        we_gui_storage(lcd)(face->blob_addr + offset, face->glyph_buf, row_stride * chunk_rows);
+        we_draw_alpha_mask(lcd, draw_x, (int16_t)(draw_y + row0), g->box_w, chunk_rows,
+                           face->glyph_buf, row_stride, face->bpp, color, opacity);
+        row0 = (int16_t)(row0 + (int16_t)chunk_rows);
     }
-
-    return 1U;
 }
 
 /* --------------------------------------------------------------------------
@@ -364,19 +162,21 @@ static uint8_t _stream_draw_glyph(we_flash_font_face_t *face,
 /**
  * @brief 计算文本控件当前文本的包围盒尺寸。
  * @param obj 文本控件实例。
- * @param out_w 输出文本总宽度（像素）。
- * @param out_h 输出文本总高度（像素，含多行 line_height）。
+ * @param out_w 输出文本总宽度（像素，各行步进宽度与向右伸出的墨迹取最大）。
+ * @param out_h 输出文本总高度（像素，行数 × line_height + 伸出量）。
+ * @param out_ink 输出字形伸出行框底边的最大行数（字库行高小于字形框时非 0）。
  */
-static void _compute_bbox(we_flash_font_obj_t *obj, int16_t *out_w, int16_t *out_h)
+static void _compute_bbox(we_flash_font_obj_t *obj, int16_t *out_w, int16_t *out_h, uint8_t *out_ink)
 {
     we_flash_font_face_t *face = obj->face;
-    int16_t max_w = 0;
-    int16_t cur_w = 0;
+    int32_t max_w = 0;
+    int32_t pen = 0;
     int16_t lines = 1;
+    int16_t ink = 0;
     const char *p = obj->text;
-    uint32_t glyph_index;
     _flash_glyph_t g;
 
+    *out_ink = 0U;
     if (p == NULL || *p == 0)
     {
         *out_w = 0;
@@ -386,71 +186,40 @@ static void _compute_bbox(we_flash_font_obj_t *obj, int16_t *out_w, int16_t *out
 
     while (*p)
     {
-uint32_t code = _utf8_decode_next(&p);
-        if (code == 0U)
+        uint16_t code;
+
+        if (we_utf8_next(&p, &code) == 0U)
             break;
-        if (code == (uint32_t)'\n')
+        if (code == (uint16_t)'\n')
         {
-            if (cur_w > max_w)
-                max_w = cur_w;
-            cur_w = 0;
+            pen = 0;
             lines++;
             continue;
         }
-        if (_lookup_glyph_index(face, code, &glyph_index) && _load_glyph_desc(face, glyph_index, &g))
+        if (_get_glyph(face, code, &g))
         {
-            cur_w += (int16_t)g.adv_w;
+            if (g.box_w != 0U && g.box_h != 0U)
+            {
+                int16_t below = (int16_t)(g.y_ofs + (int16_t)g.box_h - (int16_t)face->line_height);
+                int32_t right = pen + g.x_ofs + (int32_t)g.box_w;
+
+                if (below > ink)
+                    ink = below;
+                if (right > max_w)
+                    max_w = right; /* 字形墨迹比步进宽时不被包围盒裁掉 */
+            }
+            pen += g.adv_w;
+            if (pen > max_w)
+                max_w = pen;
         }
     }
 
-    if (cur_w > max_w)
-        max_w = cur_w;
+    if (ink > 255)
+        ink = 255;
 
-    *out_w = max_w;
-    *out_h = (int16_t)(lines * (int16_t)face->line_height);
-}
-
-/**
- * @brief 使控件当前包围盒区域失效，触发后续重绘。
- * @param obj 文本控件实例。
- */
-static void _invalidate_obj_bbox(we_flash_font_obj_t *obj)
-{
-    if (obj == NULL || obj->base.lcd == NULL || obj->opacity == 0U)
-        return;
-
-we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, obj->base.w, obj->base.h);
-}
-
-/**
- * @brief 计算指定文本的包围盒并使该区域失效。
- * @param obj 文本控件实例。
- * @param text 用于估算尺寸的 UTF-8 文本。
- */
-static void _invalidate_text_bbox(we_flash_font_obj_t *obj, const char *text)
-{
-    int16_t w = 0;
-    int16_t h = 0;
-    const char *saved_text;
-
-    if (obj == NULL || obj->face == NULL || obj->base.lcd == NULL || text == NULL || obj->opacity == 0U)
-        return;
-
-    saved_text = obj->text;
-    obj->text = text;
-_compute_bbox(obj, &w, &h);
-    obj->text = saved_text;
-we_obj_invalidate_area((we_obj_t *)obj, obj->base.x, obj->base.y, w, h);
-}
-
-/**
- * @brief 失效指定文本区域：纯转调 _invalidate_text_bbox，仅为命名对齐 _invalidate_obj_bbox。
- * @param obj 文本控件实例。
- * @param text 用于估算尺寸的 UTF-8 文本。
- */
-static void _invalidate_text(we_flash_font_obj_t *obj, const char *text)
-{
-_invalidate_text_bbox(obj, text);
+    *out_w = (int16_t)max_w;
+    *out_h = (int16_t)(lines * (int16_t)face->line_height + ink);
+    *out_ink = (uint8_t)ink;
 }
 
 /* --------------------------------------------------------------------------
@@ -460,38 +229,34 @@ _invalidate_text_bbox(obj, text);
 /**
  * @brief 文本控件绘制回调：按当前 PFB 切片流式解码并绘制字形。
  * @param ptr 回调透传的 we_flash_font_obj_t 指针。
+ * @note 行跳过按"行框 + 字形伸出行框底的行数（ink_below，包围盒已计入）"
+ *       判断，字形伸出行框的部分在任何切片高度下都画得一致。
  */
 static void _font_flash_draw_cb(void *ptr)
 {
     we_flash_font_obj_t *obj = (we_flash_font_obj_t *)ptr;
-    we_flash_font_face_t *face;
-    we_lcd_t *lcd;
-    int16_t cursor_x;
-    int16_t cursor_y;
-    const char *p;
+    we_flash_font_face_t *face = obj->face;
+    we_lcd_t *lcd = obj->base.lcd;
+    int16_t line_h = (int16_t)face->line_height;
+    int16_t cursor_x = obj->base.x;
+    int16_t cursor_y = obj->base.y;
+    const char *p = obj->text;
 
-    if (obj == NULL || obj->face == NULL || obj->text == NULL || obj->opacity == 0U)
+    /* face 重新初始化失败时 lcd 被清空；容器级联后 <= 5 时什么也画不出：连外挂读取也省掉 */
+    if (p == NULL || face->lcd == NULL || we_opa_apply(lcd, obj->opacity) <= 5U)
         return;
-
-    face = obj->face;
-    lcd = obj->base.lcd;
-    if (lcd == NULL || face->lcd == NULL || face->lcd->storage_read_cb == NULL || face->line_height == 0U)
-        return;
-
-    cursor_x = obj->base.x;
-    cursor_y = obj->base.y;
-    p = obj->text;
 
     while (*p)
     {
-        uint32_t code;
-        uint32_t glyph_index;
+        uint16_t code;
         _flash_glyph_t g;
 
-        if (cursor_y > (int16_t)lcd->pfb_y_end)
+        if (cursor_y > (int16_t)lcd->clip.y1)
             return;
 
-        if (cursor_y + (int16_t)face->line_height <= (int16_t)lcd->pfb_y_start)
+        /* 本行整体在切片上方，或后面的字已全在切片右侧：跳到下一行 */
+        if (cursor_y + line_h + (int16_t)obj->ink_below <= (int16_t)lcd->clip.y0 ||
+            cursor_x - (int16_t)face->max_box_width > (int16_t)lcd->clip.x1)
         {
             while (*p && *p != '\n')
                 p++;
@@ -499,52 +264,35 @@ static void _font_flash_draw_cb(void *ptr)
             {
                 p++;
                 cursor_x = obj->base.x;
-                cursor_y += (int16_t)face->line_height;
+                cursor_y += line_h;
             }
             continue;
         }
 
-code = _utf8_decode_next(&p);
-        if (code == 0U)
+        if (we_utf8_next(&p, &code) == 0U)
             break;
 
-        if (code == (uint32_t)'\n')
+        if (code == (uint16_t)'\n')
         {
             cursor_x = obj->base.x;
-            cursor_y += (int16_t)face->line_height;
+            cursor_y += line_h;
             continue;
         }
 
-        if (_lookup_glyph_index(face, code, &glyph_index) && _load_glyph_desc(face, glyph_index, &g))
+        if (_get_glyph(face, code, &g))
         {
-            if (g.box_w > 0U && g.box_h > 0U)
-            {
-                int16_t draw_x = cursor_x + g.x_ofs;
-                int16_t draw_y = cursor_y + g.y_ofs;
-                int16_t box_r = draw_x + (int16_t)g.box_w - 1;
-                int16_t box_b = draw_y + (int16_t)g.box_h - 1;
-
-                if (box_r >= (int16_t)lcd->pfb_area.x0 &&
-                    box_b >= (int16_t)lcd->pfb_y_start &&
-                    draw_x <= (int16_t)lcd->pfb_area.x1 &&
-                    draw_y <= (int16_t)lcd->pfb_y_end)
-                {
-                    if (_stream_draw_glyph(face, draw_x, draw_y, &g, obj->color, obj->opacity))
-                    {
-                    }
-                }
-            }
+            _stream_draw_glyph(face, cursor_y, (int16_t)(cursor_x + g.x_ofs), (int16_t)(cursor_y + g.y_ofs), &g,
+                               obj->color, obj->opacity);
             cursor_x += (int16_t)g.adv_w;
         }
     }
 }
-
 static const we_class_t _flash_font_class = { .draw_cb = _font_flash_draw_cb, .event_cb = NULL, .set_pos_cb = NULL};
 
 /**
  * @brief 校验字体句柄与 blob 头信息，并填充 face 运行时字段。
  * @param face 待初始化的字体面对象。
- * @param lcd LCD 上下文，需提供 storage_read_cb。
+ * @param lcd LCD 上下文，端口需提供 storage_read。
  * @param handle font2c 导出的字体句柄与 blob 地址。
  * @return 1 表示校验通过且绑定成功，0 表示任一字段或格式不合法。
  */
@@ -552,42 +300,37 @@ static uint8_t _validate_and_bind_face(we_flash_font_face_t *face,
                                        we_lcd_t *lcd,
                                        const font_external_handle_t *handle)
 {
+    const font_external_t *font;
     uint8_t hdr[WE_FLASH_FONT_BLOB_HEADER_SIZE];
     uint16_t i;
-    uint32_t glyph_cursor = 0U;
-    uint32_t expected_bitmap_data_offset;
+    uint32_t range_total = 0U;
 
-    if (face == NULL || lcd == NULL || handle == NULL || handle->font == NULL)
+    if (lcd == NULL || handle == NULL || handle->font == NULL)
         return 0U;
-    if (lcd->storage_read_cb == NULL)
+    if (we_gui_storage(lcd) == NULL)
         return 0U;
     if (handle->blob_addr > 0xFFFFFFFFu)
         return 0U;
 
-memset(face, 0, sizeof(*face));
+    font = handle->font;
+    memset(face, 0, sizeof(*face));
 
     face->lcd = lcd;
-    face->font = handle->font;
     face->blob_addr = (uint32_t)handle->blob_addr;
-    face->blob_size = handle->font->blob_size;
-
-    face->line_height = handle->font->line_height;
-    face->baseline = handle->font->baseline;
-    face->bpp = handle->font->bpp;
-    face->range_count = handle->font->range_count;
-    face->sparse_count = handle->font->sparse_count;
-    face->glyph_count = handle->font->glyph_count;
-    face->max_box_width = handle->font->max_box_width;
-    face->max_box_height = handle->font->max_box_height;
-    face->ranges = handle->font->ranges;
-    face->sparse_codes = handle->font->sparse;
-    face->glyph_desc_offset = WE_FLASH_FONT_BLOB_HEADER_SIZE;
+    face->blob_size = font->blob_size;
+    face->line_height = font->line_height;
+    face->bpp = font->bpp;
+    face->range_count = font->range_count;
+    face->sparse_count = font->sparse_count;
+    face->max_box_width = font->max_box_width;
+    face->ranges = font->ranges;
+    face->sparse_codes = font->sparse;
 
     if (face->bpp != 1U && face->bpp != 2U && face->bpp != 4U && face->bpp != 8U)
         return 0U;
     if (face->line_height == 0U)
         return 0U;
-    if (face->glyph_count == 0U)
+    if (font->glyph_count == 0U)
         return 0U;
     if (face->range_count > 0U && face->ranges == NULL)
         return 0U;
@@ -596,40 +339,38 @@ memset(face, 0, sizeof(*face));
     if (face->blob_size < WE_FLASH_FONT_BLOB_HEADER_SIZE)
         return 0U;
 
-    lcd->storage_read_cb(face->blob_addr, hdr, sizeof(hdr));
+    we_gui_storage(lcd)(face->blob_addr, hdr, sizeof(hdr));
     if (hdr[0] != 0x02U)
         return 0U;
     if (hdr[1] != 0x00U)
         return 0U;
-    if (_read_u32_be(&hdr[2]) != handle->font->blob_crc32)
+    if (_read_u32_be(&hdr[2]) != font->blob_crc32)
         return 0U;
 
     for (i = 0; i < face->range_count; ++i)
     {
         const font_range_t *r = &face->ranges[i];
-        uint32_t range_len;
 
         if (r->end < r->start)
             return 0U;
         if (i > 0U && r->start <= face->ranges[i - 1U].end)
             return 0U;
-
-        range_len = r->end - r->start + 1U;
-        glyph_cursor += range_len;
+        range_total += r->end - r->start + 1U;
     }
-    face->range_total = glyph_cursor;
 
-    if ((uint32_t)face->glyph_count != face->range_total + (uint32_t)face->sparse_count)
+    /* 码点查到的字形序号 < 区间总数 + 稀疏数 = glyph_count，描述表整体落在 blob 内：
+     * 运行时读描述项不必再逐字检查越界 */
+    if ((uint32_t)font->glyph_count != range_total + (uint32_t)face->sparse_count)
         return 0U;
 
-    if (face->glyph_desc_offset + (uint32_t)face->glyph_count * WE_FLASH_FONT_GLYPH_DESC_SIZE > face->blob_size)
-        return 0U;
-
-    expected_bitmap_data_offset = face->glyph_desc_offset + (uint32_t)face->glyph_count * WE_FLASH_FONT_GLYPH_DESC_SIZE;
-    face->bitmap_data_offset = expected_bitmap_data_offset;
+    face->bitmap_data_offset = WE_FLASH_FONT_BLOB_HEADER_SIZE + (uint32_t)font->glyph_count * WE_FLASH_FONT_GLYPH_DESC_SIZE;
     if (face->bitmap_data_offset > face->blob_size)
         return 0U;
 
+#if (WE_FLASH_FONT_DESC_CACHE > 0)
+    for (i = 0; i < (uint16_t)WE_FLASH_FONT_DESC_CACHE; ++i)
+        face->desc_cache[i].index = 0xFFFFFFFFUL;
+#endif
     return 1U;
 }
 
@@ -640,11 +381,12 @@ memset(face, 0, sizeof(*face));
 /**
  * @brief 初始化字体面对象并绑定字形流式读取缓冲。
  * @param face 待初始化的字体面对象。
- * @param lcd LCD 上下文，需已绑定 storage_read_cb。
+ * @param lcd LCD 上下文，端口需已提供 storage_read。
  * @param handle font2c 导出的字体句柄。
  * @param glyph_buf 外部分配的字形 scratch 缓冲区。
  * @param glyph_buf_size scratch 缓冲容量（字节）。
  * @return 1 表示初始化成功，0 表示校验失败或缓冲区不足。
+ * @note 失败时 face 被置为不可用（lcd 清空），拿它初始化文本控件会直接失败。
  */
 uint8_t we_flash_font_face_init(we_flash_font_face_t *face,
                                 we_lcd_t *lcd,
@@ -654,12 +396,20 @@ uint8_t we_flash_font_face_init(we_flash_font_face_t *face,
 {
     uint32_t min_row_bytes;
 
-    if (!_validate_and_bind_face(face, lcd, handle))
+    if (face == NULL)
         return 0U;
+    if (!_validate_and_bind_face(face, lcd, handle))
+    {
+        face->lcd = NULL;
+        return 0U;
+    }
 
     min_row_bytes = ((uint32_t)face->max_box_width * face->bpp + 7U) >> 3U;
     if (min_row_bytes > 0U && (glyph_buf == NULL || glyph_buf_size < min_row_bytes))
+    {
+        face->lcd = NULL;
         return 0U;
+    }
 
     face->glyph_buf = glyph_buf;
     face->glyph_buf_size = glyph_buf_size;
@@ -694,10 +444,8 @@ uint8_t we_flash_font_obj_init(we_flash_font_obj_t *obj,
 
     if (obj == NULL || face == NULL || face->lcd == NULL)
         return 0U;
-    if (face->line_height == 0U)
-        return 0U;
 
-memset(obj, 0, sizeof(*obj));
+    memset(obj, 0, sizeof(*obj));
     obj->base.lcd = face->lcd;
     obj->face = face;
     obj->text = text;
@@ -707,14 +455,14 @@ memset(obj, 0, sizeof(*obj));
     obj->base.y = y;
     obj->base.class_p = &_flash_font_class;
 
-_compute_bbox(obj, &w, &h);
+    _compute_bbox(obj, &w, &h, &obj->ink_below);
     obj->base.w = w;
     obj->base.h = h;
 
     we_obj_attach_to_lcd(face->lcd, (we_obj_t *)obj);
 
     if (opacity > 0U && w > 0 && h > 0)
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
 
     return 1U;
 }
@@ -723,32 +471,26 @@ we_obj_invalidate((we_obj_t *)obj);
  * @brief 更新文本内容并重算包围盒后触发重绘。
  * @param obj 文本控件实例。
  * @param text 新的 UTF-8 文本。
+ * @note 不比较指针：同一缓冲区原地改写内容后再次调用也会重新测量并重绘。
  */
 void we_flash_font_obj_set_text(we_flash_font_obj_t *obj, const char *text)
 {
-    int16_t new_w = 0;
-    int16_t new_h = 0;
-    const char *saved_text;
+    int16_t w = 0;
+    int16_t h = 0;
 
-    if (obj == NULL || obj->face == NULL)
-        return;
-    if (obj->text == text)
+    if (obj == NULL || obj->face == NULL || obj->face->lcd == NULL)
         return;
 
-    saved_text = obj->text;
-    obj->text = text;
-_compute_bbox(obj, &new_w, &new_h);
-    obj->text = saved_text;
-
     if (obj->opacity > 0U)
-_invalidate_obj_bbox(obj);
+        we_obj_invalidate((we_obj_t *)obj); /* 旧区域 */
 
     obj->text = text;
-    obj->base.w = new_w;
-    obj->base.h = new_h;
+    _compute_bbox(obj, &w, &h, &obj->ink_below);
+    obj->base.w = w;
+    obj->base.h = h;
 
     if (obj->opacity > 0U)
-_invalidate_text_bbox(obj, obj->text);
+        we_obj_invalidate((we_obj_t *)obj); /* 新区域 */
 }
 
 /**
@@ -758,50 +500,25 @@ _invalidate_text_bbox(obj, obj->text);
  */
 void we_flash_font_obj_set_color(we_flash_font_obj_t *obj, colour_t color)
 {
-    if (obj == NULL)
+    if (obj == NULL || we_colour_eq(obj->color, color))
         return;
-
-#if (LCD_DEEP == DEEP_RGB565)
-    if (obj->color.dat16 == color.dat16)
-        return;
-#elif (LCD_DEEP == DEEP_RGB888)
-    if (obj->color.rgb.r == color.rgb.r &&
-        obj->color.rgb.g == color.rgb.g &&
-        obj->color.rgb.b == color.rgb.b)
-        return;
-#endif
 
     obj->color = color;
     if (obj->opacity > 0U)
-we_obj_invalidate((we_obj_t *)obj);
+        we_obj_invalidate((we_obj_t *)obj);
 }
 
 /**
- * @brief 设置文本控件透明度，并对旧/新显示区域做失效处理。
+ * @brief 设置文本控件透明度并重绘。
  * @param obj 文本控件实例。
  * @param opacity 新透明度（0~255）。
+ * @note 透明度不改变几何范围，只刷当前包围盒，不必重新测量文字。
  */
 void we_flash_font_obj_set_opacity(we_flash_font_obj_t *obj, uint8_t opacity)
 {
     if (obj == NULL || obj->opacity == opacity)
         return;
 
-    if (obj->opacity > 0U)
-_invalidate_text(obj, obj->text);
-
     obj->opacity = opacity;
-
-    if (obj->opacity > 0U)
-_invalidate_text(obj, obj->text);
-}
-
-/**
- * @brief 删除文本控件并从对象链表中移除。
- * @param obj 文本控件实例。
- */
-void we_flash_font_obj_delete(we_flash_font_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-we_obj_delete((we_obj_t *)obj);
+    we_obj_invalidate((we_obj_t *)obj);
 }

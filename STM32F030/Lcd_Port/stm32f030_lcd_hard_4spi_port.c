@@ -18,7 +18,7 @@
 
 #if (LCD_PORT == _HARD_4SPI)
 #include "stm32f030_lcd_hard_4spi_port.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 static __inline void spi_set_8b(void)
 {
@@ -186,7 +186,7 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
     LCD_DC_Set();
     LCD_CS_Clr();
 
-    pixel_count = pix_size / 3U;
+    pixel_count = pix_size; /* 内核按像素数传入 */
     while (pixel_count--)
     {
         r = *gram++;

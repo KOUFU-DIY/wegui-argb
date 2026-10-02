@@ -158,19 +158,19 @@ void ST7789VW_Idle_On()//39
 	const uint8_t i[]={0x39};
 	lcd_send_nCmd((uint8_t*)i,sizeof(i)/sizeof(uint8_t));
 }
-void ST7789VW_Set_RGB444_Mode()//3A
+void st7789vw_set_rgb444_mode()//3A
 {
 	const uint8_t i[]={0x3A,0x03};//4k(RGB444)
 	lcd_send_nCmd((uint8_t*)i,sizeof(i)/sizeof(uint8_t));
 
 }
-void ST7789VW_Set_RGB565_Mode()//3A
+void st7789vw_set_rgb565_mode()//3A
 {
 	const uint8_t i[]={0x3A,0x05};//65k(RGB565)
 	lcd_send_nCmd((uint8_t*)i,sizeof(i)/sizeof(uint8_t));
 
 }
-void ST7789VW_Set_RGB666_Mode()//3A
+void st7789vw_set_rgb666_mode()//3A
 {
 	const uint8_t i[]={0x3A,0x06};//262k(RGB666)
 	lcd_send_nCmd((uint8_t*)i,sizeof(i)/sizeof(uint8_t));
@@ -1217,9 +1217,9 @@ void st7789vw_init()
 	//注意：一般芯片不支持c0设置,为了程序兼容其他款芯片,设置反色和RGB顺序时,建议优先设置C0,而36保持默认
 	ST7789VW_LCM_Control_Init();//C0
 	//---------选择默认颜色深度---------
-	//ST7789VW_Set_RGB444_Mode();//3A
-	ST7789VW_Set_RGB565_Mode();//3A
-	//ST7789VW_Set_RGB666_Mode();//3A
+	//st7789vw_set_rgb444_mode();//3A
+	st7789vw_set_rgb565_mode();//3A
+	//st7789vw_set_rgb666_mode();//3A
 	//ST7789VW_Set_RGB888_Mode();//3A
 
 	//-------------次要设置-------------

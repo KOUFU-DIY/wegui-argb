@@ -16,15 +16,19 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 日历对象与自动轮播状态为大小屏共享；标题/FPS/SEL 回显仅大屏版有 */
+static we_calendar_obj_t cal_widget;
+
+static uint32_t cal_auto_timer;         /* 自动翻月累计计时 */
+static uint8_t cal_auto_step;           /* 自动轮播步序 0..3 */
+
+#if !WE_DEMO_SMALL_SCREEN
 static we_label_obj_t cal_title;
 static we_label_obj_t cal_fps_label;
 static we_label_obj_t cal_sel_label;    /* 顶部选中日期回显 */
-static we_calendar_obj_t cal_widget;
 
 static uint32_t cal_fps_timer;
 static uint32_t cal_last_frames;
-static uint32_t cal_auto_timer;         /* 自动翻月累计计时 */
-static uint8_t cal_auto_step;           /* 自动轮播步序 0..3 */
 static char cal_fps_buf[16];
 static char cal_sel_buf[24];
 
@@ -33,6 +37,7 @@ static char cal_sel_buf[24];
 #define CAL_Y 58
 #define CAL_W 196
 #define CAL_H 176
+#endif
 
 /* 自动翻月节奏：每 2.5 秒一步，3 步 next 后第 4 步回到起点 */
 #define CAL_AUTO_PERIOD 2500U
@@ -41,6 +46,8 @@ static char cal_sel_buf[24];
 #define CAL_START_YEAR 2026U
 #define CAL_START_MONTH 7U
 #define CAL_START_DAY 20U
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 把日历当前选中日期格式化回显到顶部 SEL 标签。
@@ -147,3 +154,55 @@ void we_calendar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &cal_fps_label, &cal_fps_timer,
                        &cal_last_frames, cal_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 calendar demo（128x64 布局：日历独占全屏，格 18x8）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_calendar_preview_demo_init(we_lcd_t *lcd)
+{
+    cal_auto_timer = 0U;
+    cal_auto_step = 0U;
+
+    /* 日历独占全屏：行高仅 8px，数字紧凑排布；点格选日、横滑翻月可用 */
+    we_calendar_obj_init(&cal_widget, lcd, 0, 0, 128, 64, we_font_consolas_18);
+    we_calendar_set_month(&cal_widget, CAL_START_YEAR, (uint8_t)CAL_START_MONTH);
+    we_calendar_set_selected(&cal_widget, (uint8_t)CAL_START_DAY);
+    we_calendar_set_today(&cal_widget, CAL_START_YEAR, (uint8_t)CAL_START_MONTH,
+                          (uint8_t)CAL_START_DAY);
+}
+
+/**
+ * @brief calendar demo 周期更新：自动翻月轮播（无回显标签）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_calendar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    cal_auto_timer += ms_tick;
+    if (cal_auto_timer >= CAL_AUTO_PERIOD)
+    {
+        cal_auto_timer = 0U;
+
+        if (cal_auto_step < 3U)
+        {
+            we_calendar_next_month(&cal_widget);
+            cal_auto_step++;
+        }
+        else
+        {
+            we_calendar_set_month(&cal_widget, CAL_START_YEAR, (uint8_t)CAL_START_MONTH);
+            we_calendar_set_selected(&cal_widget, (uint8_t)CAL_START_DAY);
+            cal_auto_step = 0U;
+        }
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

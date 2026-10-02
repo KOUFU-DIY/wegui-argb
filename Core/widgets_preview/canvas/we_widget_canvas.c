@@ -3,13 +3,13 @@
  * @brief 用户自绘壳控件（preview）：PFB 窗口收窄 + 用户回调转发
  *
  * draw_cb 按 group 的标准套路把 PFB 窗口收窄到自身矩形
- * （save/restore pfb_area / pfb_y_start / pfb_y_end / pfb_gram），
+ * （save/restore clip / pfb_gram），
  * 并把控件 opacity 乘入 lcd->opa_scale 级联乘子，然后调用用户自绘回调；
  * 回调返回后恢复窗口。用户回调内所有原语的越界像素被窗口自动裁掉。
  */
 
 #include "we_widget_canvas.h"
-#include "we_render.h" /* PFB 裁剪三件套 */
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 内部回调

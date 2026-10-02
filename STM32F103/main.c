@@ -71,7 +71,6 @@ static void system_init(void)
     sysclk_check_rescue();
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
-    g_sys_tick = 0;
     SystemCoreClockUpdate();
     SysTick_Config(SystemCoreClock / 1000U);
 }
@@ -79,9 +78,27 @@ static void system_init(void)
 static colour_t s_gram[USER_GRAM_NUM];
 we_lcd_t g_lcd;
 
+/* 端口描述：设窗 / 刷屏 / 触摸 / 外挂存储（刷屏函数按色深与屏类型选） */
+static const we_port_t s_port = {
+    .set_addr = lcd_set_windows,
+#if (LCD_DEEP == DEEP_RGB565)
+    .flush = lcd_rgb565_port,
+#elif (LCD_DEEP == DEEP_RGB888)
+    .flush = lcd_rgb888_port,
+#elif (LCD_TYPE == HW_LCD_OLED)
+    .flush = lcd_oled_port, /* 单色 OLED */
+#elif (LCD_TYPE == HW_LCD_GRAY)
+    .flush = lcd_gray_port, /* 4 灰度 OLED */
+#endif
+    .touch_read = NULL, /* 本板无触摸 */
+    .storage_read = w25qxx_read_data,
+    .flush_async = LCD_FLUSH_ASYNC,
+};
+
 int main(void)
 {
     static we_gui_timer_t demo_timer; /* demo 周期定时器节点（调用方持有） */
+    uint32_t t0;
     system_init();
 
     lcd_hw_init();
@@ -90,18 +107,10 @@ int main(void)
     flash_port_init();
     w25qxx_init();
 
-#if (LCD_DEEP == DEEP_RGB565)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_rgb565_port, we_input_port_read, w25qxx_read_data);
-#elif (LCD_DEEP == DEEP_RGB888)
-    we_gui_init(&g_lcd, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_rgb888_port, we_input_port_read, w25qxx_read_data);
-#elif (LCD_DEEP == DEEP_GRAY8)
-  #if (LCD_TYPE == HW_LCD_OLED)
-	    /* 页式单色 OLED */
-      we_gui_init(&g_lcd, RGB888TODEV(0, 0, 0), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_oled_port, we_input_port_read, w25qxx_read_data);
-  #else
-      /* 灰度 OLED */
-      we_gui_init(&g_lcd, RGB888TODEV(0, 0, 0), s_gram, USER_GRAM_NUM, lcd_set_windows, lcd_gray_port, we_input_port_read, w25qxx_read_data);
-  #endif
+#if (LCD_DEEP == DEEP_GRAY8)
+    we_gui_init(&g_lcd, &s_port, RGB888TODEV(0, 0, 0), s_gram, USER_GRAM_NUM);
+#else
+    we_gui_init(&g_lcd, &s_port, RGB888TODEV(10, 14, 20), s_gram, USER_GRAM_NUM);
 #endif
 
     /* DEMO_ID（编译期宏切换，改这一行即可）；
@@ -138,7 +147,7 @@ int main(void)
      * 121 = animimg (帧动画)      122 = canvas (自绘画布)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
      * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
-#define DEMO_ID (33)
+#define DEMO_ID (12)
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
 #if (DEMO_ID == 1)
@@ -317,16 +326,9 @@ int main(void)
     we_gui_timer_create(&g_lcd, &demo_timer, we_label_simple_demo_tick, 16U, 1U);
 #endif
 
-    g_sys_tick = 0;
+    t0 = g_sys_ms; /* GUI 时间轴从进入主循环时的 0 起算 */
     while (1)
     {
-        if (g_sys_tick >= 1U)
-        {
-            uint16_t ms = g_sys_tick;
-            g_sys_tick = 0;
-            we_gui_tick_inc(&g_lcd, ms);
-        }
-
-        we_gui_task_handler(&g_lcd);
+        (void)we_gui_run(&g_lcd, g_sys_ms - t0);
     }
 }

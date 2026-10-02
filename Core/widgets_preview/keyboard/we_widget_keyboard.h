@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_KEYBOARD_H
 #define __WE_WIDGET_KEYBOARD_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 软键盘控件（keyboard）—— preview 孵化区实验控件
@@ -68,9 +68,14 @@
 #endif
 
 /* 弹层模式顶部回显条高度（像素）：实时显示目标输入框内容（含末尾光标），
- * 键盘滑入遮住输入框时也能看到正在输入的文本。0 = 关闭回显条。 */
+ * 键盘滑入遮住输入框时也能看到正在输入的文本。0 = 关闭回显条。
+ * 小屏（宽 <=128）默认减半，给键区留高度。 */
 #ifndef WE_KEYBOARD_ECHO_H
+#if (SCREEN_WIDTH <= 128)
+#define WE_KEYBOARD_ECHO_H 13
+#else
 #define WE_KEYBOARD_ECHO_H 26
+#endif
 #endif
 
 /* 本控件弹层键导航开关（默认跟随全局 WE_CFG_ENABLE_KEY_INPUT）。

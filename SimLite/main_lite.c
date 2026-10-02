@@ -5,9 +5,6 @@
  * 与硬件目标（STM32F103/F030/AD14N）完全同构：改下面的 DEMO_ID 宏并重编即可
  * 切换 demo（tcc 全量编译约 1 秒）。本文件同时是移植模板——只有
  * 初始化 / 编译期选 demo / 主循环三段，无任何调试设施。
- *
- * 开发调试入口（运行时选 demo、--shot 抓帧自检）在 SimLite/debug/，
- * 用 build_lite.ps1 -Dev（或 build_lite.sh --dev）单独构建，日常构建不编译。
  */
 
 #include "lite_port.h"
@@ -60,22 +57,31 @@ int main(void)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
      * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
 #ifndef DEMO_ID /* build_lite.ps1 -Demo N 可从命令行覆盖（-DDEMO_ID=N） */
-#define DEMO_ID (33)
+#define DEMO_ID (22)
 #endif
 
+    /* 端口描述：设窗 / 刷屏 / 触摸采样 / 外挂存储读取。
+     * 模拟器的 flush 是同步内存拷贝，返回时已写完，flush_async 填 0。 */
+    static const we_port_t port = {
+        .set_addr = lite_lcd_set_addr,
+#if (LCD_DEEP == DEEP_GRAY8)
+        .flush = lcd_gray8_port,
+#else
+        .flush = lcd_rgb565_port,
+#endif
+        .touch_read = lite_touch_read,
+        .storage_read = we_storage_port_read,
+        .flush_async = 0U,
+    };
     static we_gui_timer_t demo_timer; /* demo 周期定时器节点（调用方持有） */
     uint32_t last_tick;
+    uint32_t gui_ms = 0U; /* 交给 GUI 的时间轴（调试暂停造成的大跳变按一帧计） */
 
     lcd_hw_init();
     input_hw_init();
     storage_hw_init();
 
-#if (LCD_DEEP == DEEP_GRAY8)
-    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_gray8_port,
-#else
-    we_gui_init(&mylcd, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM, lite_lcd_set_addr, lcd_rgb565_port,
-#endif
-                we_input_port_read, we_storage_port_read);
+    we_gui_init(&mylcd, &port, RGB888TODEV(10, 14, 20), user_gram, USER_GRAM_NUM);
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
 #if (DEMO_ID == 0)
@@ -151,6 +157,7 @@ int main(void)
 #elif (DEMO_ID == 22)
     we_line_simple_demo_init(&mylcd);
     we_gui_timer_create(&mylcd, &demo_timer, we_line_simple_demo_tick, 16U, 1U);
+    //we_gui_timer_create(&mylcd, &demo_timer, we_line_simple_demo_tick, 16U, 1U);
 #elif (DEMO_ID == 23)
     we_box_simple_demo_init(&mylcd);
     we_gui_timer_create(&mylcd, &demo_timer, we_box_simple_demo_tick, 16U, 1U);
@@ -269,15 +276,10 @@ int main(void)
         uint32_t delta = now - last_tick;
         uint32_t frame_ms;
 
-        if (delta > 0U)
-        {
-            uint16_t ms = (uint16_t)((delta > 100U) ? 16U : delta);
+        gui_ms += (delta > 100U) ? 16U : delta;
+        last_tick = now;
 
-            we_gui_tick_inc(&mylcd, ms);
-            last_tick = now;
-        }
-
-        we_gui_task_handler(&mylcd);
+        (void)we_gui_run(&mylcd, gui_ms);
         lite_present();
 
         frame_ms = lite_ticks_ms() - now;

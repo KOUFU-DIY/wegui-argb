@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_JOYSTICK_H
 #define __WE_WIDGET_JOYSTICK_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"

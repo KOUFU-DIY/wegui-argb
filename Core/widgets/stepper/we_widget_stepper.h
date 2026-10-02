@@ -1,16 +1,16 @@
 #ifndef __WE_WIDGET_STEPPER_H
 #define __WE_WIDGET_STEPPER_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * 数值步进控件（stepper / spinbox）
  *
  * 左 [-] / 中 数值 / 右 [+] 三段式布局，适合 MCU 设置项（温度、音量、阈值…）。
  *   - 点击左/右区按 step 减/加，到边界禁用对应按钮（wrap=1 则回绕不禁用）；
- *   - 按住不放触发连续步进（复用 STAY 事件，不占用 timer slot）；
+ *   - 按住不放触发连续步进（复用 STAY 事件，不用定时器）；
  *   - 数值统一用“定点 int32”存储：真实值 = value / 10^decimals，
- *     小数显示在 draw 时才拆分，避免 Cortex-M0 软浮点开销与符号歧义。
+ *     值变化时才拆成整数/小数格式化成文本，避免 Cortex-M0 软浮点开销与符号歧义。
  *
  * 例：温度 16.0~30.0、步进 0.5、1 位小数 →
  *     decimals=1, min=160, max=300, step=5, init=230。
@@ -33,7 +33,7 @@
 #define WE_STEPPER_HOLD_INTERVAL 7U
 #endif
 
-/* 支持的最大小数位数（决定内部查表与缓冲大小） */
+/* 支持的最大小数位数（0~9，超出则编译报错） */
 #ifndef WE_STEPPER_MAX_DECIMALS
 #define WE_STEPPER_MAX_DECIMALS 4U
 #endif
@@ -54,12 +54,13 @@ typedef struct we_stepper_obj_t
     we_stepper_changed_cb_t changed_cb;
     uint16_t radius;   /* 底框圆角 */
     uint16_t hold_cnt; /* 按住期间累计的 STAY 次数 */
-    char buf[16];      /* 数值文本缓冲（draw 时刷新） */
+    char buf[14];      /* 数值文本（值变化时格式化；最长 "-2147483.648" 12 字符 + 结尾） */
+    uint16_t txt_w;    /* 数值文本宽度（随 buf 一起更新） */
     uint8_t decimals;  /* 小数位数，0 = 纯整数 */
-    int8_t active_side; /* 当前按住的一侧：-1=减，+1=加，0=无 */
+    int8_t active_side; /* 当前按住的一侧：-1=减，+1=加，0=无（非 0 即按钮高亮） */
     uint8_t wrap : 1;    /* 1：到边界回绕；0：到边界禁用对应按钮 */
     uint8_t enabled : 1; /* 是否可交互 */
-    uint8_t pressed : 1; /* 是否处于按下态（用于按钮高亮） */
+    int8_t txt_ymid;   /* 数值文本墨迹竖直中线（相对基线，随 buf 一起更新） */
 } we_stepper_obj_t;
 
 /**
@@ -145,6 +146,6 @@ void we_stepper_set_changed_cb(we_stepper_obj_t *obj, we_stepper_changed_cb_t cb
  * @param obj 控件对象指针。
  * @return 无。
  */
-void we_stepper_obj_delete(we_stepper_obj_t *obj);
+static inline void we_stepper_obj_delete(we_stepper_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif

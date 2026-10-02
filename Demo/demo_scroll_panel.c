@@ -123,7 +123,7 @@ void we_scroll_panel_simple_demo_init(we_lcd_t *lcd)
                              0U, 255);
     we_scroll_panel_set_scrollbar(&demo_panel, 1U, 6U);
     we_scroll_panel_set_scrollbar_opacity(&demo_panel, 180U);
-    we_scroll_panel_set_content_h(&demo_panel, 316);
+    we_scroll_panel_set_content_h(&demo_panel, 344); /* 末项局部 y=316 + 行高 18 + 底部留白 10 */
 
     we_label_obj_init(&panel_header, lcd, 0, 0,
                       "SCROLL AREA", we_font_consolas_18,

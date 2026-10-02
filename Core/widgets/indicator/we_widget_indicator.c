@@ -1,5 +1,5 @@
 #include "we_widget_indicator.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /**
  * @brief 控件绘制回调，向当前 PFB 输出可视内容。
@@ -57,6 +57,7 @@ static uint8_t _indicator_key_cb(void *ptr, uint8_t key_evt)
 }
 #endif
 
+/* 可交互（可点击或设了用户回调）时用的类 */
 static const we_class_t _indicator_class = {
     .draw_cb = _indicator_draw_cb,
     .event_cb = _indicator_event_cb,
@@ -66,10 +67,20 @@ static const we_class_t _indicator_class = {
 #endif
 };
 
+/* 只读灯用的类：event_cb 为 NULL，命中测试跳过它（触摸落到背后的控件），也不可聚焦 */
+static const we_class_t _indicator_class_ro = {
+    .draw_cb = _indicator_draw_cb,
+    .event_cb = NULL,
+    .set_pos_cb = NULL,
+};
+
 static const colour_t _c_black = RGB888_CONST(0, 0, 0);
 
 /* 按下时向黑色额外混合的 alpha，产生轻微暗化按压反馈 */
 #define _IND_PRESS_DARKEN 40U
+
+/* 光晕圈数（固定 3 圈，下面的 /3 用乘移位代替） */
+#define _IND_GLOW_RINGS 3U
 
 /**
  * @brief 以 (w,h) 内接圆方式绘制一枚抗锯齿圆（round_rect 退化）。
@@ -86,7 +97,7 @@ static void _indicator_fill_circle(we_lcd_t *lcd, int16_t cx, int16_t cy,
 {
     int16_t d;
 
-    if (lcd == NULL || r <= 0 || opacity == 0U)
+    if (r <= 0 || opacity == 0U)
         return;
 
     d = (int16_t)(r * 2);
@@ -103,7 +114,7 @@ static void _indicator_fill_circle(we_lcd_t *lcd, int16_t cx, int16_t cy,
 static void _indicator_draw_cb(void *ptr)
 {
     we_indicator_obj_t *obj = (we_indicator_obj_t *)ptr;
-    we_lcd_t *lcd;
+    we_lcd_t *lcd = obj->base.lcd;
     int16_t cx;
     int16_t cy;
     int16_t r_max;
@@ -112,10 +123,7 @@ static void _indicator_draw_cb(void *ptr)
     uint8_t lit_alpha;
     colour_t core_color;
 
-    if (obj == NULL || obj->opacity == 0U)
-        return;
-    lcd = obj->base.lcd;
-    if (lcd == NULL || obj->base.w <= 0 || obj->base.h <= 0)
+    if (obj->opacity == 0U)
         return;
 
     /* 圆心与最大半径（取短边的一半，保证正圆且落在 box 内） */
@@ -140,19 +148,21 @@ static void _indicator_draw_cb(void *ptr)
     if (core_r < 1)
         core_r = 1;
 
-    /* ---- 光晕：点亮程度越高越明显，由数圈同心半透明圆叠加出径向衰减 ---- */
+    /* ---- 光晕：点亮程度越高越明显，由数圈同心半透明圆叠加出径向衰减 ----
+     * 各乘积都不超过 65025：/255 用 we_div255、/3 用 ×0xAAAB>>17，两者在此范围内与整除逐位相同 */
     if (obj->glow && lit_alpha > 0U)
     {
         uint8_t i;
-        uint8_t rings = 3U;
-        for (i = 0U; i < rings; i++)
+        uint32_t peak = we_div255((uint32_t)WE_INDICATOR_GLOW_ALPHA * lit_alpha);
+        uint32_t span = (uint32_t)(r_max - core_r);
+
+        for (i = 0U; i < _IND_GLOW_RINGS; i++)
         {
-            /* 由外到内：半径从 r_max 递减到 core_r，alpha 由弱到强累积 */
-            int16_t gr = (int16_t)(core_r
-                        + (int32_t)(r_max - core_r) * (int32_t)(rings - i) / (int32_t)rings);
-            uint32_t a = (uint32_t)WE_INDICATOR_GLOW_ALPHA * lit_alpha / 255U;
-            a = a * (uint32_t)(i + 1U) / (uint32_t)rings;        /* 内圈更实 */
-            a = a * (uint32_t)obj->opacity / 255U;
+            /* 由外到内：半径从 r_max 递减到 core_r，alpha 由弱到强累积（内圈更实） */
+            int16_t gr = (int16_t)(core_r + (int16_t)((span * (_IND_GLOW_RINGS - i) * 0xAAABU) >> 17));
+            uint32_t a = (peak * (uint32_t)(i + 1U) * 0xAAABU) >> 17;
+
+            a = we_div255(a * (uint32_t)obj->opacity);
             if (gr > core_r && a > 0U)
                 _indicator_fill_circle(lcd, cx, cy, gr, obj->on_color, (uint8_t)a);
         }
@@ -167,38 +177,28 @@ static void _indicator_draw_cb(void *ptr)
 }
 
 /**
- * @brief 控件事件回调，处理按压/点击输入。
+ * @brief 控件事件回调，处理按压/点击输入（只挂在可交互类上）。
  * @param ptr 回调透传对象指针。
  * @param event 输入事件类型。
  * @param data 输入设备事件数据指针。
  * @return 返回状态标志（1 有效，0 未处理）。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
-static uint8_t _indicator_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
                                    we_indev_data_t *data)
 {
+    we_indicator_obj_t *obj = (we_indicator_obj_t *)ptr;
+
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_INDICATOR_USE_KEY == 1)
     /* 统一事件通道：语义键/焦点通知（0x10+）分流到键处理器 */
     if ((uint8_t)event >= WE_KEY_UP)
         return _indicator_key_cb(ptr, (uint8_t)event);
 #endif
 
-    we_indicator_obj_t *obj = (we_indicator_obj_t *)ptr;
-
-    if (obj == NULL)
-        return 0U;
-
     /* 用户自定义回调优先，接管全部事件 */
     if (obj->user_event_cb != NULL)
         return obj->user_event_cb(ptr, event, data);
 
     (void)data;
-
-    /* 只读：不消费事件，让事件可穿透给背后控件 */
-    if (!obj->clickable)
-        return 0U;
 
     switch (event)
     {
@@ -221,6 +221,30 @@ static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
 }
 
 /**
+ * @brief 按“可点击或设了用户回调”换类描述符。
+ * @param obj 指示灯控件对象指针。
+ * @return 无。
+ * @note 换成只读类时收起按压视觉；焦点的交出在 set_clickable 里处理。
+ */
+static void _indicator_update_class(we_indicator_obj_t *obj)
+{
+    if (obj->base.class_p == NULL)
+        return; /* 已删除的对象不复活 */
+
+    if (obj->clickable || obj->user_event_cb != NULL)
+    {
+        obj->base.class_p = &_indicator_class;
+        return;
+    }
+    obj->base.class_p = &_indicator_class_ro;
+    if (obj->pressed)
+    {
+        obj->pressed = 0U;
+        we_obj_invalidate((we_obj_t *)obj);
+    }
+}
+
+/**
  * @brief 推进一次亮灭过渡动画。
  * @param obj 指示灯控件对象指针。
  * @param elapsed_ms 本次调度经过的毫秒数。
@@ -229,9 +253,8 @@ static uint8_t _indicator_event_cb(void *ptr, we_event_t event,
 static void _indicator_anim_step(we_indicator_obj_t *obj, uint16_t elapsed_ms)
 {
     uint16_t target;
-    uint32_t delta;
 
-    if (obj == NULL || elapsed_ms == 0U)
+    if (elapsed_ms == 0U)
         return;
 
     target = obj->state ? 256U : 0U;
@@ -242,24 +265,12 @@ static void _indicator_anim_step(we_indicator_obj_t *obj, uint16_t elapsed_ms)
         return;
     }
 
-    /* 本帧线性推进量（Q8）。anim_ms 为 0 时直接到位，避免除零 */
-    if (obj->anim_ms == 0U)
-    {
-        obj->progress = target;
-    }
+    /* 点亮向 256 推进；熄灭按“离 256 的距离”推进，同一个推进函数两个方向共用 */
+    if (target != 0U)
+        obj->progress = we_motion_advance(obj->progress, obj->anim_ms, elapsed_ms);
     else
-    {
-        delta = (uint32_t)elapsed_ms * 256U / (uint32_t)obj->anim_ms;
-        if (delta == 0U)
-            delta = 1U; /* 保证慢主循环下也能缓慢前进 */
-
-        if (obj->progress < target)
-            obj->progress = ((uint32_t)obj->progress + delta >= target)
-                          ? target : (uint16_t)(obj->progress + delta);
-        else
-            obj->progress = ((uint32_t)delta >= obj->progress - target)
-                          ? target : (uint16_t)(obj->progress - delta);
-    }
+        obj->progress = (uint16_t)(256U - we_motion_advance((uint16_t)(256U - obj->progress),
+                                                            obj->anim_ms, elapsed_ms));
 
     if (obj->progress == target)
         we_anim_stop(obj->base.lcd, &obj->anim); /* 本步到位，摘链停表 */
@@ -303,7 +314,7 @@ void we_indicator_obj_init(we_indicator_obj_t *obj, we_lcd_t *lcd,
     obj->base.y       = y;
     obj->base.w       = w;
     obj->base.h       = h;
-    obj->base.class_p = &_indicator_class;
+    obj->base.class_p = &_indicator_class_ro; /* 默认只读 */
     obj->base.parent  = NULL;
     obj->base.next    = NULL;
 
@@ -317,7 +328,6 @@ void we_indicator_obj_init(we_indicator_obj_t *obj, we_lcd_t *lcd,
     obj->user_event_cb = NULL;
     obj->ease          = we_ease_in_out_sine;
     obj->anim_ms       = WE_INDICATOR_ANIM_MS;
-    obj->anim_acc_ms   = 0U;
     obj->progress      = 0U;     /* 初始熄灭 */
     obj->anim.next     = NULL;
     obj->anim.step_cb  = NULL;
@@ -355,7 +365,6 @@ void we_indicator_set_state(we_indicator_obj_t *obj, uint8_t on)
         return;
 
     obj->state = val;
-    obj->anim_acc_ms = 0U;
 
     if (!obj->anim_enabled)
     {
@@ -364,7 +373,7 @@ void we_indicator_set_state(we_indicator_obj_t *obj, uint8_t on)
     }
     else
     {
-        /* 挂入中央动画链表（不占 task 槽、不会失败） */
+        /* 挂入中央动画链表（不会失败；进行中的过渡从当前进度掉头） */
         we_anim_start(obj->base.lcd, &obj->anim, _indicator_anim_step_cb, obj);
     }
 
@@ -404,6 +413,8 @@ void we_indicator_set_colors(we_indicator_obj_t *obj, colour_t on_color,
                              colour_t off_color)
 {
     if (obj == NULL)
+        return;
+    if (we_colour_eq(obj->on_color, on_color) && we_colour_eq(obj->off_color, off_color))
         return;
     obj->on_color  = on_color;
     obj->off_color = off_color;
@@ -473,12 +484,27 @@ void we_indicator_set_glow(we_indicator_obj_t *obj, uint8_t enable)
  * @param obj 指示灯控件对象指针。
  * @param clickable 0=只读，非0=点击翻转。
  * @return 无。
+ * @note 改为只读时收起按压视觉；若它正持有焦点，焦点一并清掉
+ *       （只读灯不可聚焦）。
  */
 void we_indicator_set_clickable(we_indicator_obj_t *obj, uint8_t clickable)
 {
     if (obj == NULL)
         return;
     obj->clickable = clickable ? 1U : 0U;
+    if (!obj->clickable)
+    {
+        if (obj->pressed)
+        {
+            obj->pressed = 0U;
+            we_obj_invalidate((we_obj_t *)obj);
+        }
+#if (WE_CFG_ENABLE_KEY_INPUT == 1)
+        if (obj->base.lcd != NULL && we_focus_get(obj->base.lcd) == (we_obj_t *)obj)
+            we_focus_set(obj->base.lcd, NULL);
+#endif
+    }
+    _indicator_update_class(obj);
 }
 
 /**
@@ -493,6 +519,7 @@ void we_indicator_set_event_cb(we_indicator_obj_t *obj,
     if (obj == NULL)
         return;
     obj->user_event_cb = cb;
+    _indicator_update_class(obj);
 }
 
 /**
@@ -508,26 +535,3 @@ void we_indicator_set_opacity(we_indicator_obj_t *obj, uint8_t opacity)
     obj->opacity = opacity;
     we_obj_invalidate((we_obj_t *)obj);
 }
-
-/**
- * @brief 删除指示灯控件：摘除中央动画链节点并从对象链表移除。
- * @param obj 指示灯控件对象指针。
- * @return 无。
- */
-void we_indicator_obj_delete(we_indicator_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    /* 节点归控件所有，删除前必须摘链，否则动画链表留悬空指针 */
-    we_anim_stop(obj->base.lcd, &obj->anim);
-    we_obj_delete((we_obj_t *)obj);
-}
-
-
-
-
-
-
-
-
-

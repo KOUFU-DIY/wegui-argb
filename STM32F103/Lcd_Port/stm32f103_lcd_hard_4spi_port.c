@@ -18,7 +18,7 @@
 
 #if (LCD_PORT == _HARD_4SPI)
 #include "stm32f103_lcd_hard_4spi_port.h"
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /*
  * 使用 static __inline 而非裸 inline：
@@ -342,7 +342,8 @@ void lcd_rgb888_port(uint8_t *gram, uint32_t pix_size)
     LCD_DC_Set();
     LCD_CS_Clr();
 
-    /* pix_size 为 RGB888 字节数，R/G/B 3 字节原样直出 */
+    /* 内核按像素数传入，RGB888 每像素 R/G/B 3 字节原样直出 */
+    pix_size *= 3U;
     while (pix_size--)
     {
         wait_lcd_spi_txtemp_free();

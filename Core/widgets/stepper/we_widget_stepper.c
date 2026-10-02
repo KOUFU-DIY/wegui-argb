@@ -1,6 +1,5 @@
 #include "we_widget_stepper.h"
-#include "we_font_text.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* 内置配色（RGB888TODEV 兼容 RGB565 / RGB888）。 */
 #define _SP_COL_BG          RGB888TODEV(46, 52, 64)    /* 中间数值区背景 */
@@ -12,9 +11,12 @@
 #define _SP_COL_SIGN_PRESS  RGB888TODEV(255, 255, 255) /* +/- 符号按下色 */
 #define _SP_COL_SIGN_DIS    RGB888TODEV(90, 98, 114)   /* +/- 符号禁用色 */
 
-/* 10^n 查表（n=0..WE_STEPPER_MAX_DECIMALS），避免运行时循环求幂。 */
-static const int32_t _sp_pow10[WE_STEPPER_MAX_DECIMALS + 1U] = {
-    1, 10, 100, 1000, 10000
+/* 10^n 查表（n=0..9，覆盖 int32 能表示的全部小数位），避免运行时循环求幂。 */
+#if (WE_STEPPER_MAX_DECIMALS > 9)
+#error "WE_STEPPER_MAX_DECIMALS 最大为 9（int32 定点值最多 10 位十进制）"
+#endif
+static const int32_t _sp_pow10[10] = {
+    1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000
 };
 
 /**
@@ -76,9 +78,10 @@ static void _stepper_put_uint(char *buf, uint8_t *pos, uint8_t cap,
  *
  * 真实值 = value / 10^decimals。注意 value 为 -1~-(divisor-1) 时整数部分
  * 为 0、负号会丢失，这里用独立的 neg 标志统一在最前补 '-'。
- * 只在值变更点调用（init / set_value / 步进 / set_range 夹紧），
- * draw_cb 直读 obj->buf——含软除的格式化不进每帧绘制路径。
- * @param obj 控件对象指针（结果写入 obj->buf）。
+ * 只在值变更点调用（init / set_value / 步进 / set_range 夹紧），同时量好
+ * 文字宽度与竖直中线；draw_cb 直读 obj->buf 与缓存——含软除的格式化和
+ * 逐字测量都不进每个切片的绘制路径。
+ * @param obj 控件对象指针（结果写入 obj->buf / txt_w / txt_ymid）。
  * @return 无。
  */
 static void _stepper_format(we_stepper_obj_t *obj)
@@ -102,17 +105,29 @@ static void _stepper_format(we_stepper_obj_t *obj)
         _stepper_put_uint(obj->buf, &pos, cap, fp, obj->decimals);
     }
     obj->buf[pos] = '\0';
+
+    obj->txt_w = 0U;
+    obj->txt_ymid = 0;
+    if (obj->font != NULL)
+    {
+        int8_t y_top, y_bot;
+
+        obj->txt_w = we_get_text_width(obj->font, obj->buf);
+        we_get_text_bbox(obj->font, obj->buf, &y_top, &y_bot);
+        obj->txt_ymid = (int8_t)((y_top + y_bot) / 2);
+    }
 }
 
 /**
  * @brief 计算左右按钮区宽度（方形，取 h 与 w/3 的较小值）。
  * @param obj 控件对象指针。
  * @return 按钮区宽度（像素）。
+ * @note w/3 用 ×43691>>17（0..32767 内与整除逐位相同），每个切片省一次库除法。
  */
 static int16_t _stepper_btn_w(const we_stepper_obj_t *obj)
 {
     int16_t bw = obj->base.h;
-    int16_t third = (int16_t)(obj->base.w / 3);
+    int16_t third = (int16_t)(((uint32_t)(uint16_t)obj->base.w * 43691U) >> 17);
     if (bw > third)
         bw = third;
     if (bw < 1)
@@ -195,54 +210,42 @@ static void _stepper_draw_sign(we_lcd_t *lcd, int16_t cx, int16_t cy,
     int16_t t0 = (int16_t)(thick / 2);
 
     /* 横条 */
-    we_draw_round_rect_analytic_fill(lcd, (int16_t)(cx - half), (int16_t)(cy - t0),
-                                     (uint16_t)(half * 2 + 1), (uint16_t)thick,
-                                     0U, color, 255U);
+    we_fill_rect(lcd, (int16_t)(cx - half), (int16_t)(cy - t0),
+                 (uint16_t)(half * 2 + 1), (uint16_t)thick, color, 255U);
     /* 竖条（仅 '+'） */
     if (is_plus)
-        we_draw_round_rect_analytic_fill(lcd, (int16_t)(cx - t0), (int16_t)(cy - half),
-                                         (uint16_t)thick, (uint16_t)(half * 2 + 1),
-                                         0U, color, 255U);
+        we_fill_rect(lcd, (int16_t)(cx - t0), (int16_t)(cy - half),
+                     (uint16_t)thick, (uint16_t)(half * 2 + 1), color, 255U);
 }
 
 /**
- * @brief 在裁剪框内垂直/水平居中绘制一行文本。
- * @param lcd GUI 上下文。
- * @param font 字体资源。
- * @param text 文本。
+ * @brief 在中间数值区内居中绘制数值文本（窗口收窄到数值区，文字不压到按钮区）。
+ * @param obj 控件对象指针（文字与宽度/竖直中线缓存由 _stepper_format 写好）。
  * @param color 文本颜色。
- * @param box_x 框左上 X。
- * @param box_y 框左上 Y。
- * @param box_w 框宽。
- * @param box_h 框高。
- * @param opacity 透明度。
+ * @param box_x 数值区左上 X。
+ * @param box_y 数值区左上 Y。
+ * @param box_w 数值区宽。
+ * @param box_h 数值区高。
  * @return 无。
  */
-static void _stepper_draw_text_centered(we_lcd_t *lcd, const unsigned char *font,
-                                        const char *text, colour_t color,
-                                        int16_t box_x, int16_t box_y,
-                                        int16_t box_w, int16_t box_h, uint8_t opacity)
+static void _stepper_draw_value(we_stepper_obj_t *obj, colour_t color,
+                                int16_t box_x, int16_t box_y, int16_t box_w, int16_t box_h)
 {
+    we_lcd_t *lcd = obj->base.lcd;
     we_pfb_clip_t sv;
-    int8_t y_top, y_bot;
-    uint16_t tw;
-    int16_t txt_x, txt_y;
 
-    if (text == NULL || font == NULL)
+    if (obj->font == NULL)
         return;
-
-    tw = we_get_text_width(font, text);
-    we_get_text_bbox(font, text, &y_top, &y_bot);
-    txt_x = (int16_t)(box_x + (box_w - (int16_t)tw) / 2);
-    txt_y = (int16_t)(box_y + box_h / 2 - (y_top + y_bot) / 2);
 
     we_pfb_clip_save(lcd, &sv);
     if (we_pfb_clip_to(lcd, &sv, box_x, box_y,
                        (int16_t)(box_x + box_w - 1), (int16_t)(box_y + box_h - 1)))
     {
-        we_draw_string(lcd, txt_x, txt_y, font, text, color, opacity);
+        we_draw_string(lcd, (int16_t)(box_x + (box_w - (int16_t)obj->txt_w) / 2),
+                       (int16_t)(box_y + box_h / 2 - obj->txt_ymid),
+                       obj->font, obj->buf, color, 255U);
+        we_pfb_clip_restore(lcd, &sv);
     }
-    we_pfb_clip_restore(lcd, &sv);
 }
 
 /**
@@ -260,8 +263,9 @@ static void _stepper_draw_cb(void *ptr)
     int16_t h = obj->base.h;
     int16_t bw = _stepper_btn_w(obj);
     uint16_t r = obj->radius;
-    int16_t sign_half = (int16_t)(h / 6);
-    int16_t sign_thick = (int16_t)(h / 10);
+    /* h/6、h/10 用乘移位（0..32767 内与整除逐位相同） */
+    int16_t sign_half = (int16_t)(((uint32_t)(uint16_t)h * 43691U) >> 18);
+    int16_t sign_thick = (int16_t)(((uint32_t)(uint16_t)h * 52429U) >> 19);
 #if (WE_CFG_MONO_STYLE == 0)
     uint8_t dec_dis = _stepper_dec_disabled(obj);
     uint8_t inc_dis = _stepper_inc_disabled(obj);
@@ -280,15 +284,15 @@ static void _stepper_draw_cb(void *ptr)
         static const colour_t mono_fg = RGB888_CONST(255, 255, 255);
         static const colour_t mono_bg = RGB888_CONST(0, 0, 0);
         uint16_t zr = (r > 0U) ? (uint16_t)(r - 1U) : 0U;
-        colour_t sign_l = (obj->pressed && obj->active_side < 0) ? mono_bg : mono_fg;
-        colour_t sign_r = (obj->pressed && obj->active_side > 0) ? mono_bg : mono_fg;
+        colour_t sign_l = (obj->active_side < 0) ? mono_bg : mono_fg;
+        colour_t sign_r = (obj->active_side > 0) ? mono_bg : mono_fg;
 
         we_draw_round_rect_outline_fill(lcd, x, y, (uint16_t)w, (uint16_t)h, r,
                                         mono_fg, mono_bg, 255U);
-        if (obj->pressed && obj->active_side < 0)
+        if (obj->active_side < 0)
             we_draw_round_rect_analytic_fill(lcd, (int16_t)(x + 1), (int16_t)(y + 1),
                                              (uint16_t)(bw - 1), (uint16_t)(h - 2), zr, mono_fg, 255U);
-        if (obj->pressed && obj->active_side > 0)
+        if (obj->active_side > 0)
             we_draw_round_rect_analytic_fill(lcd, (int16_t)(x + w - bw), (int16_t)(y + 1),
                                              (uint16_t)(bw - 1), (uint16_t)(h - 2), zr, mono_fg, 255U);
         we_fill_rect(lcd, (int16_t)(x + bw), (int16_t)(y + 1), 1U, (uint16_t)(h - 2), mono_fg, 255U);
@@ -299,8 +303,7 @@ static void _stepper_draw_cb(void *ptr)
         _stepper_draw_sign(lcd, (int16_t)(x + w - bw / 2), (int16_t)(y + h / 2),
                            sign_half, sign_thick, 1U, sign_r);
 
-        _stepper_draw_text_centered(lcd, obj->font, obj->buf, mono_fg,
-                                    (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h, 255U);
+        _stepper_draw_value(obj, mono_fg, (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h);
     }
 #else
     /* 整体底框（中间数值区背景） */
@@ -308,36 +311,35 @@ static void _stepper_draw_cb(void *ptr)
 
     /* 左按钮区背景：按下高亮，否则常态色（左侧仅左两角圆角，这里用统一圆角近似） */
     {
-        colour_t lbg = (obj->pressed && obj->active_side < 0) ? _SP_COL_BTN_PRESS : _SP_COL_BTN;
+        colour_t lbg = (obj->active_side < 0) ? _SP_COL_BTN_PRESS : _SP_COL_BTN;
         we_draw_round_rect_analytic_fill(lcd, x, y, (uint16_t)bw, (uint16_t)h, r, lbg, 255U);
         /* 用底色补掉按钮右侧的圆角缺口，使其与中间区平直拼接 */
-        we_draw_round_rect_analytic_fill(lcd, (int16_t)(x + bw - r), y, r, (uint16_t)h, 0U, lbg, 255U);
+        we_fill_rect(lcd, (int16_t)(x + bw - r), y, r, (uint16_t)h, lbg, 255U);
     }
 
     /* 右按钮区背景 */
     {
         int16_t rx = (int16_t)(x + w - bw);
-        colour_t rbg = (obj->pressed && obj->active_side > 0) ? _SP_COL_BTN_PRESS : _SP_COL_BTN;
+        colour_t rbg = (obj->active_side > 0) ? _SP_COL_BTN_PRESS : _SP_COL_BTN;
         we_draw_round_rect_analytic_fill(lcd, rx, y, (uint16_t)bw, (uint16_t)h, r, rbg, 255U);
-        we_draw_round_rect_analytic_fill(lcd, rx, y, r, (uint16_t)h, 0U, rbg, 255U);
+        we_fill_rect(lcd, rx, y, r, (uint16_t)h, rbg, 255U);
     }
 
     /* '-' 符号 */
     sc = dec_dis ? _SP_COL_SIGN_DIS
-                 : ((obj->pressed && obj->active_side < 0) ? _SP_COL_SIGN_PRESS : _SP_COL_SIGN);
+                 : ((obj->active_side < 0) ? _SP_COL_SIGN_PRESS : _SP_COL_SIGN);
     _stepper_draw_sign(lcd, (int16_t)(x + bw / 2), (int16_t)(y + h / 2),
                        sign_half, sign_thick, 0U, sc);
 
     /* '+' 符号 */
     sc = inc_dis ? _SP_COL_SIGN_DIS
-                 : ((obj->pressed && obj->active_side > 0) ? _SP_COL_SIGN_PRESS : _SP_COL_SIGN);
+                 : ((obj->active_side > 0) ? _SP_COL_SIGN_PRESS : _SP_COL_SIGN);
     _stepper_draw_sign(lcd, (int16_t)(x + w - bw / 2), (int16_t)(y + h / 2),
                        sign_half, sign_thick, 1U, sc);
 
     /* 中间数值（obj->buf 由值变更点预格式化） */
     num_col = obj->enabled ? _SP_COL_TEXT : _SP_COL_TEXT_DIS;
-    _stepper_draw_text_centered(lcd, obj->font, obj->buf, num_col,
-                                (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h, 255U);
+    _stepper_draw_value(obj, num_col, (int16_t)(x + bw), y, (int16_t)(w - 2 * bw), h);
 #endif
 }
 
@@ -357,16 +359,17 @@ static int8_t _stepper_hit_side(const we_stepper_obj_t *obj, int16_t px)
     return 0;
 }
 
+#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
+static uint8_t _stepper_key_cb(void *ptr, uint8_t key_evt);
+#endif
+
 /**
- * @brief 事件回调：点击左右区步进，按住触发连续步进（复用 STAY，不占 timer）。
+ * @brief 事件回调：点击左右区步进，按住触发连续步进（复用 STAY 事件）。
  * @param ptr 控件对象指针。
  * @param event 输入事件。
  * @param data 输入数据。
  * @return 1 表示消费事件。
  */
-#if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
-static uint8_t _stepper_key_cb(void *ptr, uint8_t key_evt);
-#endif
 static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *data)
 {
 #if (WE_CFG_ENABLE_KEY_INPUT == 1) && (WE_CFG_FOCUS_EDIT == 1) && (WE_STEPPER_USE_KEY == 1)
@@ -387,12 +390,9 @@ static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *d
         side = (data != NULL) ? _stepper_hit_side(obj, data->x) : 0;
         obj->active_side = side;
         obj->hold_cnt = 0U;
-        if (side != 0)
-        {
-            obj->pressed = 1U;
-            (void)_stepper_apply(obj, side); /* 内部已标脏；首次按下立即步进一次 */
-            we_obj_invalidate((we_obj_t *)obj); /* 保证按钮高亮也刷新 */
-        }
+        /* 首次按下立即步进一次；值没变（到边界）也要刷出按钮高亮 */
+        if (side != 0 && !_stepper_apply(obj, side))
+            we_obj_invalidate((we_obj_t *)obj);
         break;
 
     case WE_EVENT_STAY:
@@ -409,9 +409,8 @@ static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *d
 
     case WE_EVENT_RELEASED:
     case WE_EVENT_CLICKED:
-        if (obj->pressed || obj->active_side != 0)
+        if (obj->active_side != 0)
         {
-            obj->pressed = 0U;
             obj->active_side = 0;
             obj->hold_cnt = 0U;
             we_obj_invalidate((we_obj_t *)obj);
@@ -429,7 +428,7 @@ static uint8_t _stepper_event_cb(void *ptr, we_event_t event, we_indev_data_t *d
 /**
  * @brief 按键/焦点回调：OK 进/退编辑态，编辑态方向键复用 _stepper_apply 步进。
  * @param ptr 回调透传对象指针。
- * @param key_evt 语义键值或焦点通知（we_key_evt_t）。
+ * @param key_evt 语义键值或焦点通知（WE_KEY_xx / WE_KEY_EVT_xx）。
  * @return 非 0 表示已消费。
  * @note 步进边界/回绕/标脏/回调全部复用触摸路径的 _stepper_apply；
  *       端口按住连发注入即等效触摸长按连调。
@@ -529,7 +528,6 @@ void we_stepper_obj_init(we_stepper_obj_t *obj, we_lcd_t *lcd,
     obj->font = font;
     obj->changed_cb = NULL;
     obj->active_side = 0;
-    obj->pressed = 0U;
     obj->hold_cnt = 0U;
     obj->value = _stepper_clamp(obj, init_value);
     _stepper_format(obj);
@@ -641,7 +639,6 @@ void we_stepper_set_enabled(we_stepper_obj_t *obj, uint8_t enabled)
     obj->enabled = e;
     if (!e)
     {
-        obj->pressed = 0U;
         obj->active_side = 0;
         obj->hold_cnt = 0U;
     }
@@ -659,22 +656,3 @@ void we_stepper_set_changed_cb(we_stepper_obj_t *obj, we_stepper_changed_cb_t cb
     if (obj != NULL)
         obj->changed_cb = cb;
 }
-
-/**
- * @brief 删除控件并从对象链表移除。
- * @param obj 控件对象指针。
- * @return 无。
- */
-void we_stepper_obj_delete(we_stepper_obj_t *obj)
-{
-    if (obj == NULL)
-        return;
-    we_obj_delete((we_obj_t *)obj);
-}
-
-
-
-
-
-
-

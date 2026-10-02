@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_IME_PINYIN_H
 #define __WE_WIDGET_IME_PINYIN_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "widgets_preview/keyboard/we_widget_keyboard.h"
 #include "we_pinyin.h"
 
@@ -43,22 +43,35 @@
  *   - 缓冲非空时的非拼音键直接忽略（不自动上屏首选）。
  * -------------------------------------------------------------------------- */
 
-/* 拼音缓冲条高度（像素），可在包含本头文件前用宏覆盖 */
+/* 拼音缓冲条高度（像素），可在包含本头文件前用宏覆盖。
+ * 小屏（宽 <=128）默认压缩，给候选栏与键区留高度。 */
 #ifndef WE_IME_PINYIN_BUF_H
+#if (SCREEN_WIDTH <= 128)
+#define WE_IME_PINYIN_BUF_H 14
+#else
 #define WE_IME_PINYIN_BUF_H 22
 #endif
+#endif
 
-/* 候选栏高度（像素） */
+/* 候选栏高度（像素）；小屏默认压缩（16px 中文字形 + 上下各 1px） */
 #ifndef WE_IME_PINYIN_CAND_H
+#if (SCREEN_WIDTH <= 128)
+#define WE_IME_PINYIN_CAND_H 18
+#else
 #define WE_IME_PINYIN_CAND_H 30
+#endif
 #endif
 
 /* 候选页容量（个），布局按 7 设计，改动需同步候选格宽度观感 */
 #define WE_IME_PINYIN_PAGE_CAP 7
 
-/* 翻页键宽度（像素） */
+/* 翻页键宽度（像素）；小屏默认收窄 */
 #ifndef WE_IME_PINYIN_PAGER_W
+#if (SCREEN_WIDTH <= 128)
+#define WE_IME_PINYIN_PAGER_W 16
+#else
 #define WE_IME_PINYIN_PAGER_W 26
+#endif
 #endif
 
 /* 回翻栈深度（页），翻更深后最早的页起点被挤掉 */

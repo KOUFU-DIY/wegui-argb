@@ -13,7 +13,7 @@ extern "C"
  *
  * 入参 t ∈ [0, 256]，256 = 动画完成（1.0）。
  * 返回值通常也在 [0, 256] 内，但 we_ease_out_back 会短暂超过 256（过冲）。
- * 过冲场景可配合 we_gui_driver.h 中的 we_lerp 使用。
+ * 过冲场景可配合 we_types.h 中的 we_lerp 使用。
  * -------------------------------------------------------------------------- */
 typedef uint16_t (*we_ease_fn_t)(uint16_t t);
 
@@ -72,6 +72,15 @@ uint16_t we_ease_out_bounce(uint16_t t);
  * @return 缓动后进度（Q8，动画中途可能超过 256）
  */
 uint16_t we_ease_out_back(uint16_t t);
+
+/**
+ * @brief 按经过时间推进 Q8 动画进度（控件动画 step 回调共用）
+ * @param t 传入：当前进度（Q8，0~256，256 = 完成）
+ * @param dur_ms 传入：动画总时长（毫秒），0 表示立即完成
+ * @param elapsed_ms 传入：本次经过的毫秒数
+ * @return 推进后的进度（不超过 256；每次至少前进 1）
+ */
+uint16_t we_motion_advance(uint16_t t, uint16_t dur_ms, uint16_t elapsed_ms);
 
 #ifdef __cplusplus
 }

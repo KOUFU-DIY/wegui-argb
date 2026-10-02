@@ -13,7 +13,7 @@
 
 #include "we_widget_textarea.h"
 #include "../keyboard/we_widget_keyboard.h" /* 绑定弹层软键盘呼出 */
-#include "we_render.h"
+#include "wegui.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------------
@@ -113,27 +113,45 @@ static void _textarea_draw_cb(void *ptr)
     we_textarea_obj_t *obj = (we_textarea_obj_t *)ptr;
     we_lcd_t *lcd = obj->base.lcd;
     colour_t bg;
+    colour_t tc;
     uint16_t draw_r;
     int16_t inner_x;
     int16_t inner_w;
     int16_t avail_w;
+#if (WE_CFG_MONO_STYLE == 1)
+    static const colour_t _ta_mono_fg = RGB888_CONST(255, 255, 255); /* 单色样式双色 */
+    static const colour_t _ta_mono_bg = RGB888_CONST(0, 0, 0);
+#endif
 
     if (obj->opacity == 0U)
         return;
 
     /* 1. 圆角底框：按压反馈时底色向白微调（整数混色，无浮点） */
+#if (WE_CFG_MONO_STYLE == 1)
+    /* 单色样式：黑底白描边框，按压整框反白（正文挖空为黑） */
+    bg = obj->pressed ? _ta_mono_fg : obj->bg_color;
+    tc = obj->pressed ? _ta_mono_bg : obj->text_color;
+#else
     bg = obj->bg_color;
     if (obj->pressed)
         bg = we_colour_blend(we_rgb888_to_dev(255U, 255U, 255U), bg, 30U);
+    tc = obj->text_color;
+#endif
 
     draw_r = WE_TEXTAREA_RADIUS;
     if (draw_r > (uint16_t)(obj->base.w / 2))
         draw_r = (uint16_t)(obj->base.w / 2);
     if (draw_r > (uint16_t)(obj->base.h / 2))
         draw_r = (uint16_t)(obj->base.h / 2);
+#if (WE_CFG_MONO_STYLE == 1)
+    we_draw_round_rect_outline_fill(lcd, obj->base.x, obj->base.y,
+                                    (uint16_t)obj->base.w, (uint16_t)obj->base.h,
+                                    draw_r, _ta_mono_fg, bg, obj->opacity);
+#else
     we_draw_round_rect_analytic_fill(lcd, obj->base.x, obj->base.y,
                                      (uint16_t)obj->base.w, (uint16_t)obj->base.h,
                                      draw_r, bg, obj->opacity);
+#endif
 
     /* 2. 内容区几何：光标常驻末尾，可视文本宽须给光标预留位置 */
     inner_x = (int16_t)(obj->base.x + WE_TEXTAREA_PAD_X);
@@ -163,14 +181,19 @@ static void _textarea_draw_cb(void *ptr)
                 if ((int32_t)text_w > (int32_t)avail_w)
                     tx = (int16_t)(inner_x + avail_w - (int16_t)text_w);
                 we_draw_string(lcd, tx, text_y, obj->font, obj->buf,
-                               obj->text_color, obj->opacity);
+                               tc, obj->opacity);
                 cursor_x = (int16_t)(tx + (int16_t)text_w);
             }
             else if (obj->placeholder != NULL && obj->font != NULL)
             {
                 /* 3'. 占位提示：空内容时灰色显示，光标停在行首 */
+#if (WE_CFG_MONO_STYLE == 1)
+                we_draw_string(lcd, inner_x, text_y, obj->font, obj->placeholder,
+                               tc, obj->opacity); /* 单色无灰阶：随正文色（按压挖空） */
+#else
                 we_draw_string(lcd, inner_x, text_y, obj->font, obj->placeholder,
                                obj->placeholder_color, obj->opacity);
+#endif
             }
 
             /* 4. 光标：2px 竖条贴在文本末尾，仅编辑中且亮相位才绘制 */
@@ -370,10 +393,18 @@ void we_textarea_obj_init(we_textarea_obj_t *obj, we_lcd_t *lcd,
     obj->len = (uint16_t)cur;
 
     obj->placeholder = NULL;
+    /* 默认调色盘：单色样式切白边黑底盘（描边与按压反白在绘制处） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->bg_color = RGB888TODEV(0, 0, 0);
+    obj->text_color = RGB888TODEV(255, 255, 255);
+    obj->cursor_color = RGB888TODEV(255, 255, 255);
+    obj->placeholder_color = RGB888TODEV(255, 255, 255);
+#else
     obj->bg_color = RGB888TODEV(36, 44, 58);
     obj->text_color = RGB888TODEV(236, 241, 248);
     obj->cursor_color = RGB888TODEV(92, 181, 255);
     obj->placeholder_color = RGB888TODEV(122, 131, 146);
+#endif
 
     obj->blink_anim.next = NULL;
     obj->blink_anim.step_cb = NULL;

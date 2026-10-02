@@ -27,8 +27,8 @@ extern "C" {
 
 #include "stm32f10x.h"
 
-/* 系统节拍计数 (SysTick 每 1ms 自增, 主循环清零) */
-extern volatile uint8_t  g_sys_tick;
+/* 系统毫秒计数 (SysTick 每 1ms 自增, 自然回绕; 32 位读取是原子操作, 主循环直接读) */
+extern volatile uint32_t g_sys_ms;
 /* 软件阻塞延时计数器 (delay_ms 写入, SysTick 递减) */
 extern volatile uint32_t g_sys_delay;
 

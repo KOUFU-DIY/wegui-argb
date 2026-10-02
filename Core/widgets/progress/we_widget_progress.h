@@ -1,7 +1,7 @@
 #ifndef WE_WIDGET_PROGRESS_H
 #define WE_WIDGET_PROGRESS_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -21,14 +21,13 @@ extern "C"
 typedef struct
 {
     we_obj_t base;
-    we_anim_t anim; /* 中央动画引擎节点（不占 GUI task 槽） */
+    we_anim_t anim; /* 中央动画引擎节点（删除控件时由内核摘链） */
 
-    uint8_t value;
-    uint8_t display_value;
-    uint8_t anim_from_value;
-    uint8_t anim_to_value;
-    uint32_t anim_elapsed_ms;
-    uint16_t anim_duration_ms;
+    uint8_t value;           /* 目标进度（0~255） */
+    uint8_t display_value;   /* 当前显示进度（动画中间值） */
+    uint8_t anim_from_value; /* 本次过渡起点 */
+    uint8_t anim_to_value;   /* 本次过渡终点 */
+    uint16_t anim_elapsed_ms; /* 本次过渡已走的毫秒数（总时长 WE_PROGRESS_ANIM_DURATION_MS） */
     uint8_t animating : 1;
 
     colour_t track_color;
@@ -38,7 +37,7 @@ typedef struct
 } we_progress_obj_t;
 
 /**
- * @brief 初始化进度条对象（动画由中央动画引擎驱动，不占 task 槽）。
+ * @brief 初始化进度条对象（数值过渡由中央动画引擎驱动）。
  * @param obj 进度条对象指针。
  * @param lcd 所属 LCD 上下文。
  * @param x 控件左上角 X 坐标。
@@ -56,11 +55,11 @@ void we_progress_obj_init(we_progress_obj_t *obj, we_lcd_t *lcd,
                           colour_t track_color, colour_t fill_color, uint8_t opacity);
 
 /**
- * @brief 删除进度条对象（先摘除中央动画节点，再从对象链表移除）。
+ * @brief 删除进度条对象并从对象链表移除（动画节点由内核一并摘链）。
  * @param obj 目标控件对象指针。
  * @return 无。
  */
-void we_progress_obj_delete(we_progress_obj_t *obj);
+static inline void we_progress_obj_delete(we_progress_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 /**
  * @brief 设置目标进度值，并按差值决定是否启用缓动动画。
@@ -129,7 +128,7 @@ void we_progress_set_colors(we_progress_obj_t *obj, colour_t track_color,
  */
 static inline void we_progress_obj_set_pos(we_progress_obj_t *obj, int16_t x, int16_t y)
 {
-we_obj_set_pos((we_obj_t *)obj, x, y);
+    we_obj_set_pos((we_obj_t *)obj, x, y);
 }
 
 #ifdef __cplusplus

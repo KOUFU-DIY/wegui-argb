@@ -1,5 +1,5 @@
 #include "we_widget_spectrum.h"
-#include "we_render.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * spectrum —— 频谱柱（preview 孵化区）
@@ -286,9 +286,16 @@ void we_spectrum_obj_init(we_spectrum_obj_t *obj, we_lcd_t *lcd,
         obj->peak[i] = 0U;
     }
 
+    /* 默认调色盘：单色样式切全白柱黑底盘（渐变无灰阶，两端同白） */
+#if (WE_CFG_MONO_STYLE == 1)
+    obj->color_low = RGB888TODEV(255, 255, 255);
+    obj->color_high = RGB888TODEV(255, 255, 255);
+    obj->color_peak = RGB888TODEV(255, 255, 255);
+#else
     obj->color_low = RGB888TODEV(48, 200, 220);   /* 低端青蓝 */
     obj->color_high = RGB888TODEV(236, 92, 176);  /* 高端品红 */
     obj->color_peak = RGB888TODEV(244, 246, 250); /* 峰值帽近白 */
+#endif
 
     obj->anim.next = NULL;
     obj->anim.step_cb = NULL;

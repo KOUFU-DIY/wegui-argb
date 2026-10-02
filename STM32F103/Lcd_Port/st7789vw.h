@@ -23,13 +23,13 @@ limitations under the License.
 //#define TFT_IC_HIGH_PIXEL  (240)
 //#define TFT_IC_PIXEL  (TFT_IC_WIDTH_PIXEL*TFT_IC_HIGH_PIXEL)
 
-void ST7789VW_Set_Addr(uint16_t x1,uint16_t y1,uint16_t x2,uint16_t y2);
+void st7789vw_set_addr(uint16_t x1,uint16_t y1,uint16_t x2,uint16_t y2);
 
-void ST7789VW_Set_RGB444_Mode(void);
-void ST7789VW_Set_RGB565_Mode(void);
-void ST7789VW_Set_RGB666_Mode(void);
+void st7789vw_set_rgb444_mode(void);
+void st7789vw_set_rgb565_mode(void);
+void st7789vw_set_rgb666_mode(void);
 
-void ST7789VW_Init(void);
+void st7789vw_init(void);
 
 
 #endif

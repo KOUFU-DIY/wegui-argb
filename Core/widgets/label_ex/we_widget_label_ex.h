@@ -1,14 +1,17 @@
 #ifndef WE_WIDGET_LABEL_EX_H
 #define WE_WIDGET_LABEL_EX_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 
 /* --------------------------------------------------------------------------
  * label_ex 使用说明
  *
  * label_ex 是支持旋转和缩放的高级文字控件，渲染原理与 img_ex 相同：
- * 对屏幕包围盒内每个目标像素做逆映射，从字模 flash 数据直接采样后混色输出。
- * 无需额外 RAM 缓冲区，结构体本身仅缓存文字宽度用于包围盒计算。
+ * 对屏幕包围盒内每个目标像素做逆映射，从字模数据直接采样后混色输出。
+ * 不需要整段文字的位图缓冲；绘制时只在栈上放一张字形表
+ * （每字形 16 字节，容量见 WE_CFG_LABEL_EX_MAX_GLYPHS）。
+ * 只画首行：文字框 = 首行排版宽度（笔位推进与最右墨迹取大）× 字体行高，
+ * 以文字框中心为旋转轴心；伸出文字框左侧或上下的墨迹会被裁掉。
  *
  * 使用步骤：
  * 1. 调用 we_label_ex_obj_init() 完成初始化。
@@ -30,7 +33,8 @@
  *   - 48  → 较长中英混排                                 约 768 B 栈
  *   - 64  → 整行长文本，使用前请确认 M0 主栈余量充足    约 1024 B 栈
  *
- * 文字字符数超过此宏时，超出部分不会被渲染（前 N 字仍可正常显示）。
+ * 首行有墨字形（空格等不计）超过此宏时，超出部分不会被渲染（前 N 字仍可正常
+ * 显示，文字框仍按整行宽度居中）。
  * 优先在 we_user_config.h 中覆盖，避免直接改本头文件。
  * -------------------------------------------------------------------------- */
 #ifndef WE_CFG_LABEL_EX_MAX_GLYPHS
@@ -60,11 +64,11 @@ typedef struct
      */
 
     uint16_t scale_256;
-    /* 缩放系数，256 = 1.0 倍，128 = 0.5 倍，512 = 2.0 倍。 */
+    /* 缩放系数，256 = 1.0 倍，128 = 0.5 倍，512 = 2.0 倍（包围盒按最大 64 倍计算）。 */
 
     uint16_t text_w;
-    /* 文字实际像素宽度缓存，init/set_text 时测量，用于包围盒计算。
-     * 不占额外静态 RAM（仅 2 字节，内含于结构体）。
+    /* 首行排版宽度缓存（笔位推进与最右墨迹取大），init/set_text 时测量，
+     * 用于包围盒与采样边界。
      */
 } we_label_ex_obj_t;
 
@@ -87,8 +91,9 @@ void we_label_ex_obj_init(we_label_ex_obj_t *obj, we_lcd_t *lcd,
 /**
  * @brief 设置文本内容并触发重排或重绘。
  * @param obj 目标控件对象指针。
- * @param new_text 新的文本字符串。
+ * @param new_text 新的文本字符串（控件只保存指针，调用方须保证其生命周期）。
  * @return 无。
+ * @note 不比较指针：同一缓冲区原地改写内容后再次调用也会重新测量并重绘。
  */
 void we_label_ex_set_text(we_label_ex_obj_t *obj, const char *new_text);
 
@@ -104,7 +109,7 @@ void we_label_ex_set_center(we_label_ex_obj_t *obj, int16_t cx, int16_t cy);
  * @brief 设置旋转角度与缩放比例并重算包围盒。
  * @param obj 控件对象指针。
  * @param angle 旋转角度（512 分度制）。
- * @param scale_256 缩放比例（256=1.0x）。
+ * @param scale_256 缩放比例（256=1.0x，传 0 时忽略本次调用）。
  */
 void we_label_ex_set_transform(we_label_ex_obj_t *obj, int16_t angle, uint16_t scale_256);
 
@@ -130,7 +135,7 @@ void we_label_ex_set_opacity(we_label_ex_obj_t *obj, uint8_t opacity);
  */
 static inline void we_label_ex_obj_delete(we_label_ex_obj_t *obj)
 {
-we_obj_delete((we_obj_t *)obj);
+    we_obj_delete((we_obj_t *)obj);
 }
 
 #endif

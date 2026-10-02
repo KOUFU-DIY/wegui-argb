@@ -17,23 +17,38 @@
 #include "widgets/label/we_widget_label.h"
 #include <string.h>
 
-static we_label_obj_t  cv_title;
-static we_label_obj_t  cv_note;
-static we_label_obj_t  cv_fps;
+/* 画布对象/相位与自绘回调为大小屏共享（回调从控件几何自适应取幅值）；
+ * 标题/说明/FPS 仅大屏版有 */
 static we_canvas_obj_t cv;
 
 static uint16_t cv_phase;       /* 李萨如 X 相位（512 步制角度） */
 static uint32_t cv_ms;          /* 累计毫秒（相位推进时基） */
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t cv_title;
+static we_label_obj_t cv_note;
+static we_label_obj_t cv_fps;
+
 static uint32_t cv_fps_timer;
 static uint32_t cv_last_frames;
 static char     cv_fps_buf[16];
 
-/* 画布布局与曲线参数（280x240 基准） */
+/* 画布布局（280x240 基准） */
 #define CV_X     40
 #define CV_Y     62
 #define CV_W     200
 #define CV_H     150
 #define CV_GRID  20            /* 网格间距（像素） */
+#else
+/* 画布布局（128x64：整屏画布） */
+#define CV_X     0
+#define CV_Y     0
+#define CV_W     128
+#define CV_H     64
+#define CV_GRID  16            /* 网格间距（像素） */
+#endif
+
+/* 曲线参数（两版共用） */
 #define CV_PTS   48            /* 曲线采样点数（40~60 区间取 48） */
 #define CV_FREQ_X 3            /* X 频率（李萨如比率 3:2） */
 #define CV_FREQ_Y 2            /* Y 频率 */
@@ -98,6 +113,8 @@ static void _cv_user_draw(we_lcd_t *lcd, void *canvas, void *user_data)
                    we_font_consolas_18, "3:2", RGB888TODEV(138, 152, 170), 255U);
 }
 
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 /**
  * @brief 初始化 canvas demo：标题/说明/FPS + 一块自绘画布
  * @param lcd 传入：GUI 屏幕上下文指针
@@ -151,3 +168,45 @@ void we_canvas_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &cv_fps, &cv_fps_timer,
                        &cv_last_frames, cv_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 canvas demo（128x64 布局：整屏自绘画布）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @return 无
+ */
+void we_canvas_preview_demo_init(we_lcd_t *lcd)
+{
+    cv_phase = 0U;
+    cv_ms = 0U;
+
+    /* user_data 透传相位变量地址：绘制回调只读，推进在 tick 里做 */
+    we_canvas_obj_init(&cv, lcd, CV_X, CV_Y, CV_W, CV_H,
+                       _cv_user_draw, &cv_phase);
+}
+
+/**
+ * @brief canvas demo 周期更新（128x64：推进相位并请求重绘）
+ * @param lcd 传入：GUI 屏幕上下文指针
+ * @param ms_tick 传入：本轮累计毫秒数
+ * @return 无
+ */
+void we_canvas_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    uint16_t new_phase;
+
+    if (lcd == NULL || ms_tick == 0U)
+        return;
+
+    /* 相位 = 累计毫秒 / 8（512 步一圈 → 约 4.1 秒转满一圈） */
+    cv_ms += ms_tick;
+    new_phase = (uint16_t)((cv_ms >> 3) & 511U);
+    if (new_phase != cv_phase)
+    {
+        cv_phase = new_phase;
+        we_canvas_invalidate(&cv);
+    }
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

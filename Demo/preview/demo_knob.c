@@ -15,7 +15,15 @@
 #include <stdio.h>
 #include <string.h>
 
-static we_knob_obj_t     kb_knob;
+/* 旋钮与百分比缓冲为大小屏共享；大屏用 label_ex 2 倍字号，小屏用普通 label */
+static we_knob_obj_t kb_knob;
+static char          kb_pct_buf[12];
+
+/* 初始值（两版共用） */
+#define KB_INIT_V 35
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
+
 static we_label_obj_t    kb_title;
 static we_label_obj_t    kb_hint;
 static we_label_obj_t    kb_fps_label;
@@ -24,13 +32,11 @@ static we_label_ex_obj_t kb_pct_label;   /* 2 倍字号大百分比 */
 static uint32_t kb_fps_timer;
 static uint32_t kb_last_frames;
 static char     kb_fps_buf[16];
-static char     kb_pct_buf[12];
 
-/* 旋钮布局（280x240 基准）与初始值 */
+/* 旋钮布局（280x240 基准） */
 #define KB_SIZE   150
 #define KB_X      14
 #define KB_Y      62
-#define KB_INIT_V 35
 
 /* 百分比 label_ex 的变换中心与缩放（256 = 1.0x）；
  * 中心取 214：三位数 "100%" 放大 2 倍后左沿仍不压到旋钮弧带 */
@@ -113,3 +119,66 @@ void we_knob_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &kb_fps_label, &kb_fps_timer,
                        &kb_last_frames, kb_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+static we_label_obj_t kb_pct_label; /* 右侧百分比（普通 label） */
+
+/**
+ * @brief 刷新百分比文本。
+ * @param v 当前值（0~100）。
+ * @return 无。
+ */
+static void _kb_update_pct(int32_t v)
+{
+    sprintf(kb_pct_buf, "%ld%%", (long)v);
+    we_label_set_text(&kb_pct_label, kb_pct_buf);
+}
+
+/**
+ * @brief knob 数值变化回调：百分比 label 实时联动。
+ * @param obj 触发回调的 knob 对象指针（未使用）。
+ * @param value 变化后的新值。
+ * @return 无。
+ */
+static void _kb_on_changed(void *obj, int32_t value)
+{
+    (void)obj;
+    _kb_update_pct(value);
+}
+
+/**
+ * @brief 初始化 knob preview demo（128x64 布局：左旋钮 + 右百分比）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @return 无。
+ */
+void we_knob_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(kb_pct_buf, 0, sizeof(kb_pct_buf));
+
+    /* 56px 旋钮：量程 0~100，初值 KB_INIT_V（程序设值，不触发回调） */
+    we_knob_obj_init(&kb_knob, lcd, 8, 4, 56);
+    we_knob_set_range(&kb_knob, 0, 100);
+    we_knob_set_value(&kb_knob, KB_INIT_V);
+    we_knob_set_changed_cb(&kb_knob, _kb_on_changed);
+
+    /* 右侧百分比回显 */
+    sprintf(kb_pct_buf, "%d%%", KB_INIT_V);
+    we_label_obj_init(&kb_pct_label, lcd, 78, 26,
+                      kb_pct_buf, we_font_consolas_18,
+                      RGB888TODEV(245, 214, 120), 255);
+}
+
+/**
+ * @brief knob preview demo 周期更新（数值联动由 changed_cb 驱动）。
+ * @param lcd 传入：GUI 屏幕上下文指针。
+ * @param ms_tick 传入：本轮累计毫秒数。
+ * @return 无。
+ */
+void we_knob_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

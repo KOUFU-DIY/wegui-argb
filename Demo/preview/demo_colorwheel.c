@@ -17,21 +17,26 @@
 #include <stdio.h>
 #include <string.h>
 
-static we_label_obj_t      cw_title;
-static we_label_obj_t      cw_note;
-static we_label_obj_t      cw_fps;
+/* 色轮/色块/R/G/B 标签与同步回调为大小屏共享；标题/说明/FPS 仅大屏版有 */
 static we_colorwheel_obj_t cw_wheel;
 static we_box_obj_t        cw_swatch;   /* 右侧选中色大色块 */
 static we_label_obj_t      cw_lbl_r;
 static we_label_obj_t      cw_lbl_g;
 static we_label_obj_t      cw_lbl_b;
 
+static char cw_r_buf[8];
+static char cw_g_buf[8];
+static char cw_b_buf[8];
+
+#if !WE_DEMO_SMALL_SCREEN
+static we_label_obj_t cw_title;
+static we_label_obj_t cw_note;
+static we_label_obj_t cw_fps;
+
 static uint32_t cw_fps_timer;
 static uint32_t cw_last_frames;
 static char     cw_fps_buf[16];
-static char     cw_r_buf[8];
-static char     cw_g_buf[8];
-static char     cw_b_buf[8];
+#endif
 
 /**
  * @brief 把当前选中色同步到右侧色块与 R/G/B 数值标签
@@ -64,6 +69,8 @@ static void _cw_demo_changed_cb(void *cw, colour_t c)
     (void)c;
     _cw_demo_sync((we_colorwheel_obj_t *)cw);
 }
+
+#if !WE_DEMO_SMALL_SCREEN /* ==================== 280x240 大屏版 ==================== */
 
 /**
  * @brief 初始化 colorwheel preview demo 场景
@@ -125,3 +132,50 @@ void we_colorwheel_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
     we_demo_update_fps(lcd, &cw_fps, &cw_fps_timer,
                        &cw_last_frames, cw_fps_buf, ms_tick);
 }
+
+#else /* ==================== 128x64 小屏版 ==================== */
+
+/**
+ * @brief 初始化 colorwheel preview demo（128x64 布局：左色轮 + 右色块与 R/G/B）
+ * @param lcd GUI 运行时上下文
+ * @return 无
+ */
+void we_colorwheel_preview_demo_init(we_lcd_t *lcd)
+{
+    memset(cw_r_buf, 0, sizeof(cw_r_buf));
+    memset(cw_g_buf, 0, sizeof(cw_g_buf));
+    memset(cw_b_buf, 0, sizeof(cw_b_buf));
+
+    /* 左侧色轮：60×60（灰度/单色屏上环带按亮度呈现，仍可拖动选色） */
+    we_colorwheel_obj_init(&cw_wheel, lcd, 4, 2, 60U);
+    we_colorwheel_set_changed_cb(&cw_wheel, _cw_demo_changed_cb);
+
+    /* 右侧选中色色块（圆角 + 细边框） */
+    we_box_obj_init(&cw_swatch, lcd, 76, 6, 44, 14);
+    we_box_set_radius(&cw_swatch, 4U);
+    we_box_set_border(&cw_swatch, RGB888TODEV(200, 210, 224), 1U);
+
+    /* R/G/B 数值标签（静态缓冲，整数格式化） */
+    we_label_obj_init(&cw_lbl_r, lcd, 76, 22, "R", we_font_consolas_18,
+                      RGB888TODEV(255, 128, 118), 255);
+    we_label_obj_init(&cw_lbl_g, lcd, 76, 36, "G", we_font_consolas_18,
+                      RGB888TODEV(126, 231, 150), 255);
+    we_label_obj_init(&cw_lbl_b, lcd, 76, 50, "B", we_font_consolas_18,
+                      RGB888TODEV(120, 170, 255), 255);
+
+    _cw_demo_sync(&cw_wheel); /* 初值同步一次（程序化 set 不触发回调） */
+}
+
+/**
+ * @brief colorwheel preview demo 周期更新（交互全部事件驱动）
+ * @param lcd GUI 运行时上下文
+ * @param ms_tick 距上次调用的毫秒增量
+ * @return 无
+ */
+void we_colorwheel_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick)
+{
+    (void)lcd;
+    (void)ms_tick;
+}
+
+#endif /* WE_DEMO_SMALL_SCREEN */

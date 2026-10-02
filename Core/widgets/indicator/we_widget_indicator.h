@@ -1,7 +1,7 @@
 #ifndef __WE_WIDGET_INDICATOR_H
 #define __WE_WIDGET_INDICATOR_H
 
-#include "we_gui_driver.h"
+#include "wegui.h"
 #include "components/we_motion.h"
 
 /* --------------------------------------------------------------------------
@@ -9,11 +9,12 @@
  *
  * 一盏圆形指示灯，在“熄灭/点亮”两态之间做颜色亮灭过渡，可选外发光晕。
  * 典型用途：电源/连接/告警等状态指示。默认只读（由代码 set_state 驱动），
- * 也可开启点击翻转。
+ * 也可开启点击翻转。只读且没有用户回调时 event_cb 为 NULL：命中测试跳过它，
+ * 触摸落到背后的控件，也不可聚焦。
  *
  * 复用框架既有能力：
  *   - we_draw_round_rect_analytic_fill(d, d, r=d/2) 退化为抗锯齿圆；
- *   - 中央动画引擎 we_anim_t（链入 lcd->anim_head，不占 GUI task 槽）+ we_lerp + we_ease_* 推进动画，时长运行时可配；
+ *   - 中央动画引擎 we_anim_t（链入 lcd->anim_head）+ we_ease_* 推进动画，时长运行时可配；
  *   - 光晕由同心半透明圆叠加构成，全部落在 base box 内，不会漏刷脏矩形。
  * -------------------------------------------------------------------------- */
 
@@ -76,9 +77,8 @@ typedef struct we_indicator_obj_t
     we_obj_t base;
     we_indicator_event_cb_t user_event_cb; /* 非 NULL 时接管全部事件 */
     we_ease_fn_t ease;        /* 缓动函数，默认 we_ease_in_out_sine */
-    we_anim_t anim;           /* 中央动画引擎节点（不占 GUI task 槽） */
+    we_anim_t anim;           /* 中央动画引擎节点（删除控件时由内核摘链） */
     uint16_t anim_ms;         /* 动画时长（毫秒） */
-    uint16_t anim_acc_ms;     /* 已累计动画时间 */
     uint16_t progress;        /* 当前视觉进度，0..256（Q8） */
     colour_t on_color;        /* 点亮色 */
     colour_t off_color;       /* 熄灭色 */
@@ -163,6 +163,8 @@ void we_indicator_set_glow(we_indicator_obj_t *obj, uint8_t enable);
  * @brief 设置是否允许点击翻转状态。
  * @param obj 指示灯控件对象指针。
  * @param clickable 0=只读，非0=点击翻转。
+ * @note 改为只读时收起按压视觉，若它正持有焦点则清掉焦点；
+ *       只读且无用户回调时输入穿透给背后控件。
  */
 void we_indicator_set_clickable(we_indicator_obj_t *obj, uint8_t clickable);
 
@@ -182,9 +184,9 @@ void we_indicator_set_event_cb(we_indicator_obj_t *obj,
 void we_indicator_set_opacity(we_indicator_obj_t *obj, uint8_t opacity);
 
 /**
- * @brief 删除指示灯控件并从对象链表/任务系统移除。
+ * @brief 删除指示灯控件并从对象链表移除（动画节点由内核一并摘链）。
  * @param obj 指示灯控件对象指针。
  */
-void we_indicator_obj_delete(we_indicator_obj_t *obj);
+static inline void we_indicator_obj_delete(we_indicator_obj_t *obj) { we_obj_delete((we_obj_t *)obj); }
 
 #endif /* __WE_WIDGET_INDICATOR_H */
