@@ -55,9 +55,10 @@ int main(void)
      * 119 = colorwheel (色轮)     120 = (已毕业→32)
      * 121 = animimg (帧动画)      122 = canvas (自绘画布)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
-     * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
+     * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本)
+     * 127 = glowring (透明渐变色环) */
 #ifndef DEMO_ID /* build_lite.ps1 -Demo N 可从命令行覆盖（-DDEMO_ID=N） */
-#define DEMO_ID (22)
+#define DEMO_ID (127)
 #endif
 
     /* 端口描述：设窗 / 刷屏 / 触摸采样 / 外挂存储读取。
@@ -263,6 +264,9 @@ int main(void)
 #elif (DEMO_ID == 126)
     we_mlabel_preview_demo_init(&mylcd);
     we_gui_timer_create(&mylcd, &demo_timer, we_mlabel_preview_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 127)
+    we_glowring_preview_demo_init(&mylcd);
+    we_gui_timer_create(&mylcd, &demo_timer, we_glowring_preview_demo_tick, 16U, 1U);
 #else
     we_label_simple_demo_init(&mylcd);
     we_gui_timer_create(&mylcd, &demo_timer, we_label_simple_demo_tick, 16U, 1U);

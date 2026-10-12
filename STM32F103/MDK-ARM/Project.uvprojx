@@ -1272,6 +1272,11 @@
               <FilePath>..\..\Core\widgets_preview\colorwheel\we_widget_colorwheel.c</FilePath>
             </File>
             <File>
+              <FileName>we_widget_glowring.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\widgets_preview\glowring\we_widget_glowring.c</FilePath>
+            </File>
+            <File>
               <FileName>we_widget_hold_btn.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Core\widgets_preview\hold_btn\we_widget_hold_btn.c</FilePath>
@@ -1635,6 +1640,11 @@
               <FileName>demo_colorwheel.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Demo\preview\demo_colorwheel.c</FilePath>
+            </File>
+            <File>
+              <FileName>demo_glowring.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Demo\preview\demo_glowring.c</FilePath>
             </File>
             <File>
               <FileName>demo_hold_btn.c</FileName>

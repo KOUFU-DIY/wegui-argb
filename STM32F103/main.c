@@ -146,7 +146,8 @@ int main(void)
      * 119 = colorwheel (色轮)     120 = (已毕业→32)
      * 121 = animimg (帧动画)      122 = canvas (自绘画布)
      * 123 = tabview (页签容器)    124 = hold_btn (长按确认)
-     * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本) */
+     * 125 = mask_group (蒙版容器) 126 = mlabel (多行文本)
+     * 127 = glowring (透明渐变色环) */
 #define DEMO_ID (12)
 
     /* 按 DEMO_ID 编译期选择并加载对应 demo（只编译进选中的那一个）。 */
@@ -321,6 +322,9 @@ int main(void)
 #elif (DEMO_ID == 126)
     we_mlabel_preview_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_mlabel_preview_demo_tick, 16U, 1U);
+#elif (DEMO_ID == 127)
+    we_glowring_preview_demo_init(&g_lcd);
+    we_gui_timer_create(&g_lcd, &demo_timer, we_glowring_preview_demo_tick, 16U, 1U);
 #else
     we_label_simple_demo_init(&g_lcd);
     we_gui_timer_create(&g_lcd, &demo_timer, we_label_simple_demo_tick, 16U, 1U);

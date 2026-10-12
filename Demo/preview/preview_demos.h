@@ -50,6 +50,7 @@
  *   121 animimg(帧动画)       122 canvas(自绘画布)
  *   123 tabview(页签容器)     124 hold_btn(长按确认)
  *   125 mask_group(蒙版容器)  126 mlabel(多行文本)
+ *   127 glowring(透明渐变色环)
  * ======================================================================== */
 
 /* spinner 加载指示（旋转动画，等待状态）。 */
@@ -147,5 +148,9 @@ void we_statusbar_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 /* ime_pinyin 拼音输入法面板（音节索引引擎 + 候选栏 + 键盘/输入框联动）。 */
 void we_ime_pinyin_preview_demo_init(we_lcd_t *lcd);
 void we_ime_pinyin_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
+
+/* glowring 透明渐变色环（单色环带 + 沿圆周对称的透明度渐变 + 任意旋转）。 */
+void we_glowring_preview_demo_init(we_lcd_t *lcd);
+void we_glowring_preview_demo_tick(we_lcd_t *lcd, uint16_t ms_tick);
 
 #endif
