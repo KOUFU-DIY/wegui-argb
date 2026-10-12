@@ -1,0 +1,25 @@
+工具路径./3.bin2c
+把字体取模和图片取模得到的bin合并成一个整包，用于烧录到外置flash/sd卡
+
+使用步骤:
+1.先完成字体取模和图片取模（./1.font2c/output 和 ./2.img2c/output/bin 里已有需要外置储存的bin）
+2.双击运行“build_bin.bat”，合并结果输出到output文件夹（TIP 1.1）
+3.把./output下的merged_bin.c和merged_bin.h加入单片机工程，程序里通过资源ID或地址宏访问资源（TIP 2.1）
+
+也可以双击运行上一级的“0.1.2.3.update_all.bat”，一次完成 字体取模 -> 图片取模(rgb565) -> 合并
+
+TIP 1.1:
+运行build_bin.bat后，./output将清空并重新生成
+./output/merged_bin.bin #合并后的整包数据，烧录到外置flash/sd卡；模拟器也读这个文件（构建时自动拷到exe旁）
+./output/merged_bin.c #各资源在整包里的起始地址表bin_addr_table[]，储存到单片机
+./output/merged_bin.h #资源ID枚举、每个资源的大小宏和地址宏
+./output/embed/ #带完整数据数组的版本，只给“4.ex_flash_download”的烧录工程编译用，应用工程不要添加
+
+合并顺序是先字体后图片，各自按文件名排序
+增删或修改资源后各资源的地址会变化，需要重新编译单片机工程，并重新烧录外置储存
+
+TIP 2.1:
+资源名取自bin的文件名（转成大写），例如demo_rgb565_raw_be_64x80.bin对应
+bin_addr_table[DEMO_RGB565_RAW_BE_64X80_ID] #该资源在外置储存里的起始地址
+DEMO_RGB565_RAW_BE_64X80_ADDR #同上，宏的写法
+DEMO_RGB565_RAW_BE_64X80_SIZE #该资源的字节数

@@ -4,16 +4,16 @@ STM32F030/MDK-ARM/Listings/
 STM32F030/MDK-ARM/STM32F030/
 STM32F103/MDK-ARM/Objects/
 STM32F103/MDK-ARM/Listings/
-tool/4.STM32F103_ex_flash_download/Objects/
-tool/4.STM32F103_ex_flash_download/Listings/
-tool/4.STM32F103_ex_flash_download/Flash_FLM/Objects/
-tool/4.STM32F103_ex_flash_download/Flash_FLM/Listings/
+tool/4.ex_flash_download/*/Objects/
+tool/4.ex_flash_download/*/Listings/
+tool/4.ex_flash_download/*/Flash_FLM/Objects/
+tool/4.ex_flash_download/*/Flash_FLM/Listings/
 build_out.txt
 
 # GD32E230 目标暂不入库（老王 GD32E230C8 带屏板，整目录忽略）；
 # 它的外挂 Flash 烧录工具跟随目标，同样整目录忽略
 GD32E230/
-tool/4.GD32E230_ex_flash_download/
+tool/4.ex_flash_download/GD32E230/
 
 # AD14N 目标暂不入库（整目录忽略；下面的产物细则保留，供将来入库时恢复使用）
 AD14N/

@@ -1,0 +1,30 @@
+工具路径./4.ex_flash_download
+把合并后的整包数据通过调试器烧录到外置flash，每款单片机一个文件夹
+目前提供：STM32F103（外置flash W25Q128，接SPI2）
+
+每个单片机文件夹里有:
+flash_download工程 #Keil烧录工程，编译3.bin2c输出的整包数据并下载
+Flash_FLM文件夹 #烧录算法的源码工程，换引脚时才需要改动和重新编译
+算法文件(拷贝到keil安装目录)文件夹 #编译好的烧录算法.FLM，按版本存放，附“帮助.txt”
+
+使用步骤:
+1.把“算法文件(拷贝到keil安装目录)”里最新版本的.FLM，拷贝到Keil安装目录的ARM\Flash下（只需做一次）
+2.运行./3.bin2c/build_bin.bat，生成./3.bin2c/output/embed/merged_bin.c
+3.用Keil打开对应单片机文件夹里的flash_download工程，编译
+4.第一次使用先检查下载设置（TIP 1.1）
+5.点下载（Download），等待擦除、编程、校验完成
+
+TIP 1.1:
+下载设置位置：Options for Target - Debug - Settings - Flash Download
+Programming Algorithm只保留外置flash的烧录算法（例WE_STM32F103_W25Q128），片内Flash的算法要移除
+RAM for Algorithm：Start 0x20000000，Size 0x1000
+勾选Erase Sectors / Program / Verify
+烧录算法的引脚、速率和各版本的区别，见.FLM同目录下的“帮助.txt”
+
+TIP 2.1:
+换了引脚：改Flash_FLM文件夹里的xxx_flash_spi_port.h，重新编译Flash_FLM工程即可生成新的.FLM
+其它型号的单片机：参照现有的单片机文件夹新建一个
+更换了外置储存的资源（字体/图片）后，要重新执行“3.外挂储存bin合并”和本步骤，只重新编译单片机程序不会更新外置flash里的内容
+
+不用Keil可以烧录吗?
+可以，用其它烧录器把./3.bin2c/output/merged_bin.bin从0地址写入外置flash即可，效果相同

@@ -1,4 +1,6 @@
 font2c 字体取模工具
-img2bin_raw 图片原图转bin工具, 支持RGB565/RGB888/A8/A4/A2/A1
-img2bin_indexqoi 图片压缩并转bin工具, 支持RGB565/RGB888, 压缩算法indexqoi
+img2bin_raw 图片原图转bin工具, 支持RGB565/RGB888/ARGB8565/ARGB8888/A8/A4/A2/A1
+img2bin_indexqoi 图片压缩并转bin工具, 支持RGB565/RGB888/ARGB8565/ARGB8888, 压缩算法indexqoi
+img2bin_indexqoimask 透明位图压缩并转bin工具, 支持A8, 压缩算法indexqoimask
 bin2c bin合并工具/bin转c工具
+res_manager 资源管理器(图形界面), 预览字体/图片/bin并一键取模, 只调用上面的工具
